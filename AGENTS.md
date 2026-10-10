@@ -13,7 +13,7 @@ The architecture document is the canonical project-wide design reference. Featur
 
 ## Current scope
 
-Work locally on the checked-out working branch. HeimKit currently implements infinite torches for Windows dedicated servers only. Multiplayer validation remains pending. Do not claim Linux support or verified in-game operation from a successful build.
+Work locally on the checked-out working branch. HeimKit currently implements infinite torches for Windows dedicated servers only. Wooden-torch refilling has passed an initial live test recorded in the spec; broader multiplayer validation remains pending. Do not infer additional in-game guarantees from compilation or expand support beyond recorded evidence.
 
 Only add another feature when requested. Before implementing it, document its behavior and server-only feasibility in a new feature spec. Future ideas and incomplete functionality do not belong in the README's feature list.
 

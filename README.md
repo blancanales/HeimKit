@@ -4,7 +4,7 @@ Infinite torches for Windows Valheim dedicated servers, built with C# and BepInE
 
 **Supported platform: Windows only.** Linux support is not implemented or tested. HeimKit currently targets the Windows dedicated-server process, `valheim_server.exe`.
 
-HeimKit automatically refills eligible torches without consuming player resin. It uses the existing vanilla fuel-setting network message so players can use unmodified clients by design. Multiplayer verification remains pending.
+HeimKit automatically refills eligible torches without consuming player resin. It uses the existing vanilla fuel-setting network message so players can use unmodified clients by design. Wooden torch refilling has passed an initial live server test; broader multiplayer validation remains pending.
 
 ## Quick configuration guide
 
@@ -26,7 +26,7 @@ The working branch is `feature/server-qol`, created from `main`. The torch imple
 
 The current HeimKit implementation provides periodic torch refilling. It compiled against installed Valheim 1.0.17 dedicated-server assemblies with zero warnings and zero errors. The installed client and server Fireplace classes were also compared and matched.
 
-**Multiplayer testing remains pending.** The prototype has not been tested with connected unmodified clients or installed into the live server. Source and the build script are present in the local checkout. The assembly is `HeimKit.dll` and its BepInEx configuration identifier is `blancanales.heimkit`.
+**Initial live refill test passed on October 10, 2026.** On a Windows Valheim 1.0.17 dedicated server running BepInEx 5.4.23.5, logs showed 52 eligible torches and batches of 32 and 20 refill requests. Trevor confirmed that empty wooden torches lit up and displayed 4/4 fuel. Other torch types, inventory consumption, two-client agreement, ownership transfers, restarts and explicit verification of the client's mod state remain unverified. The assembly is `HeimKit.dll` and its BepInEx plugin identifier is `heimkit`.
 
 ## Infinite torches
 
@@ -39,6 +39,7 @@ Current behavior:
 - Below 75% fuel, request a refill to the prefab's normal maximum.
 - Consume no player resin for the automatic refill.
 - Send at most 32 refill requests per pass, rotating across candidates.
+- Track pending refills by object ID across all players, suppressing duplicate requests while awaiting updated fuel. Retry after 30 seconds without sufficient fuel progress, or re-evaluate after an owner change.
 - Skip unsupported or missing prefab definitions.
 - Run only in the dedicated-server process.
 - Disable outside the audited game version, 1.0.17, until reviewed.
@@ -58,6 +59,10 @@ Runtime checks require a refillable fireplace with finite positive capacity, no 
 This is **periodic automatic refilling**, not a guarantee of uninterrupted light. Vanilla water, obstruction and smoke rules remain. Campfires, hearths, braziers, furnaces, candles and cooking fires are outside the default scope.
 
 Objects that are unloaded or change owners can ignore a request. Later passes retry. Empty torches may briefly remain dark after loading. Normal refill effects can appear. Manual refilling at the same moment can still consume a player's resin.
+
+Version 0.1.1 adds pending-request tracking. The server checks replicated fuel for a sufficient increase after each request; that observation is not a client delivery acknowledgement or proof that the plugin caused the increase. Missing objects are cleared from tracking; still-unresolved requests expire after 30 seconds, evaluated on the next pass. Retries remain within the server-wide request budget. Tracking is capped at 2,048 objects; new requests wait if that cap is reached rather than bypassing duplicate suppression. Late network delivery can still overlap a timeout retry; this is not an exactly-once protocol.
+
+The original live test used 0.1.0. The new duplicate-suppression behavior in 0.1.1 is covered by automated checks but still needs a multiplayer live test.
 
 ## Configuration and on/off switch
 
@@ -103,7 +108,7 @@ Prefab warnings state the rejection reason. Runtime errors include the operation
 At plugin startup, HeimKit reports the torch feature's effective state:
 
 ```text
-HeimKit 0.1.0 starting.
+HeimKit 0.1.1 starting.
 Created default configuration: <server folder>\BepInEx\config\heimkit.cfg. All feature settings are included.
 To enable or disable Infinite Torches: stop the server, edit [Torches] Enabled = true or false in heimkit.cfg, save, then restart the server.
 Infinite Torches: ENABLED (Torches.Enabled = true; interval 5s; maximum 32 refill requests per pass; debug mode False; automatic diagnostic interval 60s). Waiting for the dedicated-server world.
@@ -138,6 +143,7 @@ src/HeimKit/
     InfiniteTorches/
       InfiniteTorches.cs
       TorchDiagnostics.cs
+      PendingRefills.cs
 ```
 
 `Plugin.cs` loads features, dispatches updates and handles shutdown. `ConfigurationLoader` checks the runtime configuration path, binds all defaults and saves the complete configuration before feature initialization. `InfiniteTorches` owns the torch configuration, version check, scheduling, prefab selection and refill behavior. `IServerModule` provides the shared lifecycle contract. Each feature has its own folder under Features containing its class files. Class names do not include the word Feature. Shared contracts and utilities live outside those individual folders. Each additional working feature must have its own enable setting. Feature failures are handled individually.
@@ -233,7 +239,7 @@ Valheim dedicated server/
 
 ## Multiplayer acceptance checklist
 
-All runtime checks remain pending:
+Initial live evidence: the plugin loaded, generated configuration automatically, sent refill requests and wooden torches visibly lit at 4/4 fuel. The remaining checks below require separate verification:
 
 - [ ] Loads in the dedicated-server process and stays inactive in a game client.
 - [ ] Clean unmodified clients can connect.

@@ -2,7 +2,7 @@
 
 ## Scope and current status
 
-HeimKit is a C# BepInEx 5 plugin for Windows Valheim dedicated servers. It currently contains one implemented module: infinite torches. The source targets `netstandard2.1`; the inspected game baseline is Valheim 1.0.17. Live multiplayer validation remains pending.
+HeimKit is a C# BepInEx 5 plugin for Windows Valheim dedicated servers. It currently contains one implemented module: infinite torches. The source targets `netstandard2.1`; the inspected game baseline is Valheim 1.0.17. Wooden-torch refilling passed an initial live test on October 10, 2026; broader multiplayer validation remains pending.
 
 The current distribution is one plugin DLL with independently controlled modules. Shared code is allowed. Each module must work without another module being enabled. Windows-only support is an explicit product constraint until Linux support is requested, implemented and tested.
 
@@ -58,7 +58,7 @@ Use one folder inside Features for each module. Put its class files inside that 
 - Match filenames to their primary class/interface names.
 - Use `HeimKit.Features.<FeatureName>` for module namespaces, and `HeimKit.Shared` or `HeimKit.Configuration` for shared code.
 - The Features folder name remains intentional; the naming restriction applies to class/interface names.
-- Preserve the current plugin identifier `blancanales.heimkit`. The user-facing configuration filename is independently defined as `heimkit.cfg`.
+- Use the plugin identifier `heimkit`. The user-facing configuration filename is independently defined as `heimkit.cfg`. The identifier was changed from `blancanales.heimkit` at Trevor's request; configuration loading uses an explicit path and is unaffected by that change.
 
 ## Module lifecycle and isolation
 

@@ -2,7 +2,13 @@
 
 ## Status and scope
 
-Implemented locally in `src/HeimKit/Features/InfiniteTorches/InfiniteTorches.cs`. The project builds against Windows Valheim 1.0.17 and BepInEx 5. Automated lifecycle/configuration checks pass. Live multiplayer acceptance is pending.
+Implemented in `src/HeimKit/Features/InfiniteTorches/InfiniteTorches.cs`. The project builds against Windows Valheim 1.0.17 and BepInEx 5. Automated lifecycle/configuration checks pass. An initial live wooden-torch refill test passed; broader multiplayer acceptance remains pending.
+
+### Live evidence: October 10, 2026
+
+Trevor supplied Windows dedicated-server logs showing Valheim 1.0.17, BepInEx 5.4.23.5, HeimKit 0.1.0 and debug mode enabled. The plugin found 52 eligible torches, sent 32 requests followed by 20, and logged wooden torch fuel targets of 4. Trevor confirmed that empty torches lit up and displayed 4/4 fuel.
+
+This verifies observed wooden-torch refilling and lighting in that session. It does not establish all prefab types, zero inventory consumption, clean-client status, two-client consistency, ownership transfer, restart behavior or Linux support. Keep those acceptance checks pending.
 
 Goal: automatically refill eligible torches for free on a dedicated server, using unmodified clients. This is periodic refilling, not a promise of continuous light under every environmental condition.
 
@@ -49,6 +55,7 @@ All settings are bound before `ConfigurationLoader` saves `heimkit.cfg` in BepIn
 7. Skip torches whose ordinary state is off or whose fuel is not finite.
 8. Below 75% normal capacity, request refill to that capacity without spending player inventory materials.
 9. Limit requests per pass and rotate the candidate cursor.
+   Track pending requests by ZDOID across players. Suppress additional sends for the same object until sufficient replicated fuel progress, owner change, object removal or a 30-second timeout. Reconcile all pending objects, including those outside scanned player areas. Cap tracking at 2,048 entries; capacity exhaustion defers new sends. Remove the reservation if routing throws, and clear tracking on initialization/shutdown. Fuel progress requires a finite increase above the prior value and at least 75% of target fuel.
 10. Disable the module and report an error if its runtime processing fails.
 
 Disabled modules do no world work. Shutdown clears caches and scheduling state and is safe to repeat.
@@ -64,6 +71,7 @@ Disabled modules do no world work. Shutdown clears caches and scheduling state a
 - Sampled requests identify object ID, prefab, owner, position, fuel before the request, target and RPC. They are transmission attempts, not delivery acknowledgements.
 - Prefab warnings identify rejection reasons; runtime failures include operation context.
 - Errors identify the module and disable it.
+- Debug mode reports observed fuel increases, timeouts, owner changes and removed objects. Pass summaries include pending count, suppressed duplicates and tracking-capacity skips. These observations are not RPC acknowledgements. Version 0.1.1 identifies this change; live evidence above applies to 0.1.0.
 
 ## Limits
 
@@ -84,6 +92,7 @@ Completed automated checks:
 - [x] Optional config defaults the single DebugMode switch off.
 - [x] Status logging respects its interval and off switch without formatting suppressed messages.
 - [x] Detailed-pass sampling respects its single debug switch, interval and reset.
+- [x] Pending-request checks cover duplicate IDs, delayed/partial fuel progress, timeout retries, ownership changes, object removal, bounded memory and shutdown cleanup.
 
 Pending live tests:
 

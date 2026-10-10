@@ -17,6 +17,7 @@ public sealed class InfiniteTorches : IServerModule
     private readonly ConfigEntry<int> _budget;
     private readonly ConfigEntry<string> _names;
     private readonly TorchDiagnostics _diagnostics;
+    private readonly PendingRefills _pending = new();
     private readonly Dictionary<int, Fireplace> _torches = new();
     private readonly List<ZDO> _sector = new();
     private readonly List<ZDO> _distant = new();
@@ -50,6 +51,7 @@ public sealed class InfiniteTorches : IServerModule
     {
         _running = false;
         _diagnostics.Reset();
+        _pending.Clear();
         if (!_enabled.Value)
         {
             _logger.LogInfo("Infinite Torches: DISABLED (Torches.Enabled = false).");
@@ -88,6 +90,15 @@ public sealed class InfiniteTorches : IServerModule
         string operation = "resolving configured torch prefabs";
         try
         {
+            operation = "checking pending refill results";
+            _pending.Reconcile(now, id =>
+            {
+                var objectData = manager.GetZDO(id);
+                return objectData != null && objectData.IsValid()
+                    ? new PendingRefills.Observation(objectData.GetOwner(), objectData.GetFloat(ZDOVars.s_fuel, -1f))
+                    : (PendingRefills.Observation?)null;
+            }, _diagnostics.IsDebugEnabled ? message => _logger.LogInfo(message) : (Action<string>?)null);
+            operation = "resolving configured torch prefabs";
             if (_scene != scene || _configuredNames != _names.Value) LoadPrefabs(scene);
             if (_torches.Count == 0)
             {
@@ -134,6 +145,8 @@ public sealed class InfiniteTorches : IServerModule
             int stateOff = 0;
             int invalidFuel = 0;
             int changedOwner = 0;
+            int pendingSkipped = 0;
+            int trackingFull = 0;
             bool? logDetails = null;
             _cursor %= _candidates.Count;
             while (examined < _candidates.Count && sent < _budget.Value)
@@ -149,9 +162,12 @@ public sealed class InfiniteTorches : IServerModule
                 if (float.IsNaN(fuel) || float.IsInfinity(fuel)) { invalidFuel++; continue; }
                 // Refill below 75%, avoiding constant RPC effects and leaving ample burn time for slow passes.
                 if (fuel >= prefab.m_maxFuel * 0.75f) { sufficientFuel++; continue; }
+                if (_pending.Contains(zdo.m_uid)) { pendingSkipped++; continue; }
                 var position = zdo.GetPosition();
                 operation = $"requesting refill: object={zdo.m_uid}; prefab={prefab.gameObject.name}; owner={owner}; position={position}; fuel={fuel}; target={prefab.m_maxFuel}";
-                routed.InvokeRoutedRPC(owner, zdo.m_uid, "RPC_SetFuelAmount", prefab.m_maxFuel);
+                if (!_pending.TryTrack(zdo.m_uid, owner, fuel, prefab.m_maxFuel, now)) { trackingFull++; continue; }
+                try { routed.InvokeRoutedRPC(owner, zdo.m_uid, "RPC_SetFuelAmount", prefab.m_maxFuel); }
+                catch { _pending.Remove(zdo.m_uid); throw; }
                 sent++;
                 logDetails ??= _diagnostics.BeginRefillDetails(now);
                 if (logDetails.Value)
@@ -163,9 +179,11 @@ public sealed class InfiniteTorches : IServerModule
             {
                 string reason = sent > 0 ? "Refill requests sent this pass; client application is unconfirmed."
                     : sufficientFuel == examined ? "All examined torches have enough fuel (at least 75%). No requests sent this pass."
+                    : pendingSkipped > 0 ? "Waiting for previously requested refills; duplicate requests suppressed."
                     : "No examined torch could be refilled this pass; see skip counts.";
                 return $"{reason} Ready players={_owners.Count}; candidates={_candidates.Count}; examined={examined}; sent={sent}; " +
                     $"sufficient fuel={sufficientFuel}; off={stateOff}; invalid fuel={invalidFuel}; owner unavailable={changedOwner}; " +
+                    $"pending={_pending.Count}; duplicate requests suppressed={pendingSkipped}; tracking capacity skips={trackingFull}; " +
                     $"deferred={_candidates.Count - examined}.";
             });
         }
@@ -220,5 +238,6 @@ public sealed class InfiniteTorches : IServerModule
         _cursor = 0;
         _announced = false;
         _diagnostics.Reset();
+        _pending.Clear();
     }
 }
