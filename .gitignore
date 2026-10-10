@@ -55,3 +55,14 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Local game/runtime references and machine-specific files
+lib/
+libs/
+references/
+BepInEx/
+valheim_server_Data/
+valheim_Data/
+Environment.props
+*.csproj.user
+.vs/

@@ -1,52 +1,38 @@
 # HeimKit
 
-A modular C# utility plugin for Windows Valheim dedicated servers, built with BepInEx 5.
+Infinite torches for Windows Valheim dedicated servers, built with C# and BepInEx 5.
 
-HeimKit aims to offer independently configurable conveniences while letting players connect with unmodified Valheim clients. Each implemented feature must have its own on/off switch.
+**Supported platform: Windows only.** Linux support is not implemented or tested. HeimKit currently targets the Windows dedicated-server process, `valheim_server.exe`.
+
+HeimKit automatically refills eligible torches without consuming player resin. It uses the existing vanilla fuel-setting network message so players can use unmodified clients by design. Multiplayer verification remains pending.
+
+## Quick configuration guide
+
+Install the DLL and start the dedicated server. HeimKit uses BepInEx's runtime `Paths.ConfigPath` to locate the correct configuration directory, creates `heimkit.cfg` there if missing, and fills it with all default settings. No manual file creation or copying is required. The supplied [config/heimkit.cfg](config/heimkit.cfg) is an optional reference. HeimKit prints the full configuration file path and editing instructions in its startup output and `BepInEx/LogOutput.log`.
+
+To turn infinite torches on or off:
+
+1. Stop the dedicated server.
+2. Open `BepInEx/config/heimkit.cfg` in the server installation folder.
+3. Under `[Torches]`, set `Enabled = true` to enable refilling or `Enabled = false` to disable it.
+4. Save the file and restart the server.
+5. Check the startup log for `Infinite Torches: ENABLED` or `Infinite Torches: DISABLED`. If disabled because of an unsupported game version, the log explains why.
 
 ## Current status
 
 **Early development. No production release is available.**
 
-The working branch is `feature/server-qol`, created from `main`. The implementation has not yet been imported into this repository.
+The working branch is `feature/server-qol`, created from `main`. The torch implementation is included under `src/HeimKit`, with the build script, example config and checks in this repository.
 
-A separate local prototype, originally called Hayman Server QoL 0.1.0, implements periodic torch refilling. It compiled against installed Valheim 1.0.17 dedicated-server assemblies with zero warnings and zero errors. The installed client and server Fireplace classes were also compared and matched.
+The current HeimKit implementation provides periodic torch refilling. It compiled against installed Valheim 1.0.17 dedicated-server assemblies with zero warnings and zero errors. The installed client and server Fireplace classes were also compared and matched.
 
-**Multiplayer testing remains pending.** The prototype has not been tested with connected unmodified clients or installed into the live server. Its source, DLL and build script are not yet committed here. Renaming and integration into HeimKit will establish the final project, DLL and configuration filenames.
+**Multiplayer testing remains pending.** The prototype has not been tested with connected unmodified clients or installed into the live server. Source and the build script are present in the local checkout. The assembly is `HeimKit.dll` and its BepInEx configuration identifier is `blancanales.heimkit`.
 
-## Goals
-
-- Install only on a Windows dedicated server.
-- Allow players to join without installing HeimKit or BepInEx on their clients.
-- Give every implemented feature its own enable/disable setting.
-- Preserve unrelated game behavior when a feature is enabled or disabled.
-- Identify unsupported behavior clearly.
-- Verify ownership transfers, synchronization, restarts and world reloads.
-- Keep game assemblies, server credentials, saves and personal paths out of Git.
-
-## Requested features
-
-| Feature | Current assessment | Status |
-| --- | --- | --- |
-| Infinite torches | Vanilla fuel-setting messages provide a plausible server-only refilling mechanism. Runtime verification is required. | Implemented in the separate local prototype; not integrated here. |
-| Waterproof buildings | A server-local rain-check patch is insufficient when a client owns simulation. Server ownership and incoming-state interception need further investigation. | Open research item; not implemented. |
-| Crafting from nearby chests | Vanilla crafting checks and consumes the player's local inventory. A server patch alone does not expand those checks to chest contents. | Blocked for the standard vanilla crafting workflow; not implemented. |
-
-These findings concern the inspected game build and proposed mechanisms. They do not establish that every possible server-only approach is impossible.
-
-## How Valheim ownership affects server-only features
-
-Building health and torch fuel are shared world values stored and distributed through the server. However, the machine calculating a change can be a player's computer.
-
-Objects have a simulation owner, often a connected client. The owner calculates wear or fuel consumption, changes shared network data, and sends changes through the server to other players.
-
-Changing a component flag only on the server therefore may not change the behavior of the client owning that object. A server-only feature must use behavior vanilla clients already understand or correctly move the relevant simulation to the server.
-
-### Infinite torches
+## Infinite torches
 
 The local prototype sends the existing vanilla `RPC_SetFuelAmount(float)` message to an eligible torch's current owner. The owner's existing handler writes ordinary fuel state, which can synchronize to other players.
 
-Prototype behavior:
+Current behavior:
 
 - Every five seconds, read object records in connected players' near simulation sectors.
 - Find eligible allowlisted torches owned by the corresponding player.
@@ -57,7 +43,7 @@ Prototype behavior:
 - Run only in the dedicated-server process.
 - Disable outside the audited game version, 1.0.17, until reviewed.
 
-Default prototype candidates:
+Default candidate prefabs:
 
 ```text
 piece_groundtorch_wood
@@ -73,41 +59,11 @@ This is **periodic automatic refilling**, not a guarantee of uninterrupted light
 
 Objects that are unloaded or change owners can ignore a request. Later passes retry. Empty torches may briefly remain dark after loading. Normal refill effects can appear. Manual refilling at the same moment can still consume a player's resin.
 
-### Waterproof buildings
+## Configuration and on/off switch
 
-The inspected `WearNTear.UpdateWear` method performs weather wear under an ownership check. Its `m_noRoofWear` field is a local component setting, rather than a verified synchronized immunity switch.
+Set [Torches] Enabled to false to stop automatic refilling. Stop the server before editing and restart afterward.
 
-Further investigation must determine whether HeimKit can safely retain server simulation ownership or intercept incoming health changes while preserving combat damage, support, destruction and synchronization.
-
-A health update alone may not identify the reason for damage. Periodic repairs also heal other damage and do not meet the goal of selective weather protection. Rain and water exposure must be assessed separately where game logic differs.
-
-The older [Serverside Simulations project](https://github.com/ddormer/valheim-serverside) demonstrates the simulation-ownership option. Its documented version and maintenance status do not establish compatibility with this build, and it is not a dependency of HeimKit.
-
-### Crafting from nearby chests
-
-In the inspected code, `Player.HaveRequirementItems` counts local player inventory, and `Player.ConsumeResources` removes materials from it. Patching these on a dedicated server does not change the unmodified client's recipe checks.
-
-A viable alternative must prove that the vanilla client can initiate and complete the action and that simultaneous players cannot duplicate resources or bypass chest access permissions.
-
-Inventory injection, free crafting and automatic chest transfers are not equivalent to crafting directly from nearby chests. None is implemented.
-
-See the [GorilaChestMod author's client/server explanation](https://github.com/trentinidev/GorilaChestMod#server-side) for another implementation explicitly separating client crafting from server features.
-
-## Independent feature switches
-
-Required configuration design:
-
-| Feature | Intended switch | Current status |
-| --- | --- | --- |
-| Torch refilling | `[Torches] Enabled` | Exists in the local prototype. |
-| Waterproof protection | `[WaterproofBuildings] Enabled` | Reserved design; unavailable. |
-| Chest crafting | `[CraftFromChests] Enabled` | Reserved design; unavailable. |
-
-Every implemented module must check its own setting before doing work. Disabling one must not disable unrelated modules.
-
-Reserved switches are **not functional configuration options today**. Unsupported features must never silently appear enabled. If exposed later, their unavailable status must be explicit.
-
-Actual local prototype settings:
+Current settings:
 
 ```ini
 [Torches]
@@ -117,15 +73,78 @@ MaxMessagesPerPass = 32
 Prefabs = piece_groundtorch_wood,piece_groundtorch,piece_groundtorch_green,piece_groundtorch_blue,piece_walltorch
 
 [Diagnostics]
-LogRefillRequests = false
+DebugMode = false
 ```
 
-The legacy prototype config is `BepInEx/config/trevorhayman.valheim.serverqol.cfg`. The final HeimKit filename will be documented after integration. Stop the server before edits and restart afterward.
+HeimKit checks for `heimkit.cfg` in the configuration directory supplied by BepInEx. In a normal server installation this is `BepInEx/config/heimkit.cfg`. It binds all settings before saving, creates the directory and file if missing, and logs the full path. Existing setting values are preserved; missing settings are added with defaults. Retired per-category diagnostic settings are removed automatically; the existing DebugMode value is preserved. The supplied [config/heimkit.cfg](config/heimkit.cfg) is an optional reference. Stop the server before edits and restart afterward.
 
 Diagnostic counts indicate requests sent, not delivery acknowledgements.
 
+### Diagnosing refill problems
+
+The plugin creates `[Diagnostics] DebugMode = false` automatically. Set it to `true` and restart for all troubleshooting output: request counts, status explanations, skip counters and sampled per-torch details. Set it to `false` for general startup/configuration, state, readiness, warnings and errors. There are no separate category switches. Diagnostic messages use Info level so the normal BepInEx log filters show them.
+
+Status explanations cover missing world services, the wrong network session, no supported prefab definitions, no ready players, no eligible nearby client-owned torches, sufficient fuel, skip reasons and candidates deferred by the message budget. Counts describe the current pass, not the entire interval or whole world. Off, invalid-fuel and unavailable-owner counts describe examined candidates; deferred torches have not yet been examined.
+
+Status explanations and detailed refill samples are automatically limited to one reporting pass every 60 seconds per stream. Detailed samples are also bounded by MaxMessagesPerPass. When debug mode is on, request-count messages can appear on every pass that sends refills.
+
+Example output with DebugMode = true (values are illustrative):
+
+```text
+Infinite Torches status: No ready connected players with character IDs. No requests sent this pass.
+Infinite Torches status: All examined torches have enough fuel (at least 75%). No requests sent this pass. Ready players=1; candidates=4; examined=4; sent=0; sufficient fuel=4; off=0; invalid fuel=0; owner unavailable=0; deferred=0.
+Infinite Torches refill request: object=<object ID>; prefab=piece_walltorch; owner=<owner ID>; position=<position>; fuel before=0.000; target=6.000; RPC=RPC_SetFuelAmount. Sent to routing; client application unconfirmed.
+```
+
+Prefab warnings state the rejection reason. Runtime errors include the operation being attempted and, for refill requests, the affected object, prefab, owner, position and fuel values. Provide startup/version logs, at least two diagnostic intervals and the visible client fuel/light behavior when reporting a problem. Logs do not acknowledge client delivery; an observed fuel increase remains the gameplay check.
+
+### Startup logs
+
+At plugin startup, HeimKit reports the torch feature's effective state:
+
+```text
+HeimKit 0.1.0 starting.
+Created default configuration: <server folder>\BepInEx\config\heimkit.cfg. All feature settings are included.
+To enable or disable Infinite Torches: stop the server, edit [Torches] Enabled = true or false in heimkit.cfg, save, then restart the server.
+Infinite Torches: ENABLED (Torches.Enabled = true; interval 5s; maximum 32 refill requests per pass; debug mode False; automatic diagnostic interval 60s). Waiting for the dedicated-server world.
+```
+
+On later starts, the configuration message is:
+
+```text
+Loaded configuration: <server folder>\BepInEx\config\heimkit.cfg. Existing settings preserved; missing settings added with defaults.
+```
+
+If configuration cannot be loaded or saved, the log identifies the path and error and the feature stays disabled.
+
+With `Enabled = false`:
+
+```text
+Infinite Torches: DISABLED (Torches.Enabled = false).
+```
+
+An unsupported game version produces a `DISABLED` warning with the version and reason, even when configuration requests enabling the feature. `ENABLED` means the module is permitted to run; world readiness and successful refill delivery are separate checks. A runtime failure disables the torch module and logs the error.
+
+## Source layout
+
+```text
+src/HeimKit/
+  Plugin.cs
+  Configuration/
+    ConfigurationLoader.cs
+  Shared/
+    IServerModule.cs
+  Features/
+    InfiniteTorches/
+      InfiniteTorches.cs
+      TorchDiagnostics.cs
+```
+
+`Plugin.cs` loads features, dispatches updates and handles shutdown. `ConfigurationLoader` checks the runtime configuration path, binds all defaults and saves the complete configuration before feature initialization. `InfiniteTorches` owns the torch configuration, version check, scheduling, prefab selection and refill behavior. `IServerModule` provides the shared lifecycle contract. Each feature has its own folder under Features containing its class files. Class names do not include the word Feature. Shared contracts and utilities live outside those individual folders. Each additional working feature must have its own enable setting. Feature failures are handled individually.
+
 ## Requirements and inspected baseline
 
+- **Windows only. Linux is not supported by this version.**
 - Windows Valheim Dedicated Server 1.0.17.
 - Matching unmodified clients for testing.
 - BepInExPack Valheim 5.4.2351, containing BepInEx 5.4.23.5.
@@ -133,7 +152,7 @@ Diagnostic counts indicate requests sent, not delivery acknowledgements.
 - Target framework: `netstandard2.1`.
 - Local server managed assemblies and BepInEx core DLL references.
 
-The torch prototype uses neither Harmony nor Jotunn.
+HeimKit uses neither Harmony nor Jotunn.
 
 Inspection on October 10, 2026 recorded:
 
@@ -144,13 +163,13 @@ Inspection on October 10, 2026 recorded:
 | Assembly game version | `1.0.17` |
 | Server assembly_valheim.dll SHA-256 | `0DFC7E81436F822121148EFED859BA1E661D58B9484BD45E3B6F33B6DD86BFAD` |
 
-Code inspection confirmed that the vanilla Fireplace registers a float fuel-setting RPC and that its handler checks object ownership. It also confirmed owner-side fuel consumption and building wear. Future patches, crossplay and actual runtime delivery still need testing.
+Code inspection confirmed that the vanilla Fireplace registers a float fuel-setting RPC and that its handler checks object ownership. It also confirmed owner-side fuel consumption. Future patches, crossplay and actual runtime delivery still need testing.
 
 ## Building
 
-**These commands apply to the separate local prototype. A fresh clone cannot run them until source and build files are imported.**
+**Check out feature/server-qol and run these commands from the HeimKit repository root.**
 
-From the prototype folder:
+From the repository root:
 
 ```powershell
 .\build.ps1 -ServerPath 'C:\path\to\Valheim dedicated server'
@@ -165,12 +184,22 @@ For an extracted development copy of BepInEx:
 Alternatively:
 
 ```powershell
-dotnet build .\HaymanServerQoL.csproj -c Release '-p:ServerPath=C:\path\to\Valheim dedicated server'
+dotnet build .\src\HeimKit\HeimKit.csproj -c Release '-p:ServerPath=C:\path\to\Valheim dedicated server'
 ```
 
-Prototype output: `bin/Release/netstandard2.1/HaymanServerQoL.dll`.
+Build output: `src/HeimKit/bin/Release/netstandard2.1/HeimKit.dll`.
 
-Integration must rename project and plugin identifiers consistently, and replace these instructions with commands verified against the committed HeimKit source.
+The build includes an optional reference `heimkit.cfg` alongside the DLL. Install only `HeimKit.dll`; the plugin creates its actual server config automatically on first use. Edit that generated file to change settings. Local reference paths are supplied at build time. No game or BepInEx assemblies are bundled.
+
+### Configuration and startup checks
+
+The lifecycle check runner requires a .NET 10 SDK and local reference DLLs:
+
+```powershell
+dotnet run --project .\tests\HeimKit.LifecycleChecks -c Release '-p:ServerPath=C:\path\to\Valheim dedicated server'
+```
+
+Supply `-p:BepInExCore` if the development loader is elsewhere. The checks exercise enabled/disabled configuration, supported/unsupported version combinations, startup messages and repeated shutdown. The four lifecycle scenarios passed locally, along with checks for the supplied config, automatic first-use creation, existing-setting preservation, missing-default insertion and setup failures. They do not test live networking.
 
 ## Installing a test build
 
@@ -181,7 +210,7 @@ No HeimKit release DLL is currently available from this repository. Once a build
 3. Use a separate test world and save directory for initial testing.
 4. Download the [Valheim BepInEx pack](https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/).
 5. Extract outside the server folder, then copy the contents of `BepInExPack_Valheim` beside `valheim_server.exe`.
-6. Place the supplied plugin DLL in a subfolder of the server's `BepInEx/plugins`.
+6. Place the supplied plugin DLL in a subfolder of the server's `BepInEx/plugins`. No config installation is required; the plugin creates it automatically on first use.
 7. Start the test server using its normal launch method.
 8. Check `BepInEx/LogOutput.log` for startup, version checks, skipped prefabs and errors.
 9. Join with clean unmodified clients and complete the acceptance checks below.
@@ -217,7 +246,6 @@ All runtime checks remain pending:
 - [ ] Non-allowlisted fires keep normal behavior.
 - [ ] Disabling refilling stops requests after restart.
 - [ ] Large groups progress without unacceptable server load.
-- [ ] Unimplemented features cause no unintended changes.
 - [ ] Removing the plugin leaves ordinary objects and data usable.
 - [ ] Steam and crossplay are tested separately if both are advertised.
 
@@ -233,17 +261,21 @@ Record game version, server build, plugin version, network backend, settings, ob
 
 **Request logged but no visible change:** The log confirms attempted transmission. The owner may have changed or the object may not have loaded when the message arrived.
 
-**Waterproofing or chest crafting unavailable:** These modules are not implemented; their feasibility remains documented above.
-
 Remove passwords, join codes and other credentials before sharing logs.
 
 ## Disabling and removing
 
-Stop the server, disable a feature in its configuration, and restart to test the change. To remove the plugin, stop the server and remove its DLL before restarting.
+To disable automatic refilling, stop the server, set [Torches] Enabled = false, and restart. To remove the plugin, stop the server and remove its DLL before restarting.
 
 The current torch design writes ordinary fuel values. Removing it leaves those values to burn normally. Restore the backup if exact original fuel amounts are required.
 
+## Documentation policy
+
+The README covers infinite torches and clearly states its validation status. Add each new feature only when it works and has been verified. Keep research ideas and unimplemented features in separate development notes.
+
 ## Contributing
+
+Read [AGENTS.md](AGENTS.md) and [the architecture rules](docs/architecture.md) before changing the project. The [infinite torches specification](docs/specs/infinite-torches.md) defines the current module's behavior and acceptance criteria.
 
 Work begins on `feature/server-qol`. Submit focused pull requests describing player-visible behavior, why it works with unmodified clients, ownership considerations, tests and remaining limitations. Update configuration and installation documentation with code changes.
 
@@ -261,5 +293,3 @@ Valheim files and third-party dependencies retain their own licenses and are not
 
 - [BepInEx plugin development guide](https://docs.bepinex.dev/articles/dev_guide/plugin_tutorial/2_plugin_start.html)
 - [Valheim BepInEx pack and installation](https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/)
-- [Serverside Simulations architectural reference](https://github.com/ddormer/valheim-serverside)
-- [GorilaChestMod client/server explanation](https://github.com/trentinidev/GorilaChestMod#server-side)
