@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using BepInEx;
 using HeimKit.Configuration;
 using HeimKit.Features.InfiniteTorches;
+using HeimKit.Features.WeatherGuard;
 using HeimKit.Shared;
 using UnityEngine;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.1.1")]
+[BepInPlugin("heimkit", "HeimKit", "0.1.11")]
 [BepInProcess("valheim_server.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -16,20 +17,23 @@ public sealed class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Logger.LogInfo("HeimKit 0.1.1 starting.");
-        InfiniteTorches torches;
+        Logger.LogInfo("HeimKit 0.1.11 starting.");
         try
         {
-            torches = ConfigurationLoader.Load(Paths.ConfigPath, Logger,
-                config => new InfiniteTorches(config, Logger));
+            ConfigurationLoader.Load(Paths.ConfigPath, Logger, config =>
+            {
+                Register(() => new InfiniteTorches(config, Logger), "Infinite Torches");
+                Register(() => new WeatherGuard(config, Logger), "WeatherGuard");
+                return config;
+            });
         }
         catch (Exception ex)
         {
-            Logger.LogError($"Infinite Torches: DISABLED because configuration setup failed: {ex.Message}");
+            _features.Clear();
+            Logger.LogError($"HeimKit: modules DISABLED because configuration setup failed: {ex.Message}");
             return;
         }
         Logger.LogInfo("To enable or disable Infinite Torches: stop the server, edit [Torches] Enabled = true or false in heimkit.cfg, save, then restart the server.");
-        _features.Add(torches);
         foreach (var feature in _features)
         {
             try
@@ -42,6 +46,12 @@ public sealed class Plugin : BaseUnityPlugin
                 Logger.LogError($"{feature.Name}: DISABLED after startup error: {ex}");
             }
         }
+    }
+
+    private void Register(Func<IServerModule> create, string name)
+    {
+        try { _features.Add(create()); }
+        catch (Exception error) { Logger.LogError($"{name}: DISABLED after configuration construction error: {error}"); }
     }
 
     private void Update()

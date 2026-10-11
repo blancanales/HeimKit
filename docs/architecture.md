@@ -1,19 +1,20 @@
-# HeimKit architecture and development rules
+# HeimKit architecture
 
 ## Scope and current status
 
-HeimKit is a C# BepInEx 5 plugin for Windows Valheim dedicated servers. It currently contains one implemented module: infinite torches. The source targets `netstandard2.1`; the inspected game baseline is Valheim 1.0.17. Wooden-torch refilling passed an initial live test on October 10, 2026; broader multiplayer validation remains pending.
+HeimKit is a C# BepInEx plugin for Windows Valheim dedicated servers. Supported game, loader and framework versions are documented in [README.md](../README.md#supported-environment). The source contains Infinite Torches and WeatherGuard. Wooden-torch refilling passed an initial live test; WeatherGuard processing and broader multiplayer behavior remain unverified.
 
 The current distribution is one plugin DLL with independently controlled modules. Shared code is allowed. Each module must work without another module being enabled. Windows-only support is an explicit product constraint until Linux support is requested, implemented and tested.
 
-This document defines project-wide rules. [Feature specs](specs) define individual behavior. [README.md](../README.md) explains installation and implemented functionality to users. [AGENTS.md](../AGENTS.md) directs coding agents to these documents; [CLAUDE.md](../CLAUDE.md) points only to AGENTS.md.
+WeatherGuard is under `src/HeimKit/Features/WeatherGuard/`; see [its specification](specs/weather-guard.md). Its configuration uses `[WeatherGuard]`. Its code moves eligible player-built structural-piece processing to the server, loads supporting context and filters client state while preserving existing creators and native commands. Enabled is its feature switch. World-created claiming is inactive. Live rain/combat/support and multiplayer remain unverified; test instructions are in README.md.
+
+This document explains the project-wide design. [Contributing](contributing.md) gives the procedure for adding and organizing code. [Feature specs](specs) define individual behavior. [README.md](../README.md) explains installation and implemented functionality to users. [AGENTS.md](../AGENTS.md) directs contributors to these documents.
 
 ## File placement
 
 ```text
 HeimKit/
   AGENTS.md
-  CLAUDE.md
   README.md
   LICENSE
   build.ps1
@@ -21,22 +22,47 @@ HeimKit/
     heimkit.cfg
   docs/
     architecture.md
+    contributing.md
     specs/
       infinite-torches.md
+      weather-guard.md
   src/
     HeimKit/
       HeimKit.csproj
       Plugin.cs
       Configuration/
         ConfigurationLoader.cs
+        DiagnosticsSettings.cs
       Shared/
         IServerModule.cs
       Features/
+        WeatherGuard/
+          WeatherGuard.cs
+          WeatherGuardSettings.cs
+          WeatherGuardController.cs
+          WeatherGuardDiagnostics.cs
+          WeatherGuardPatches.cs
+          WeatherGuardRules.cs
+          WeatherGuardNetworkFilter.cs
+          Models/
+            Routing.cs
+            WeatherGuardStatus.cs
         InfiniteTorches/
           InfiniteTorches.cs
-          TorchDiagnostics.cs
+          InfiniteTorchesController.cs
+          InfiniteTorchesSettings.cs
+          InfiniteTorchesDiagnostics.cs
+          InfiniteTorchesPendingRefills.cs
+          Models/
+            RefillObservation.cs
+            RefillRequest.cs
   tests/
-    HeimKit.LifecycleChecks/
+    HeimKit/
+      HeimKit.Tests.csproj
+      Program.cs
+      InfiniteTorches/
+      WeatherGuard/
+      Configuration/
 ```
 
 | Responsibility | Location |
@@ -47,22 +73,28 @@ HeimKit/
 | Shared config-file creation, loading and saving | `src/HeimKit/Configuration/` |
 | Optional example configuration | `config/heimkit.cfg` |
 | Module behavior and acceptance criteria | `docs/specs/<feature-name>.md` |
-| Automated validation | `tests/` |
+| Automated validation | `tests/HeimKit/`, grouped by feature name, Configuration or Shared |
 
 Use one folder inside Features for each module. Put its class files inside that folder, not directly under Features. Move a helper to Shared only when its responsibility is actually reusable. Shared code must not implicitly enable a module or require another module's private state.
 
 ## Naming
 
+- Display each feature using only its chosen name, such as `WeatherGuard`. Do not append labels such as `prototype`, `observation prototype`, `experimental`, `beta` or a development-stage suffix to the feature name in startup, registration, log prefixes, configuration sections or documentation titles. This applies during local development as well as publication.
+- Put current behavior, limitations and validation status in message bodies and feature specs, separately from the feature name. For example, use `WeatherGuard: ENABLED` and a separate `WeatherGuard: Current behavior ...` message. Diagnostic categories belong after the colon, such as `WeatherGuard: evidence; ...`. Helper class names may still describe their responsibility.
+- Use plain responsibility names for WeatherGuard helpers: Controller, Patches and Rules. Do not name project-owned helpers Simulation; retain the original names of game APIs.
 - Class and interface names do not contain the word `Feature`.
-- Use names that describe responsibility, such as `InfiniteTorches`, `ConfigurationLoader` and `IServerModule`.
-- Match filenames to their primary class/interface names.
+- Use names that describe responsibility, such as `InfiniteTorches`, `InfiniteTorchesPendingRefills`, `ConfigurationLoader` and `IServerModule`.
+- Feature-owned behavior classes use `<FeatureName><ResponsibilityOrAction>`; match filenames to their primary type names. Shared classes use descriptive responsibility names without a feature prefix.
+- Model types and enums use descriptive names. A feature prefix is guidance, not a requirement; use one when it improves clarity or avoids ambiguity.
 - Use `HeimKit.Features.<FeatureName>` for module namespaces, and `HeimKit.Shared` or `HeimKit.Configuration` for shared code.
 - The Features folder name remains intentional; the naming restriction applies to class/interface names.
-- Use the plugin identifier `heimkit`. The user-facing configuration filename is independently defined as `heimkit.cfg`. The identifier was changed from `blancanales.heimkit` at Trevor's request; configuration loading uses an explicit path and is unaffected by that change.
+- Use the plugin identifier `heimkit`. The user-facing configuration filename is independently defined as `heimkit.cfg`. Configuration loading uses an explicit path independently of the plugin identifier.
 
 ## Module lifecycle and isolation
 
 `Plugin.cs` registers modules, initializes them, dispatches updates to active modules and shuts them down. It should not contain torch selection, refilling or other module-specific gameplay algorithms.
+
+Each feature main class owns settings construction, compatibility, lifecycle, startup state and failure isolation. Its controller owns gameplay processing and reports processing failures to the main class. This boundary applies consistently to Infinite Torches and WeatherGuard.
 
 Each module implements `IServerModule`:
 
@@ -76,7 +108,7 @@ Each module implements `IServerModule`:
 
 Disabled modules must not scan world objects, send gameplay messages or install active patches. Shut down scheduled work and remove any owned patches/subscriptions when those mechanisms are added. Current config edits require a server restart; live toggling is not advertised.
 
-A module error must disable and report that module rather than deliberately disabling unrelated modules. The entry point catches lifecycle failures per module. As modules are added, isolate construction/registration failures too. A failure in the shared configuration setup currently prevents startup and must be reported clearly.
+A module error must disable and report that module rather than deliberately disabling unrelated modules. The entry point catches lifecycle failures per module. Construction/registration failures are also caught per module. A failure in the shared configuration setup currently prevents startup and must be reported clearly.
 
 ## Configuration
 
@@ -101,46 +133,20 @@ Startup reports each module's effective `ENABLED` or `DISABLED` state. State log
 
 Standard logging includes config creation/loading, module state, readiness, warnings and errors. Optional troubleshooting output requires `[Diagnostics] DebugMode = true`. This master switch defaults false and gates request counts, status explanations and detailed samples. There are no separate diagnostic category switches. Diagnostic messages use Info level for visibility in normal BepInEx output. They are not a separate Debug-level mode. Messages about network requests must distinguish transmission attempts from observed delivery.
 
-DebugMode is the single troubleshooting switch. Status explanations and detailed-pass samples are automatically limited to 60 seconds per stream. Keep counters scoped to examined objects and the current pass. Include operation context and skip/rejection reasons without claiming unobserved client state. Keep module-specific formatting in the module folder. Remove retired diagnostic category settings when saving older configurations, preserving the existing DebugMode value.
+DebugMode is the single troubleshooting switch. Status explanations and detailed-pass samples are automatically limited to 60 seconds per stream. Distinguish current-pass counts from cumulative totals. Torch pass counts describe examined candidates; WeatherGuard transition and guard counters are cumulative for the controller lifetime. Include operation context and skip/rejection reasons without claiming unobserved client state. Keep recurring debug formatting, gating and rate limits in `<FeatureName>Diagnostics`; controllers retain processing counters and supply data without moving gameplay behavior into diagnostics. Standard event logs stay at their event sites. Do not create empty diagnostics classes for features without recurring troubleshooting output. Remove retired diagnostic category settings when saving older configurations, preserving the existing DebugMode value.
 
 ## Server-only compatibility
 
-Shared world state and simulation ownership are different concerns. Inspect both client and server behavior before declaring a module server-only. Server-synced settings alone do not establish support for unmodified clients.
+Shared world state and network ownership are different concerns. Inspect both client and server behavior before declaring a module server-only. Server-synced settings alone do not establish support for unmodified clients.
 
 Use vanilla-compatible mechanisms and verify ownership transitions. Do not bypass the current game-version guard merely to make a newer build load. Review changed APIs, update the relevant spec and repeat testing before broadening the supported version.
 
-## Adding an authorized module
+## Contributor procedures and validation
 
-1. Create `docs/specs/<feature-name>.md` with scope, feasibility evidence, exact behavior, ownership, configuration, logging, failure handling and acceptance criteria.
-2. Create `src/HeimKit/Features/<FeatureName>/` and its classes using the naming rules above.
-3. Implement the lifecycle contract and its independent enable switch.
-4. Register it in the entry point and bind its settings before the shared config is saved. Preserve per-module failure isolation.
-5. Add only genuinely reusable helpers to shared locations.
-6. Update the optional example config with implemented settings; do not add misleading switches for unimplemented behavior.
-7. Verify the module alone, with all other modules disabled, then relevant combinations and failure scenarios. For three implemented independent switches, test all eight combinations.
-8. Build, run meaningful automated checks and perform the required vanilla-client acceptance tests.
-9. Add it to the README only when it works and is verified. Keep research and incomplete work in specs/development documentation.
+Follow [contributing.md](contributing.md) to add or change a feature. Each feature owns a settings class, a main lifecycle class and a Models folder when data types are needed. Helpers follow actual responsibilities rather than a fixed template. Shared ConfigurationLoader handles the single config file; DiagnosticsSettings binds the common debug switch. Feature constructors bind settings before the loader saves and Plugin initializes modules.
 
-## Build and validation
+Tests are under tests/HeimKit, grouped by feature name, Configuration or Shared. Test files and classes end in Tests. Program.cs dispatches suites only. Build commands, dependency requirements and user testing instructions are maintained in [README.md](../README.md#building-from-source).
 
-From the repository root, with BepInEx installed in the server directory:
+## Documentation content
 
-```powershell
-.\build.ps1 -ServerPath 'C:\path\to\Valheim dedicated server'
-```
-
-For references extracted elsewhere:
-
-```powershell
-.\build.ps1 -ServerPath 'C:\path\to\Valheim dedicated server' -BepInExCore 'C:\path\to\BepInEx\core'
-```
-
-Run the lifecycle/config checks with a .NET 10 SDK:
-
-```powershell
-dotnet run --project .\tests\HeimKit.LifecycleChecks -c Release '-p:ServerPath=C:\path\to\Valheim dedicated server' '-p:BepInExCore=C:\path\to\BepInEx\core'
-```
-
-Use real local references. Do not commit them or machine-specific paths. Build output is `src/HeimKit/bin/Release/netstandard2.1/HeimKit.dll`. The example config copied beside it is optional. Do not distribute test-runner output containing copied reference DLLs.
-
-Run checks relevant to the change. Documentation-only edits need link/content validation rather than an unnecessary gameplay rebuild. Report compilation, automated checks and live multiplayer validation separately. Unchecked acceptance items remain unchecked until observed.
+Keep one specification per feature, describing the code that exists: behavior, configuration, algorithms, file responsibilities and material limits. Update it in place as implementation changes. Do not append development journals, abandoned designs, per-release histories, task tracking, completion checkboxes or passed/pending test inventories. A short validation statement may distinguish local checks from unverified gameplay. Put installation, test procedures and troubleshooting in README.md. Keep supported game, loader and runtime version numbers in its Supported environment section; feature specs describe compatibility checks generically and link there. Keep architecture and agent files focused on durable project rules. Git provides source history.
