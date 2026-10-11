@@ -34,6 +34,10 @@ internal static class WeatherGuardRulesTests
         Check(typeof(ZDOMan).GetMethod("RPC_ZDOData", flags)?.GetParameters().Select(p => p.Name).SequenceEqual(new[] { "rpc", "pkg" }) == true,
             "client data Harmony parameters match installed game");
         Check(WeatherGuardRules.Eligible(111, true, true, true, 234f, true, false), "player-built piece is primary candidate");
+        Check(!WeatherGuardRules.RequiresContext(0, false, false), "collider-free sounds do not interrupt structure processing");
+        Check(WeatherGuardRules.RequiresContext(1, false, false), "non-piece collider context still required for roof/support physics");
+        Check(WeatherGuardRules.RequiresContext(0, true, false), "wear dependency still required even without prefab colliders");
+        Check(WeatherGuardRules.RequiresContext(0, false, true), "shield dependency still required even without prefab colliders");
         Check(!WeatherGuardRules.Eligible(0, true, true, true, 234f, true, false), "world piece is unchanged");
         Check(WeatherGuardRules.Exclusion(0, true, true, true, 234f, true, false) == "world-created", "world control reason");
         Check(WeatherGuardRules.Exclusion(0, true, true, true, 234f, true, true) == "container", "container exclusion takes precedence over creator");

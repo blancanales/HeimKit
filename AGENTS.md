@@ -15,7 +15,7 @@ Keep shared documentation independent of any particular assistant, vendor or too
 
 ## Current scope
 
-Work locally on the checked-out working branch. HeimKit targets Windows dedicated servers only. The source contains Infinite Torches and WeatherGuard. Do not infer gameplay guarantees from compilation.
+Work locally on the checked-out working branch. HeimKit targets Windows dedicated servers only. The source contains Infinite Torches, WeatherGuard, MajoritySleep, AfkSleepExclusion and AfkRaidProtection. NearbyChestCrafting is research documentation only: do not add gameplay, a scaffold, registration or a toggle unless server-only operation with unmodified clients is established. Do not infer gameplay guarantees from compilation.
 
 WeatherGuard priority: automatic weather protection for player-created structures first, preserving their existing creator. Claiming/protecting individual repaired world pieces is secondary. A nonzero creator makes a player-built piece eligible for protection; it must not be used as a protection exclusion. Require seamless activation during play, one normal Enabled switch, and unchanged combat/support behavior. Do not require logout-based activation. World-created claiming is not part of the current implementation.
 
@@ -27,7 +27,7 @@ Only add another feature when requested. Before implementing it, document its be
    Name feature-owned behavior classes `<FeatureName><ResponsibilityOrAction>`. Model and enum prefixes are optional guidance; prefer descriptive names. Display the chosen feature name exactly, without appended development labels. Follow the architecture naming rule; document limitations separately from the name.
 2. Keep plugin entry-point orchestration in `Plugin.cs`. Keep shared contracts/utilities in `Shared/` and configuration setup in `Configuration/`.
 3. Give each module its own enable setting, startup state log, compatibility checks and isolated failure handling. Modules must work with other modules disabled; shared classes must not depend on another module being enabled.
-4. Use the loader-provided configuration directory. Create `heimkit.cfg` automatically with all defaults when missing; preserve existing values and add missing settings. Keep the optional reference config synchronized with code defaults.
+4. Use the loader-provided configuration directory. Create `heimkit.cfg` automatically with all defaults when missing; preserve existing values and add missing settings. Keep the optional reference config synchronized with code defaults. The documented hidden DisableDebugLogging override is manual-only: preserve supplied values without generating absent keys; all features use the shared suppression resolver.
 5. Build and run relevant automated checks. Report results and any live testing instructions directly in the active chat, keeping observed facts separate from inference.
 6. Update the relevant spec and user guide when behavior changes. README feature entries explain user benefits, high-level behavior and essential scope, with guide/specification links. Include a concise compatibility overview; detailed configuration, implementation and operational instructions belong under docs. Follow the README content rules in docs/contributing.md. Keep testing instructions, results and evidence requests in chat only.
 

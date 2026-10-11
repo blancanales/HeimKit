@@ -18,6 +18,12 @@ If the BepInEx development references are elsewhere:
 
 The DLL is written to the standard Release bin directory; the exact output location and framework are listed in [Supported environment](server-setup.md#supported-environment). Install only `HeimKit.dll`; the adjacent example config is optional. Game and BepInEx assemblies are not distributed. WeatherGuard uses the Harmony library supplied with BepInEx; Jotunn is not required.
 
+## Diagnostic configuration integration
+
+Each module uses the shared DebugLoggingResolver and DebugLoggingPolicy described in [architecture](architecture.md#logging), following the [contributor requirements](contributing.md#shared-logging-format). Resolve the hidden suppression-only override during settings construction; use the effective policy for optional output and costly evidence collection. Keep hidden keys absent from generated/reference config, preserve manual values and retain restart-required behavior. The complete user configuration contract belongs in [server setup](server-setup.md#hidden-per-feature-debug-suppression).
+
+Server-admin coverage uses the [documented local request file](server-setup.md#requested-weatherguard-coverage), not a new client command. Keep explicit request handling independent of automatic diagnostics. Gameplay channel and exact-exclusion rules belong in WeatherGuardController/WeatherGuardRules; configuration definitions remain in WeatherGuardSettings and requested report formatting remains in WeatherGuardDiagnostics.
+
 ## Plugin development and Thunderstore references
 
 HeimKit is a C# BepInEx plugin that runs inside the Valheim dedicated-server process. Thunderstore distributes mod packages; the plugin DLL is built using the commands above, then packaged separately for distribution.

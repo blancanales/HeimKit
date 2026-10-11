@@ -25,7 +25,7 @@ public sealed class InfiniteTorchesPendingRefills
     public void Remove(ZDOID id) => _requests.Remove(id);
 
     // Examine all pending IDs, including those outside current player areas, so stale entries cannot accumulate.
-    public void Reconcile(float now, Func<ZDOID, RefillObservation?> observe, Action<string>? report)
+    public void Reconcile(float now, Func<ZDOID, RefillObservation?> observe, Action<RefillResult>? report)
     {
         _completed.Clear();
         foreach (var item in _requests)
@@ -34,17 +34,19 @@ public sealed class InfiniteTorchesPendingRefills
             var observation = observe(item.Key);
             string? reason = null;
             if (!observation.HasValue)
-                reason = "object no longer available in server data; tracking cleared";
+                reason = "object_missing";
             else if (observation.Value.Owner != request.Owner)
-                reason = $"owner changed from {request.Owner} to {observation.Value.Owner}; old request tracking cleared";
+                reason = "owner_changed";
             else if (!float.IsNaN(observation.Value.Fuel) && !float.IsInfinity(observation.Value.Fuel) &&
                 observation.Value.Fuel > request.Before + 0.001f && observation.Value.Fuel >= request.Target * 0.75f)
-                reason = $"observed fuel increase {request.Before:F3} -> {observation.Value.Fuel:F3} after request, target={request.Target:F3}; not a delivery acknowledgement";
+                reason = "fuel_increase";
             else if (now - request.SentAt >= TimeoutSeconds)
-                reason = $"no sufficient fuel increase observed within {TimeoutSeconds}s; retry allowed if still eligible";
+                reason = "timeout";
             if (reason == null) continue;
             _completed.Add(item.Key);
-            report?.Invoke($"Infinite Torches pending refill: object={item.Key}; requested owner={request.Owner}; {reason}.");
+            report?.Invoke(new RefillResult { Object = item.Key.ToString(), Outcome = reason,
+                RequestedOwner = request.Owner, ObservedOwner = observation?.Owner, Fuel = observation?.Fuel,
+                Before = request.Before, Target = request.Target, WaitSeconds = now - request.SentAt });
         }
         foreach (var id in _completed) _requests.Remove(id);
         _completed.Clear();

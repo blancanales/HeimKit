@@ -26,7 +26,7 @@ internal static class WeatherGuardTests
             Check(weather.IsActive == (weatherOn && version == "1.0.17"), "weather isolation/version guard");
             Check(weather.Name == "WeatherGuard" && messages[1].StartsWith("WeatherGuard: "), "exact feature name");
             if (weather.IsActive) Check(messages[2].Contains("player-built") && messages[2].Contains("No logout") &&
-                messages[2].Contains("creators are preserved") && messages[2].Contains("validation pending"), "honest startup scope and validation");
+                messages[2].Contains("creators are preserved") && messages[2].Contains("World-created claims are inactive"), "honest startup scope and validation");
             weather.Shutdown(); weather.Shutdown(); torches.Shutdown();
             Check(!weather.IsActive, "repeatable shutdown");
         }

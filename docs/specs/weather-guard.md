@@ -8,10 +8,17 @@ The module uses BepInEx and Harmony and is designed for unmodified clients. Supp
 
 ## Configuration
 
+The shared [hidden debug suppression contract](../server-setup.md#hidden-per-feature-debug-suppression) applies in this feature's existing configuration section. Settings resolve it through DebugLoggingResolver; effective debug policy gates optional output and diagnostic collection while gameplay and standard lifecycle/warnings/errors remain active. The key has no generated default.
+
 | Section | Setting | Default | Behavior |
 | --- | --- | --- | --- |
 | WeatherGuard | Enabled | false | Independent module control; restart after editing. |
+| WeatherGuard | ProtectRain | true | Suppress qualifying rain wear; restart after editing. |
+| WeatherGuard | ProtectUnderwater | true | Suppress qualifying underwater wetness wear; restart after editing. |
+| WeatherGuard | ExcludedPrefabs | Empty | Comma-separated exact case-sensitive prefab identifiers; restart after editing. |
 | Diagnostics | DebugMode | false | Shared troubleshooting switch. |
+| WeatherGuard | DebugLogLevel | Medium | Medium reports compact protection status; Detailed enables wear, health, loading and ownership evidence. |
+| WeatherGuard | LogWorldCreatedItems | false | Include otherwise qualifying world-created structures in debug output; never enables their protection. |
 
 HeimKit creates `heimkit.cfg` in BepInEx's configuration directory and adds missing settings while preserving existing values. WeatherGuardSettings.cs binds Enabled and obtains the shared DebugMode setting through DiagnosticsSettings before module initialization.
 
@@ -19,13 +26,17 @@ HeimKit creates `heimkit.cfg` in BepInEx's configuration directory and adds miss
 
 A candidate must have Piece and WearNTear components, a nonzero persistent creator, positive finite health, persistent world data, a static position and rain/wetness wear. Its category must be BuildingWorkbench, BuildingStonecutter or DeepNorth. Containers, moving objects, non-building categories and materials already immune to rain are excluded.
 
+Configured prefab exclusions do not broaden native eligibility or assign creators. Native structural/material/health exclusions take priority; otherwise an exact configured prefab match takes priority over channel disablement and creator eligibility. With both weather channels disabled, otherwise qualifying pieces receive `weather_protection_disabled` and are not acquired. World-created pieces remain excluded regardless of the channel settings.
+
+Excluded-prefab entries are trimmed and deduplicated with ordinal, case-sensitive matching against the registered prefab's name, not an instance name or localized display name. Only ASCII letters, digits and underscores are accepted; patterns, separators other than commas, empty list entries and entries beyond 1,024 distinct names are ignored with one construction warning containing a rejected count. An entirely empty/whitespace value means no exclusions. Syntactically valid names absent from the current prefab registry remain exact names and produce one installation warning with a count and at most six samples. Unknown names do not match other prefabs. Excluded pieces retain native processing, while their colliders and support dependencies can still be loaded for neighboring protected pieces.
+
 Persistent creator and platform attribution are never assigned or transferred. Before acquisition, the server instance's cached Piece creator values are refreshed from its existing world data.
 
 ## Server control and ownership
 
 Every second, the module gathers nearby and distant world records around ready connected players whose character object belongs to their session. Overlapping records are deduplicated, with nearby records taking precedence. The module extends ordinary server instance loading and retention to those regions. Terrain is loaded through vanilla zone handling at intervals of at least 0.1 seconds. The server reference position is unchanged.
 
-A piece is acquired only when its server instance, its sector and eight neighboring terrain sectors, and surrounding near-sector instances are ready. Readiness is cached per sector for each scan. Its network owner then becomes the server through native ownership replication and force-send. This changes temporary network ownership, not the creator.
+A piece is acquired only when its server instance, its sector and eight neighboring terrain sectors, and surrounding near-sector physics/wear/shield instances are ready. Collider-bearing prefabs remain dependencies, including non-building objects; collider-free sounds/effects without wear or shield components do not block processing. Readiness is cached per sector for each scan, and dependency classification is cached per prefab. Its network owner then becomes the server through native ownership replication and force-send. This changes temporary network ownership, not the creator.
 
 Newly spawned instances in retained active regions are kept between scans so ordinary drops and fragments are not prematurely removed. Pieces leaving retained nearby regions, losing ready context or becoming ineligible are released to owner zero for vanilla reassignment, with a forced state send. Each scan checks actual ownership of retained protected pieces and reasserts the server after an observed ownership loss. This observation alone does not identify the writer.
 
@@ -35,7 +46,25 @@ The installed game calculates wear only on the current network owner and after i
 
 A Harmony transpiler gates only the weather-damage branch of WearNTear.UpdateWear for protected, server-owned instances. It preserves the preceding rain-wetness calculation and never changes `m_noRoofWear`, retaining native wetness visuals and fire handling. Installation rejects an unexpected flag-read/branch shape rather than silently applying a different patch. The outside-active-area early return is bypassed only within the protected wear invocation; the finalizer clears that scope even on exceptions. UpdateWear, its warmup and native support calculations are not skipped.
 
-The gate suppresses rain and underwater wetness damage. Snow, Ashlands/lava and other biome hazards remain outside this protection. Combat, repair, removal, support collapse and resource drops use native code rather than periodic healing or health-delta inference.
+The gate independently suppresses rain and underwater wetness damage according to ProtectRain and ProtectUnderwater. With both enabled it retains the existing blanket weather-branch bypass. For partial protection it reads the native `m_rainWet` value already calculated earlier in UpdateWear and native IsUnderWater. It allows the native branch when any active wetness source is unprotected, including simultaneous rain/underwater exposure; it suppresses the branch only when all active wetness sources are protected. No sources during partial protection leave native processing unchanged. The native weather flag remains a prerequisite, and shield, health, timers and final damage restrictions remain native. Both channels disabled leave all pieces unacquired and the installed hooks inactive. No weather/roof flag or native timer is assigned by this selection. Snow, Ashlands/lava and other biome hazards remain outside this protection. Combat, repair, removal, support collapse and resource drops use native code rather than periodic healing or health-delta inference.
+
+## Native rain timing and source
+
+These timing and damage values come from Valheim's own compiled dedicated-server assembly, not from HeimKit settings or an online timing estimate. The source is `valheim_server_Data/Managed/assembly_valheim.dll` in the local server installation matching [Supported environment](../server-setup.md#supported-environment). Inspect it with the [ILSpy decompiler](https://github.com/icsharpcode/ILSpy), using its command-line tool `ilspycmd` or desktop application. Decompiled C# is a readable reconstruction of the compiled assembly; the assembly remains the underlying source of evidence. Proprietary game code and assemblies are not distributed with HeimKit.
+
+| Value or condition | Valheim method and calculation |
+| --- | --- |
+| Normal loading warmup | `WearNTear.ShouldUpdate(float time)` normally permits wear when `time - m_createTime > 30f`; negative creation time and pre-snow handling can bypass this wait. |
+| Rain exposure | `WearNTear.UpdateWear(float time)` sets rain wetness when the piece has native weather wear, no cached roof, no shield and a wet environment. `IsWet()` also includes underwater wetness. |
+| First wet interval | `WearNTear.UpdateWear(float time)` sets `m_rainTimer = time` on the first qualifying wet update. A later update contributes weather damage when `time - m_rainTimer > 60f`. Exactly 60 seconds does not satisfy that comparison. |
+| Weather-damage amount | The same method contributes `5f` to percentage wear and converts percentage wear to health damage using `num / 100f * m_health`: five percent of maximum health from the weather branch. Other native branches can contribute to the same wear total. |
+| Subsequent intervals | After a weather-damage contribution, the timer is set to the current wear time. A dry update inside the weather branch resets it to zero. The branch is evaluated only while the native health fraction is above `0.5f` and the piece is unshielded. |
+| Final damage restrictions | `WearNTear.UpdateWear` cancels percentage wear for a piece that cannot be removed and suppresses its application when `NoBuildingFall` is active. |
+| Roof-cache refresh | `WearNTear.UpdateCover(float dt)` refreshes cover after its accumulated timer exceeds `4f`, when the environment is wet or the piece is in Deep North. `WearNTearUpdater.UpdateWearNTear` schedules these calls; this accumulator threshold must not be treated as a guaranteed four-second wall-clock delay. |
+
+The first rain-damage opportunity occurs on the first qualifying wear update after the wet timer exceeds 60 game-time seconds, following any loading and cover-detection delay. Periodic update scheduling adds delay. Therefore there is no unconditional fixed duration measured from player spawn. A ten-minute period is a conservative data-collection allowance, not a timer found in Valheim or a duration calculated from these constants; elapsed time alone does not establish qualifying exposure.
+
+WeatherGuard bypasses the weather-damage branch for protected server-owned pieces, so their native rain timer does not advance through that branch. Its logged continuous wet duration is a separate diagnostic observation of qualifying protected gate entries, not the native rain timer or a calculated amount of prevented damage. Snow, Ashlands and lava have separate native conditions and timers; the rain interval does not apply to every environmental hazard.
 
 ## Client-update guards
 
@@ -59,15 +88,37 @@ Capacity warnings state that unmanaged pieces remain under vanilla processing. C
 
 Disabling, shutdown or module failure deactivates patches and releases network ownership. Other modules remain independent. The implementation does not persist a weather flag, claim marker or new creator. It does not automatically remove custom fields already stored in a world by another implementation.
 
+## Requested coverage
+
+WeatherGuardCoverageRequests handles the fixed local request file in the loader config directory at most once per second. The [admin access procedure](../server-setup.md#requested-weatherguard-coverage) is filesystem-authorized and requires no client changes or debug enablement. The file is consumed before producing a single ordinary requested SUMMARY. Access warnings are bounded until successful consumption; report exceptions are isolated from gameplay processing. The plugin ticks inactive modules for explicit administration, while each module continues gating gameplay by IsActive. WeatherGuard reports inactive/unobserved scope when disabled or awaiting world services rather than performing a whole-world scan.
+
+WeatherGuardController builds coverage data only on request from the retained nearby record set and the most recent player-region scan. Eligibility and exact exclusions use the same selection as acquisition; loaded-instance validity, native current owner, terrain and cached surrounding-context readiness establish protected counts. Scan age and capacity limitations are explicit. CoverageSnapshot partitions observed records into eligible/skipped, and eligible records into protected/waiting; unloaded eligible records are a waiting subset. Skipped reasons include records that are not structural candidates. Distant records and world areas outside retained scope are not evaluated. Unknown counts are distinct from measured zeros. Rain/underwater configuration describes channels, not proven prevented damage. WeatherGuardDiagnostics formats requested reports independently of automatic debug gating and budgets.
+
 ## Logging
 
-Standard logs report configuration, enabled/disabled state, readiness, first acquisition count, capacity warnings and errors. DebugMode adds one two-line summary per 60 seconds. Acquisition, eligibility, context and ownership streams each have an independent limit of six detailed samples per 60 seconds. Native damage/repair/removal receiver samples have a separate limit of six. Wear evidence is limited to three distinct protected pieces and three distinct unprotected structural controls per 60 seconds; one object cannot consume all wear samples in a window. Samples contain object IDs, prefab names and positions to identify the object. Persistent creator and platform account IDs are not logged.
+All messages follow the [shared logging contract](../architecture.md#logging). Standard LIFECYCLE messages report configuration, enabled/disabled state, readiness, initial processing scope, capacity warnings and errors. Enabled and readiness messages do not assert rain protection.
 
-Summaries distinguish current-scan candidate, exclusion, release-reason and ready-character counts from controller-lifetime transition/guard counters. Actual entry into the protected weather gate and completed native support passes are counted separately from UpdateWear invocations. With DebugMode enabled, wet opportunities count gate entries with native wetness, health above half and no shield; they do not measure a continuous 60-second wet interval or prove client delivery. Gate evidence can remain zero during warmup even when invocation counts increase.
+DebugMode remains the master switch. With `DebugLogLevel=Medium`, diagnostics report one SUMMARY and up to twelve compact item RESULT records per 60 seconds. Item records say “Item protected” or “Item not protected” and include object ID, prefab, position, `protected`, channel-specific `rain_protected`/`underwater_protected`, origin and reason. Protected means server-managed for the configured channels, not that both channels are necessarily enabled. Scope is nearby structures passing all eligibility checks other than creator: eligible player-built items, plus world-created items only when `LogWorldCreatedItems=true`. Containers, moving objects, non-building items and weather-immune materials are omitted. Summary counts describe this qualifying scope; unprotected player items have loading, capacity or acquisition reasons, while included world items retain `world-created` exclusion.
 
-Context samples identify the first missing terrain sector or prefab-backed surrounding instance, retention membership, zone generation and server terrain readiness. Ownership samples show previous/requested/current owner, releases with reasons and observed loss followed by reassertion. Native receiver samples give command name, owner and health before/after; receiving a command does not guarantee a health change or observed resource drops.
+New items and changed states not yet reported take priority. Remaining slots rotate through unchanged items. Deferred changes are counted in `pending_changed_samples_now`; samples are bounded and do not promise every object immediately. State memory is limited to the current retained qualifying set. Medium does not gather detailed rain histories or diagnostic roof probes. Startup, readiness, warnings and errors remain visible independently of these choices. Level and world-inclusion changes require restart.
 
-Wear samples record owner, eligibility, warmup, actual gate entry/suppression, server environment/reference position, cached roof, shield, underwater state, cached health fraction, maximum health, rain timer, removability and health before/after. NoBuildingFall and removability are reported because vanilla suppresses wear damage for that modifier or a nonremovable piece, even for controls. These are server observations; unowned controls run their wear on clients. Client weather and wear timers are not available with unmodified clients, and server weather at its reference position can differ from player weather. Health changes alone never establish their cause.
+With `DebugLogLevel=Detailed`, DebugMode adds one SUMMARY per 60 seconds: eligible/managed/current waiting counts, ready-player/character waits, watched player/control counts, interval acquisitions/releases/wet gate entries, exclusions and omitted-message counts. A reserved DETAIL supplies interval processing/support/native-command/network counters, lifetime acquisition/release/gate totals and cumulative release reasons. Deliberate releases and observed unexpected owner changes remain separate measurements.
+
+Watched RESULT records present protection, health outcome and WeatherGuard action together. `protection` is `active`, `waiting` or `excluded`, with `protection_reason` identifying eligibility or the current loading/capacity blocker. `health_change`, `health_before`, `health_after` and `health_lost_interval` describe measurements since the previous report (or tracking start for the first report). Loss measurements accumulate each observed decrease, retaining damage followed by repair between reports; they do not reconstruct changes between observations. `weather_damage=unconfirmed` and `damage_source` prevent health loss from being presented as a known weather cause.
+
+`action=weather_branch_bypassed` requires an actual bypass observed during the reporting interval, with interval and lifetime bypass counts. `left_to_native_owner` means WeatherGuard left the piece unmanaged; it does not assert that an unobserved client calculation ran. `weather_bypass_not_observed` distinguishes managed pieces without an observed bypass. The action describes the interval, while protection and blockers describe current state. `weather_opportunity` distinguishes unavailable owner calculations, unmet conditions, insufficient qualifying duration and qualifying duration exceeding the native interval; duration alone does not establish an actual prevented damage amount. SUMMARY includes watched pieces with observed health loss and watched bypass counts for the reporting interval. These counts cover the bounded watched sample, not every world piece.
+
+At most six watched RESULT records accompany a summary: three exposed eligible pieces and, when `LogWorldCreatedItems=true`, three exposed world-created controls. They contain object identity, observation source, tracked duration, health first/current/minimum/delta, native maximum health, observed continuous/longest qualifying wet duration, gate counts and current blockers. Health loss remains prominent even after rain ends. World-created controls can expose replicated health changes, but their client wet timers are unavailable and are logged as `unknown`, not zero. `server_owned_state` identifies authoritative server-side state; gate counts separately establish calculation entry. No health delta establishes its cause or client presentation.
+
+Dry gates, observed owner or management changes and game-clock gaps greater than ten seconds reset continuous wet duration. The duration is sampling evidence, not a replay of vanilla rain damage or a measurement of prevented damage. No native rain timer, creator or roof cache is changed by diagnostics. Warmup blockers include the remaining native game-time allowance; scheduling can add delay after that allowance reaches zero.
+
+A rotating debug probe inspects fresh native roof geometry for at most twelve structural candidates per scan. Eligible candidates first observed after an earlier scan can replace one eligible history once exposed. Later observation can result from building, movement or delayed data; it does not prove creation time. Cached/fresh roof disagreements include cover timer and roof-probe age so older geometry observations are not mistaken for a current calculation. Roofed objects do not prove rain protection; underwater wetness can qualify separately. Shielding, health threshold, removability and NoBuildingFall are explicit evaluation blockers.
+
+OBJECT records identify first observations, changed exclusions and tracking termination with an observed reason. Unchanged exclusions contribute counts without repeating individual messages. ACTION records identify acquisition/release/owner operations. DETAIL records explain missing terrain or prefab-backed dependencies, processing warmup, native timing, environment and calculation entry. Numeric owners, instance-loading classification and timing caches are supporting details rather than repeated routine result fields. World-data health that cannot be distinguished from a missing or NaN field is explicitly labeled `unknown_or_nan`, rather than a fabricated negative health value.
+
+OBJECT, ACTION and additional DETAIL output each allow six messages per 60 seconds. Wear DETAIL selection additionally allows at most three distinct candidates per protected/unprotected and exposed/covered group. Native command receivers have a separate six-RESULT allowance with command, processor, health before/after and object availability. Errors retain error severity. Diagnostics caps affect printing only; watched health is collected every scan and after native wear and command execution, and operational counters continue independently. Memory for exclusion observations is restricted to retained records. Persistent creator/account IDs are not logged; creator changes are reported as a boolean.
+
+Server environment can differ from client environment. Client-side wear calculations, delivery acknowledgements and client presentation cannot be directly observed with unmodified clients. RESULT messages retain that boundary rather than asserting success from compilation, elapsed wall-clock time or unchanged health alone.
 
 ## Source responsibilities
 
@@ -78,10 +129,15 @@ Wear samples record owner, eligibility, warmup, actual gate entry/suppression, s
 | WeatherGuardController.cs | Region loading, readiness, acquisition/release, ownership reconciliation, native evidence collection and operational counters. |
 | WeatherGuardDiagnostics.cs | Debug gating, summaries/evidence formatting, independent sample limits and reset. |
 | WeatherGuardPatches.cs | Harmony hooks for processing, ownership and networking. |
+| WeatherGuardCoverageRequests.cs | Local one-shot admin request consumption, polling bounds and failure isolation. |
+| Models/CoverageSnapshot.cs | Requested coverage counts, scope and reason measurements. |
 | WeatherGuardRules.cs | Eligibility, acquisition gates, routing and revision rules. |
 | WeatherGuardNetworkFilter.cs | Selective packet filtering and cursor preservation. |
 | Models/WeatherGuardStatus.cs | Processing-counter snapshot supplied to diagnostics. |
+| Models/DebugLogLevel.cs | Medium/Detailed diagnostic level selection. |
+| Models/ProtectionObservation.cs | Qualifying-item protection snapshot for compact diagnostics. |
 | Models/WearObservation.cs | Bounded native wear/command evidence supplied to diagnostics. |
+| Models/RainEvidence.cs | Bounded per-object health, ownership and wet-processing history. |
 | Models/WearProcessingState.cs | Invocation scope and diagnostic observation restored by the wear finalizer. |
 | Models/Routing.cs | Routing decision enum used by rules and patches. |
 

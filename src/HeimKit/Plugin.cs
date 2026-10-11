@@ -1,15 +1,19 @@
 using System;
 using System.Collections.Generic;
 using BepInEx;
+using BepInEx.Logging;
 using HeimKit.Configuration;
 using HeimKit.Features.InfiniteTorches;
 using HeimKit.Features.WeatherGuard;
+using HeimKit.Features.MajoritySleep;
+using HeimKit.Features.AfkSleepExclusion;
+using HeimKit.Features.AfkRaidProtection;
 using HeimKit.Shared;
 using UnityEngine;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.1.12")]
+[BepInPlugin("heimkit", "HeimKit", "0.1.20")]
 [BepInProcess("valheim_server.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -17,23 +21,26 @@ public sealed class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
-        Logger.LogInfo("HeimKit 0.1.12 starting.");
+        DiagnosticLog.StartSession();
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting", new (string, object?)[] { ("version", "0.1.20"), ("log_schema", 1) });
         try
         {
             ConfigurationLoader.Load(Paths.ConfigPath, Logger, config =>
             {
                 Register(() => new InfiniteTorches(config, Logger), "Infinite Torches");
                 Register(() => new WeatherGuard(config, Logger), "WeatherGuard");
+                Register(() => new MajoritySleep(config, Logger), "MajoritySleep");
+                Register(() => new AfkSleepExclusion(config, Logger), "AfkSleepExclusion");
+                Register(() => new AfkRaidProtection(config, Logger), "AfkRaidProtection");
                 return config;
             });
         }
         catch (Exception ex)
         {
             _features.Clear();
-            Logger.LogError($"HeimKit: modules DISABLED because configuration setup failed: {ex.Message}");
+            DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, $"modules DISABLED because configuration setup failed: {ex.Message}", level: LogLevel.Error);
             return;
         }
-        Logger.LogInfo("To enable or disable Infinite Torches: stop the server, edit [Torches] Enabled = true or false in heimkit.cfg, save, then restart the server.");
         foreach (var feature in _features)
         {
             try
@@ -43,7 +50,7 @@ public sealed class Plugin : BaseUnityPlugin
             catch (Exception ex)
             {
                 feature.Shutdown();
-                Logger.LogError($"{feature.Name}: DISABLED after startup error: {ex}");
+                DiagnosticLog.Write(Logger, feature.Name, DiagnosticEvent.Lifecycle, $"DISABLED after startup error: {ex}", level: LogLevel.Error);
             }
         }
     }
@@ -51,14 +58,15 @@ public sealed class Plugin : BaseUnityPlugin
     private void Register(Func<IServerModule> create, string name)
     {
         try { _features.Add(create()); }
-        catch (Exception error) { Logger.LogError($"{name}: DISABLED after configuration construction error: {error}"); }
+        catch (Exception error) { DiagnosticLog.Write(Logger, name, DiagnosticEvent.Lifecycle, $"DISABLED after configuration construction error: {error}", level: LogLevel.Error); }
     }
 
     private void Update()
     {
         foreach (var feature in _features)
         {
-            if (!feature.IsActive) continue;
+            // Tick inactive modules too so explicit operator requests remain available.
+            // Each module gates its own gameplay processing on IsActive.
             try
             {
                 feature.Tick(Time.unscaledTime);
@@ -66,7 +74,7 @@ public sealed class Plugin : BaseUnityPlugin
             catch (Exception ex)
             {
                 feature.Shutdown();
-                Logger.LogError($"{feature.Name}: DISABLED after runtime error: {ex}");
+                DiagnosticLog.Write(Logger, feature.Name, DiagnosticEvent.Lifecycle, $"DISABLED after runtime error: {ex}", level: LogLevel.Error);
             }
         }
     }
@@ -76,7 +84,7 @@ public sealed class Plugin : BaseUnityPlugin
         foreach (var feature in _features)
         {
             try { feature.Shutdown(); }
-            catch (Exception ex) { Logger.LogError($"{feature.Name}: shutdown error: {ex}"); }
+            catch (Exception ex) { DiagnosticLog.Write(Logger, feature.Name, DiagnosticEvent.Lifecycle, $"shutdown error: {ex}", level: LogLevel.Error); }
         }
         _features.Clear();
     }

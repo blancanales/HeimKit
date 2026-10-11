@@ -34,7 +34,7 @@ internal static class WeatherGuardPatchesTests
         foreach (bool value in new[] { false, true })
             if ((bool)allow.Invoke(null, new object?[] { value, null })! != value)
                 throw new Exception("Inactive weather hook changes vanilla behavior.");
-        foreach (string field in new[] { "m_haveRoof", "m_shieldChangeID", "m_rainTimer" })
+        foreach (string field in new[] { "m_haveRoof", "m_shieldChangeID", "m_rainTimer", "m_rainWet" })
             if (typeof(WearNTear).GetField(field, BindingFlags.Instance | BindingFlags.NonPublic) == null) throw new Exception("Missing evidence field " + field);
         foreach (string name in new[] { "ShouldUpdate", "IsUnderWater", "CanBeRemoved", "RPC_Damage", "RPC_Repair", "RPC_Remove" })
             if (typeof(WearNTear).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic) == null) throw new Exception("Missing native/evidence method " + name);

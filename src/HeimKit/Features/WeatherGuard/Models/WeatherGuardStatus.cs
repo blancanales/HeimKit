@@ -2,6 +2,9 @@ namespace HeimKit.Features.WeatherGuard.Models;
 
 public sealed class WeatherGuardStatus
 {
+    public bool RainProtection { get; set; } = true;
+    public bool UnderwaterProtection { get; set; } = true;
+    public System.Collections.Generic.Dictionary<string, int> ReleaseTotals { get; set; } = new();
     public int Protected { get; set; }
     public int Eligible { get; set; }
     public int Waiting { get; set; }

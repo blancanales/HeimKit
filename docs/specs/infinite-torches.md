@@ -8,6 +8,8 @@ Supported game and loader versions are documented in [server setup](../server-se
 
 ## Configuration
 
+The shared [hidden debug suppression contract](../server-setup.md#hidden-per-feature-debug-suppression) applies in this feature's existing configuration section. Settings resolve it through DebugLoggingResolver; effective debug policy gates optional output and diagnostic collection while gameplay and standard lifecycle/warnings/errors remain active. The key has no generated default.
+
 | Section | Setting | Default | Rules |
 | --- | --- | --- | --- |
 | Torches | Enabled | true | Independent control; restart after editing. |
@@ -42,9 +44,11 @@ The module initializes only when enabled and the audited game-version guard pass
 
 ## Logging
 
-Standard output includes configuration path, startup state, world/prefab readiness, eligibility warnings and errors. DebugMode adds per-pass request counts, skip/pending/deferred counts and reconciliation outcomes.
+All messages follow the [shared logging contract](../architecture.md#logging). Standard LIFECYCLE output includes configuration, effective startup state, world/prefab readiness, warnings and errors. DebugMode adds one SUMMARY per 60 seconds with explicitly labeled latest-pass/current counts, interval refill-request and reconciliation-outcome counts and omitted-message counts.
 
-Status reports are limited to one per 60 seconds. Actual refill-request details are limited to four samples per 60 seconds across all passes. Suppressed detail messages are not formatted. Samples identify object, prefab, owner, position, prior fuel, target and RPC, and state that client application is unconfirmed. Counts describe examined candidates in the current pass, not every torch in the world.
+Refill ACTION records are limited to four per 60 seconds. They identify object, prefab, position, prior fuel and target; they report a request sent without asserting client application. Pending-operation RESULT records are limited to six per 60 seconds. They identify observed fuel increase, timeout, owner change or missing object, with prior/target/observed fuel and elapsed wait. An owner-change result includes the owners needed to explain that transition. Missing observed data is `unknown`.
+
+Every reconciliation outcome is counted by the controller, even when its individual RESULT message is omitted. There is no unbounded per-pass request message or direct pending-refill logging bypass. A replicated fuel increase is not a delivery acknowledgement or proof of causation. SUMMARY counters labeled `_pass` refer to the latest examined pass, not every torch in the world; `_interval` counters cover activity since the preceding emitted summary.
 
 ## Limits
 

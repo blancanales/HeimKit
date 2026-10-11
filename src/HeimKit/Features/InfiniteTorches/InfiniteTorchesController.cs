@@ -2,6 +2,7 @@ using HeimKit.Features.InfiniteTorches.Models;
 using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
+using HeimKit.Shared;
 
 
 namespace HeimKit.Features.InfiniteTorches;
@@ -25,13 +26,14 @@ internal sealed class InfiniteTorchesController : IDisposable
     private float _nextTick;
     private int _cursor;
     private bool _announced;
+    private readonly Dictionary<string, long> _outcomes = new();
 
     public InfiniteTorchesController(InfiniteTorches module, InfiniteTorchesSettings settings, ManualLogSource logger)
     {
         _logger = logger;
         _module = module;
         _settings = settings;
-        _diagnostics = new InfiniteTorchesDiagnostics(_settings.DebugMode, logger);
+        _diagnostics = new InfiniteTorchesDiagnostics(() => _settings.DebugLogging.Enabled, logger, () => new Dictionary<string, long>(_outcomes));
     }
 
     internal string SettingsDescription => _diagnostics.SettingsDescription;
@@ -48,12 +50,12 @@ internal sealed class InfiniteTorchesController : IDisposable
         {
             _diagnostics.Report(now, () => "Waiting for world services. Unavailable: " +
                 $"{(net == null ? "network " : "")}{(scene == null ? "scene " : "")}" +
-                $"{(manager == null ? "world-object data " : "")}{(routed == null ? "RPC routing" : "")}".TrimEnd() + ". No requests sent this pass.");
+                $"{(manager == null ? "world-object data " : "")}{(routed == null ? "RPC routing" : "")}".TrimEnd() + ".");
             return;
         }
         if (!net.IsServer() || !net.IsDedicated())
         {
-            _diagnostics.Report(now, () => "Not running in a dedicated-server network session. No requests sent this pass.");
+            _diagnostics.Report(now, () => "Not running in a dedicated-server network session.");
             return;
         }
 
@@ -67,12 +69,12 @@ internal sealed class InfiniteTorchesController : IDisposable
                 return objectData != null && objectData.IsValid()
                     ? new RefillObservation(objectData.GetOwner(), objectData.GetFloat(ZDOVars.s_fuel, -1f))
                     : (RefillObservation?)null;
-            }, _diagnostics.IsDebugEnabled ? message => _logger.LogInfo(message) : (Action<string>?)null);
+            }, result => { Count(result.Outcome); _diagnostics.Result(now, result); });
             operation = "resolving configured torch prefabs";
             if (_scene != scene || _configuredNames != _settings.Prefabs.Value) LoadPrefabs(scene);
             if (_torches.Count == 0)
             {
-                _diagnostics.Report(now, () => "No supported torch prefabs configured. Check Torches.Prefabs and startup warnings. No requests sent this pass.");
+                _diagnostics.Report(now, () => "No supported torch prefabs configured. Check Torches.Prefabs and startup warnings.");
                 return;
             }
             _owners.Clear();
@@ -83,7 +85,7 @@ internal sealed class InfiniteTorchesController : IDisposable
             _seen.Clear();
             if (_owners.Count == 0)
             {
-                _diagnostics.Report(now, () => "No ready connected players with character IDs. No requests sent this pass.");
+                _diagnostics.Report(now, () => "No ready connected players with character IDs.");
                 return;
             }
             int sectorRecords = 0;
@@ -105,7 +107,7 @@ internal sealed class InfiniteTorchesController : IDisposable
             if (_candidates.Count == 0)
             {
                 _cursor = 0;
-                _diagnostics.Report(now, () => $"No eligible client-owned torches in players' nearby areas. Ready players={_owners.Count}; prefab types={_torches.Count}; sector records examined={sectorRecords}. No requests sent this pass.");
+                _diagnostics.Report(now, () => $"No eligible client-owned torches in players' nearby areas; ready_players_now={_owners.Count}; prefab_types_now={_torches.Count}; sector_records_pass={sectorRecords}.");
                 return;
             }
 
@@ -138,20 +140,19 @@ internal sealed class InfiniteTorchesController : IDisposable
                 try { routed.InvokeRoutedRPC(owner, zdo.m_uid, "RPC_SetFuelAmount", prefab.m_maxFuel); }
                 catch { _pending.Remove(zdo.m_uid); throw; }
                 sent++;
-                _diagnostics.LogRefillRequest(now, () => $"object={zdo.m_uid}; prefab={prefab.gameObject.name}; owner={owner}; position={position}; fuel before={fuel:F3}; target={prefab.m_maxFuel:F3}; RPC=RPC_SetFuelAmount. Sent to routing; client application unconfirmed.");
+                Count("requests_sent");
+                if (_diagnostics.IsDebugEnabled) _diagnostics.Request(now, zdo.m_uid.ToString(), prefab.gameObject.name, string.Join(",", position.x.ToString(System.Globalization.CultureInfo.InvariantCulture), position.y.ToString(System.Globalization.CultureInfo.InvariantCulture), position.z.ToString(System.Globalization.CultureInfo.InvariantCulture)), fuel, prefab.m_maxFuel);
             }
-            if (_diagnostics.IsDebugEnabled && sent > 0)
-                _logger.LogInfo($"Sent {sent} refill requests; {_candidates.Count} eligible owner-area torches. Client application is unconfirmed.");
             _diagnostics.Report(now, () =>
             {
                 string reason = sent > 0 ? "Refill requests sent this pass; client application is unconfirmed."
-                    : sufficientFuel == examined ? "All examined torches have enough fuel (at least 75%). No requests sent this pass."
+                    : sufficientFuel == examined ? "All examined torches have enough fuel (at least 75%)."
                     : pendingSkipped > 0 ? "Waiting for previously requested refills; duplicate requests suppressed."
                     : "No examined torch could be refilled this pass; see skip counts.";
-                return $"{reason} Ready players={_owners.Count}; candidates={_candidates.Count}; examined={examined}; sent={sent}; " +
-                    $"sufficient fuel={sufficientFuel}; off={stateOff}; invalid fuel={invalidFuel}; owner unavailable={changedOwner}; " +
-                    $"pending={_pending.Count}; duplicate requests suppressed={pendingSkipped}; tracking capacity skips={trackingFull}; " +
-                    $"deferred={_candidates.Count - examined}.";
+                return $"{reason}; ready_players_now={_owners.Count}; candidates_now={_candidates.Count}; examined_pass={examined}; requests_sent_pass={sent}; " +
+                    $"sufficient_fuel_pass={sufficientFuel}; off_pass={stateOff}; invalid_fuel_pass={invalidFuel}; owner_unavailable_pass={changedOwner}; " +
+                    $"pending_now={_pending.Count}; duplicates_suppressed_pass={pendingSkipped}; tracking_capacity_skips_pass={trackingFull}; " +
+                    $"deferred_pass={_candidates.Count - examined}.";
             });
         }
         catch (Exception ex)
@@ -159,6 +160,8 @@ internal sealed class InfiniteTorchesController : IDisposable
             _module.Fail(ex, operation);
         }
     }
+
+    private void Count(string kind) { _outcomes.TryGetValue(kind, out long count); _outcomes[kind] = count + 1; }
 
     private void LoadPrefabs(ZNetScene scene)
     {
@@ -176,7 +179,7 @@ internal sealed class InfiniteTorchesController : IDisposable
                 : fire.m_maxFuel <= 0f || float.IsNaN(fire.m_maxFuel) || float.IsInfinity(fire.m_maxFuel) ? "invalid maximum fuel" : null;
             if (rejection != null)
             {
-                _logger.LogWarning($"Infinite Torches skipped prefab '{name}': {rejection}.");
+                DiagnosticLog.Write(_logger, "Infinite Torches", DiagnosticEvent.Lifecycle, $"Infinite Torches skipped prefab '{name}': {rejection}.", level: LogLevel.Warning);
                 continue;
             }
             _torches[scene.GetPrefabHash(go!)] = fire!;
@@ -185,7 +188,7 @@ internal sealed class InfiniteTorchesController : IDisposable
         _configuredNames = _settings.Prefabs.Value;
         if (!_announced)
         {
-            _logger.LogInfo($"Infinite Torches: ready with {_torches.Count} prefabs. Vanilla owners receive vanilla fuel RPCs. Unloaded or transferring objects retry on later passes.");
+            DiagnosticLog.Write(_logger, "Infinite Torches", DiagnosticEvent.Lifecycle, $"ready with {_torches.Count} prefabs. Vanilla owners receive vanilla fuel RPCs. Unloaded or transferring objects retry on later passes.");
             _announced = true;
         }
     }

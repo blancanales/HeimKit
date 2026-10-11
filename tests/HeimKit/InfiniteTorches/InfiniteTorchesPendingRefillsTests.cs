@@ -11,7 +11,7 @@ internal static class InfiniteTorchesPendingRefillsTests
         var pending = new InfiniteTorchesPendingRefills();
         var torchId = new ZDOID(1L, 1U);
         var otherTorchId = new ZDOID(1L, 2U);
-        var outcomes = new List<string>();
+        var outcomes = new List<RefillResult>();
         if (!pending.TryTrack(torchId, 10L, 0f, 4f, 0f) || pending.TryTrack(torchId, 10L, 0f, 4f, 5f))
             throw new Exception("Duplicate request was not suppressed by object ID.");
         pending.Reconcile(5f, _ => new RefillObservation(10L, 0f), outcomes.Add);
@@ -19,18 +19,18 @@ internal static class InfiniteTorchesPendingRefillsTests
         pending.Reconcile(10f, _ => new RefillObservation(10L, 1f), outcomes.Add);
         if (!pending.Contains(torchId)) throw new Exception("Insufficient partial fuel increase released the request.");
         pending.Reconcile(15f, _ => new RefillObservation(10L, 3.99f), outcomes.Add);
-        if (pending.Count != 0 || !outcomes.Exists(m => m.Contains("observed fuel increase")))
+        if (pending.Count != 0 || !outcomes.Exists(m => m.Outcome == "fuel_increase"))
             throw new Exception("Replicated fuel increase was not observed.");
         pending.TryTrack(torchId, 10L, 0f, 4f, 20f);
         pending.Reconcile(49f, _ => new RefillObservation(10L, 0f), outcomes.Add);
         if (!pending.Contains(torchId)) throw new Exception("Retry permitted before the timeout.");
         pending.Reconcile(50f, _ => new RefillObservation(10L, 0f), outcomes.Add);
-        if (pending.Contains(torchId) || !outcomes.Exists(m => m.Contains("retry allowed")))
+        if (pending.Contains(torchId) || !outcomes.Exists(m => m.Outcome == "timeout"))
             throw new Exception("Timeout did not permit retry.");
         pending.TryTrack(torchId, 10L, 0f, 4f, 60f);
         pending.TryTrack(otherTorchId, 10L, 0f, 4f, 60f);
         pending.Reconcile(65f, id => id.Equals(torchId) ? new RefillObservation(20L, 0f) : (RefillObservation?)null, outcomes.Add);
-        if (pending.Count != 0 || !outcomes.Exists(m => m.Contains("owner changed")) || !outcomes.Exists(m => m.Contains("no longer available")))
+        if (pending.Count != 0 || !outcomes.Exists(m => m.Outcome == "owner_changed") || !outcomes.Exists(m => m.Outcome == "object_missing"))
             throw new Exception("Owner changes and removed objects were not cleared.");
         for (uint index = 1; index <= InfiniteTorchesPendingRefills.Capacity; index++)
             if (!pending.TryTrack(new ZDOID(2L, index), 10L, 0f, 4f, 70f)) throw new Exception("Unexpected tracking capacity.");

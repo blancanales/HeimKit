@@ -13,3 +13,5 @@ The default allowlist covers wooden, iron, green, blue and wall torches. Unsuppo
 Debug output includes examined candidates, sent requests, skip reasons, pending records and deferred candidates. Status summaries appear at most once per minute; detailed refill requests are capped at four per minute. A sent request or observed fuel increase is not a delivery acknowledgement.
 
 The [Infinite Torches specification](../specs/infinite-torches.md) describes the implemented selection, networking, duplicate suppression and limits.
+
+Per-feature diagnostic output and collection can be suppressed through the [hidden debug override](../server-setup.md#hidden-per-feature-debug-suppression), without disabling protection/refilling or standard startup, readiness, warnings and errors.

@@ -1,3 +1,4 @@
+using HeimKit.Shared;
 using System;
 using System.IO;
 using BepInEx.Configuration;
@@ -18,14 +19,14 @@ public static class ConfigurationLoader
             T result = bindSettings(config);
             config.Save();
             config.SaveOnConfigSet = true;
-            logger.LogInfo(existed
+            DiagnosticLog.Write(logger, "HeimKit", DiagnosticEvent.Lifecycle, existed
                 ? $"Loaded configuration: {path}. Existing settings preserved; missing settings added with defaults."
                 : $"Created default configuration: {path}. All feature settings are included.");
             return result;
         }
         catch (Exception ex)
         {
-            logger.LogError($"Could not load or create configuration at {path}: {ex.Message}");
+            DiagnosticLog.Write(logger, "HeimKit", DiagnosticEvent.Lifecycle, $"Could not load or create configuration at {path}: {ex.Message}", level: LogLevel.Error);
             throw;
         }
     }

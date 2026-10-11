@@ -1,4 +1,5 @@
 using BepInEx.Configuration;
+using BepInEx.Logging;
 using HeimKit.Configuration;
 
 namespace HeimKit.Features.InfiniteTorches;
@@ -10,8 +11,9 @@ public sealed class InfiniteTorchesSettings
     public ConfigEntry<int> MaxMessagesPerPass { get; }
     public ConfigEntry<string> Prefabs { get; }
     public ConfigEntry<bool> DebugMode { get; }
+    public DebugLoggingPolicy DebugLogging { get; }
 
-    public InfiniteTorchesSettings(ConfigFile config)
+    public InfiniteTorchesSettings(ConfigFile config, ManualLogSource? logger = null)
     {
         Enabled = config.Bind("Torches", "Enabled", true, "Automatically refill eligible torches for free. Restart after config edits.");
         IntervalSeconds = config.Bind("Torches", "IntervalSeconds", 5f,
@@ -22,5 +24,6 @@ public sealed class InfiniteTorchesSettings
             "piece_groundtorch_wood,piece_groundtorch,piece_groundtorch_green,piece_groundtorch_blue,piece_walltorch",
             "Exact prefab allowlist. Only refillable non-toggle lights without wet-flame objects qualify. Fires and braziers are excluded by default.");
         DebugMode = DiagnosticsSettings.Bind(config);
+        DebugLogging = DebugLoggingResolver.Resolve(config, "Torches", DebugMode, logger);
     }
 }

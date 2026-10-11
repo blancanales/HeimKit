@@ -140,9 +140,10 @@ internal sealed class WeatherGuardPatches : IDisposable
         if (_protectedWearDepth == 0 || active?.Running != true) return native;
         var view = wear.GetComponent<ZNetView>();
         if (view == null || !view.IsValid() || !view.IsOwner() || !active.Protects(view.GetZDO().m_uid)) return native;
-        try { active.WeatherGate(wear); } catch (Exception error) { active.Fail(error); return native; }
-        if (_wearObservation != null) _wearObservation.Suppressed = native;
-        return false;
+        bool suppress;
+        try { suppress = active.SuppressWeather(wear, native); active.WeatherGate(wear, suppress); } catch (Exception error) { active.Fail(error); return native; }
+        if (_wearObservation != null) _wearObservation.Suppressed = suppress;
+        return suppress ? false : native;
     }
     private static void Wear(WearNTear __instance, float time, out WearProcessingState __state)
     {

@@ -4,7 +4,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AssemblyName>HeimKit</AssemblyName>
-    <Version>0.1.12</Version>
+    <Version>0.1.20</Version>
     <GameManaged>$(ServerPath)\valheim_server_Data\Managed</GameManaged>
     <BepInExCore Condition="'$(BepInExCore)' == ''">$(ServerPath)\BepInEx\core</BepInExCore>
   </PropertyGroup>
@@ -17,6 +17,7 @@
     <Reference Include="Splatform"><HintPath>$(GameManaged)\Splatform.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>$(GameManaged)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(GameManaged)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(GameManaged)\UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
   <Target Name="CheckReferences" BeforeTargets="ResolveReferences">
     <Error Condition="!Exists('$(GameManaged)\assembly_valheim.dll')" Text="Supply -p:ServerPath pointing at your Windows dedicated server installation." />

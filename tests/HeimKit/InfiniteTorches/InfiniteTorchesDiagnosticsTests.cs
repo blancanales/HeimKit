@@ -57,5 +57,20 @@ internal static class InfiniteTorchesDiagnosticsTests
             throw new Exception("Master debug switch failed to suppress enabled diagnostic categories.");
         System.Console.WriteLine("PASS: master DebugMode defaults off and suppresses all optional diagnostics through one setting.");
 
+        statusConfig.Bind("Diagnostics", "DebugMode", false).Value = true;
+        status.Reset();
+        int outcomeStart = statusMessages.Count;
+        for (int i = 0; i < 100; i++) status.Result(0, new HeimKit.Features.InfiniteTorches.Models.RefillResult
+            { Object = "1:" + i, Outcome = "fuel_increase", Before = 0, Fuel = 10, Target = 10 });
+        if (statusMessages.Count != outcomeStart + 6 || !statusMessages[^1].Contains(": RESULT |") ||
+            !statusMessages[^1].Contains("delivery acknowledgement unavailable"))
+            throw new Exception("Refill outcomes are unbounded or overstate delivery evidence.");
+        status.Report(0, () => "Pending refill outcomes collected");
+        if (!statusMessages[^1].Contains("omitted_messages_interval=RESULT:94")) throw new Exception("Omitted outcome count missing.");
+        statusConfig.Bind("Diagnostics", "DebugMode", false).Value = false;
+        int offCount = statusMessages.Count;
+        status.Result(60, new HeimKit.Features.InfiniteTorches.Models.RefillResult { Outcome = "timeout" });
+        if (statusMessages.Count != offCount) throw new Exception("Disabled outcome diagnostics emitted a message.");
+
     }
 }
