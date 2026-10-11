@@ -19,4 +19,14 @@ public sealed class WeatherGuardStatus
     public long Commands { get; set; }
     public long WearPasses { get; set; }
     public bool Limited { get; set; }
+    public int Peers { get; set; }
+    public int ReadyPeers { get; set; }
+    public int CharacterWaits { get; set; }
+    public System.Collections.Generic.Dictionary<string, int> Exclusions { get; set; } = new();
+    public System.Collections.Generic.Dictionary<string, int> ReleaseReasons { get; set; } = new();
+    public long OwnerLosses { get; set; }
+    public long WeatherGates { get; set; }
+    public long WetOpportunities { get; set; }
+    public long NativeCommands { get; set; }
+    public long SupportPasses { get; set; }
 }

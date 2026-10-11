@@ -4,7 +4,7 @@
 
 WeatherGuard automatically protects eligible player-built structural pieces from rain and wetness wear on a Windows Valheim dedicated server. Existing creator ownership is preserved. Activation requires no player repair, logout, rejoin or manual refresh. Unclaimed world-generated pieces are not protected or claimed by the current code.
 
-The module uses BepInEx and Harmony and is designed for unmodified clients. Supported game and loader versions are documented in [README.md](../../README.md#supported-environment). Local builds and automated checks pass. Server terrain loading, ownership handover, rain protection, combat, support and multiplayer behavior have not yet been verified in-game.
+The module uses BepInEx and Harmony and is designed for unmodified clients. Supported game and loader versions are documented in [server setup](../server-setup.md#supported-environment).
 
 ## Configuration
 
@@ -27,13 +27,15 @@ Every second, the module gathers nearby and distant world records around ready c
 
 A piece is acquired only when its server instance, its sector and eight neighboring terrain sectors, and surrounding near-sector instances are ready. Readiness is cached per sector for each scan. Its network owner then becomes the server through native ownership replication and force-send. This changes temporary network ownership, not the creator.
 
-Newly spawned instances in retained active regions are kept between scans so ordinary drops and fragments are not prematurely removed. Pieces leaving retained nearby regions, losing ready context or becoming ineligible are released to owner zero for vanilla reassignment.
+Newly spawned instances in retained active regions are kept between scans so ordinary drops and fragments are not prematurely removed. Pieces leaving retained nearby regions, losing ready context or becoming ineligible are released to owner zero for vanilla reassignment, with a forced state send. Each scan checks actual ownership of retained protected pieces and reasserts the server after an observed ownership loss. This observation alone does not identify the writer.
 
 ## Wear and native commands
 
-During a protected server WearNTear.UpdateWear invocation, `m_noRoofWear` is temporarily false. A Harmony finalizer restores the original value, including on exceptions. The outside-active-area early return is bypassed only within the protected wear invocation, allowing native support calculations to run. UpdateWear itself is not skipped.
+The installed game calculates wear only on the current network owner and after its normal loading warmup (normally 30 seconds). Its periodic ownership assignment can try to transfer server-owned pieces near players back to their clients. WeatherGuard retains server ownership through SetOwner guards and rejects protected client packet records, including the SetOwnerInternal path used by incoming packets. Client commands target the owner known at invocation time; stale nonbroadcast targets are redirected to the server.
 
-The flag suppresses rain and underwater wetness wear. Snow, Ashlands/lava and other biome hazards remain outside this protection. Combat, repair, removal, support collapse and resource drops use native code rather than periodic healing or health-delta inference. Their behavior during ownership handover requires live verification.
+A Harmony transpiler gates only the weather-damage branch of WearNTear.UpdateWear for protected, server-owned instances. It preserves the preceding rain-wetness calculation and never changes `m_noRoofWear`, retaining native wetness visuals and fire handling. Installation rejects an unexpected flag-read/branch shape rather than silently applying a different patch. The outside-active-area early return is bypassed only within the protected wear invocation; the finalizer clears that scope even on exceptions. UpdateWear, its warmup and native support calculations are not skipped.
+
+The gate suppresses rain and underwater wetness damage. Snow, Ashlands/lava and other biome hazards remain outside this protection. Combat, repair, removal, support collapse and resource drops use native code rather than periodic healing or health-delta inference.
 
 ## Client-update guards
 
@@ -59,9 +61,13 @@ Disabling, shutdown or module failure deactivates patches and releases network o
 
 ## Logging
 
-Standard logs report configuration, enabled/disabled state, readiness, first acquisition count, capacity warnings and errors. DebugMode adds up to six acquisition samples per 60 seconds and one status summary per 60 seconds.
+Standard logs report configuration, enabled/disabled state, readiness, first acquisition count, capacity warnings and errors. DebugMode adds one two-line summary per 60 seconds. Acquisition, eligibility, context and ownership streams each have an independent limit of six detailed samples per 60 seconds. Native damage/repair/removal receiver samples have a separate limit of six. Wear evidence is limited to three distinct protected pieces and three distinct unprotected structural controls per 60 seconds; one object cannot consume all wear samples in a window. Samples contain object IDs, prefab names and positions to identify the object. Persistent creator and platform account IDs are not logged.
 
-Summaries contain protected/eligible counts, terrain/instance/context waits, region/object counts, acquisition/release totals, blocked client records and broadcasts, prevented ownership transfers, routed owner commands and protected UpdateWear invocation counts. Invocation counts and readiness logs do not establish successful rain prevention. Persistent creator and platform account IDs are not logged.
+Summaries distinguish current-scan candidate, exclusion, release-reason and ready-character counts from controller-lifetime transition/guard counters. Actual entry into the protected weather gate and completed native support passes are counted separately from UpdateWear invocations. With DebugMode enabled, wet opportunities count gate entries with native wetness, health above half and no shield; they do not measure a continuous 60-second wet interval or prove client delivery. Gate evidence can remain zero during warmup even when invocation counts increase.
+
+Context samples identify the first missing terrain sector or prefab-backed surrounding instance, retention membership, zone generation and server terrain readiness. Ownership samples show previous/requested/current owner, releases with reasons and observed loss followed by reassertion. Native receiver samples give command name, owner and health before/after; receiving a command does not guarantee a health change or observed resource drops.
+
+Wear samples record owner, eligibility, warmup, actual gate entry/suppression, server environment/reference position, cached roof, shield, underwater state, cached health fraction, maximum health, rain timer, removability and health before/after. NoBuildingFall and removability are reported because vanilla suppresses wear damage for that modifier or a nonremovable piece, even for controls. These are server observations; unowned controls run their wear on clients. Client weather and wear timers are not available with unmodified clients, and server weather at its reference position can differ from player weather. Health changes alone never establish their cause.
 
 ## Source responsibilities
 
@@ -69,14 +75,16 @@ Summaries contain protected/eligible counts, terrain/instance/context waits, reg
 | --- | --- |
 | WeatherGuard.cs | Settings construction, compatibility, module lifecycle and failure isolation. |
 | WeatherGuardSettings.cs | Feature configuration bindings and defaults. |
-| WeatherGuardController.cs | Region loading, readiness, acquisition, release and operational counters. |
-| WeatherGuardDiagnostics.cs | Debug summaries, acquisition sample formatting, logging limits and reset. |
+| WeatherGuardController.cs | Region loading, readiness, acquisition/release, ownership reconciliation, native evidence collection and operational counters. |
+| WeatherGuardDiagnostics.cs | Debug gating, summaries/evidence formatting, independent sample limits and reset. |
 | WeatherGuardPatches.cs | Harmony hooks for processing, ownership and networking. |
 | WeatherGuardRules.cs | Eligibility, acquisition gates, routing and revision rules. |
 | WeatherGuardNetworkFilter.cs | Selective packet filtering and cursor preservation. |
 | Models/WeatherGuardStatus.cs | Processing-counter snapshot supplied to diagnostics. |
+| Models/WearObservation.cs | Bounded native wear/command evidence supplied to diagnostics. |
+| Models/WearProcessingState.cs | Invocation scope and diagnostic observation restored by the wear finalizer. |
 | Models/Routing.cs | Routing decision enum used by rules and patches. |
 
-User installation, testing and troubleshooting instructions belong in [README.md](../../README.md). Project design belongs in [architecture.md](../architecture.md); file placement and development procedures belong in [contributing.md](../contributing.md).
+User installation and general configuration belong in [server setup](../server-setup.md); feature usage and troubleshooting belong in the [feature guide](../features/weather-guard.md). Project design belongs in [architecture.md](../architecture.md); file placement and development procedures belong in [contributing.md](../contributing.md).
 
 ConfigurationLoader manages the shared file, and DiagnosticsSettings binds the common debug switch. The main class activates the controller only after enable and compatibility checks pass and world services are ready; the controller performs gameplay work and reports processing failures to the main class.

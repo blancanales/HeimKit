@@ -24,6 +24,14 @@ internal sealed class WeatherGuardController : IDisposable
     private readonly Dictionary<ZDOID, ZDO> _protected = new();
     private readonly Dictionary<Vector2s, bool> _readyContexts = new();
     private readonly List<ZDOID> _release = new();
+    private readonly Dictionary<string, int> _exclusions = new();
+    private readonly Dictionary<string, int> _releaseReasons = new();
+    private readonly FieldInfo _roof = AccessTools.Field(typeof(WearNTear), "m_haveRoof");
+    private readonly FieldInfo _shield = AccessTools.Field(typeof(WearNTear), "m_shieldChangeID");
+    private readonly FieldInfo _rainTimer = AccessTools.Field(typeof(WearNTear), "m_rainTimer");
+    private readonly MethodInfo _shouldUpdate = AccessTools.Method(typeof(WearNTear), "ShouldUpdate");
+    private readonly MethodInfo _underWater = AccessTools.Method(typeof(WearNTear), "IsUnderWater");
+    private readonly MethodInfo _canBeRemoved = AccessTools.Method(typeof(WearNTear), "CanBeRemoved");
     private readonly MethodInfo _createZones = typeof(ZoneSystem).GetMethod("CreateLocalZones", BindingFlags.Instance | BindingFlags.NonPublic)!;
     private readonly FieldInfo _instancesField = AccessTools.Field(typeof(ZNetScene), "m_instances");
     private float _nextRefresh, _nextTerrain;
@@ -31,6 +39,9 @@ internal sealed class WeatherGuardController : IDisposable
     private bool _announced;
     private int _eligible, _waiting, _waitingTerrain, _waitingObjects, _waitingInstance;
     private long _acquired, _released, _blockedData, _blockedOwner, _blockedBroadcast, _commands, _wearPasses;
+    private long _ownerLosses, _weatherGates, _wetOpportunities;
+    private long _nativeCommands, _supportPasses;
+    private int _peers, _readyPeers, _characterWaits;
     internal static WeatherGuardController? Active { get; private set; }
     internal long ServerId => ZDOMan.GetSessionID();
     internal bool Running => Active == this && _module.IsActive && ReferenceEquals(_manager, ZDOMan.instance) &&
@@ -40,13 +51,18 @@ internal sealed class WeatherGuardController : IDisposable
     { _module = module; _log = log; _diagnostics = new WeatherGuardDiagnostics(log, debug); _manager = ZDOMan.instance; _patches = new WeatherGuardPatches(); }
     public void Install()
     {
-        if (_createZones == null || _instancesField == null) throw new MissingMemberException("WeatherGuard terrain/instance APIs unavailable.");
+        if (_createZones == null || _instancesField == null || _roof == null || _shield == null || _rainTimer == null ||
+            _shouldUpdate == null || _underWater == null || _canBeRemoved == null) throw new MissingMemberException("WeatherGuard terrain/instance/wear evidence APIs unavailable.");
         Active = this;
         try { _patches.Install(); } catch { Dispose(); throw; }
     }
     internal bool Protects(ZDOID id) => Running && _protected.ContainsKey(id);
     internal void Fail(Exception error) => _module.Fail(error);
-    internal void OwnerBlocked() => _blockedOwner++;
+    internal void OwnerBlocked(ZDO zdo, long requested)
+    {
+        _blockedOwner++;
+        _diagnostics.Sample(Time.unscaledTime, "ownership", () => $"ownership transfer prevented; {Describe(zdo)}; current owner={zdo.GetOwner()}; requested owner={requested}; retained owner={ServerId}");
+    }
     internal void DataBlocked(int count) => _blockedData += count;
     internal void Reassert(ZDOID id, uint revision, ushort ownerRevision)
     {
@@ -64,6 +80,65 @@ internal sealed class WeatherGuardController : IDisposable
     }
     internal void CommandRouted() => _commands++;
     internal void WearPass() => _wearPasses++;
+    internal void WeatherGate(WearNTear wear)
+    {
+        _weatherGates++;
+        if (!_diagnostics.DebugEnabled) return;
+        int shield = (int)_shield.GetValue(wear);
+        if (wear.m_noRoofWear && wear.GetHealthPercentage() > 0.5f &&
+            !ShieldGenerator.IsInsideShieldCached(wear.transform.position, ref shield) && wear.IsWet()) _wetOpportunities++;
+    }
+    internal WearObservation? BeginWear(WearNTear wear, ZNetView view, bool protectedPiece, float time)
+    {
+        if (!_diagnostics.DebugEnabled) return null;
+        var zdo = view.GetZDO();
+        var reason = Eligibility(zdo, ZNetScene.instance);
+        // Observe only structural weather-wearing controls, not every world object.
+        if (!protectedPiece && reason != "world-created" && reason != "eligible") return null;
+        if (!_diagnostics.TryWearSample(Time.unscaledTime, zdo.m_uid.ToString(), protectedPiece)) return null;
+        int shield = (int)_shield.GetValue(wear);
+        bool shielded = ShieldGenerator.IsInsideShieldCached(wear.transform.position, ref shield);
+        return new WearObservation
+        {
+            Object = Describe(zdo), Protected = protectedPiece, Owner = view.IsOwner(),
+            Warmup = !(bool)_shouldUpdate.Invoke(wear, new object[] { time }),
+            Before = zdo.GetFloat(ZDOVars.s_health, wear.m_health),
+            Context = $"eligibility={reason}; owner={zdo.GetOwner()}; server={ServerId}; native weather wear={wear.m_noRoofWear}; wear time={time:F1}; environment={EnvMan.instance?.GetCurrentEnvironment()?.m_name ?? "unavailable"}; server reference={ZNet.instance.GetReferencePosition()}; env wet={EnvMan.IsWet()}; cached roof={_roof.GetValue(wear)}; shielded={shielded}; underwater={_underWater.Invoke(wear, Array.Empty<object>())}; cached health fraction={wear.GetHealthPercentage():F3}; max health={wear.m_health}; rain timer={_rainTimer.GetValue(wear)}; support wear={wear.m_noSupportWear}; removable={_canBeRemoved.Invoke(wear, Array.Empty<object>())}; NoBuildingFall={ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoBuildingFall)}"
+        };
+    }
+    internal void EndWear(WearNTear wear, WearObservation? observation, Exception? error)
+    {
+        if (observation == null) return;
+        var view = wear.GetComponent<ZNetView>();
+        float? after = view != null && view.IsValid() ? view.GetZDO().GetFloat(ZDOVars.s_health, wear.m_health) : (float?)null;
+        _diagnostics.Wear(observation, after, error != null);
+    }
+    internal WearObservation? BeginCommand(WearNTear wear, string method)
+    {
+        var view = wear.GetComponent<ZNetView>();
+        if (view == null || !view.IsValid() || !Protects(view.GetZDO().m_uid)) return null;
+        _nativeCommands++;
+        if (!_diagnostics.ReserveCommand(Time.unscaledTime)) return null;
+        var zdo = view.GetZDO();
+        return new WearObservation { Object = Describe(zdo), Before = zdo.GetFloat(ZDOVars.s_health, wear.m_health),
+            Context = $"method={method}; local owner={view.IsOwner()}; owner={zdo.GetOwner()}; server={ServerId}" };
+    }
+    internal void EndCommand(WearNTear wear, WearObservation? observation, Exception? error)
+    {
+        if (observation == null) return;
+        var view = wear.GetComponent<ZNetView>();
+        float? health = view != null && view.IsValid() ? view.GetZDO().GetFloat(ZDOVars.s_health, wear.m_health) : (float?)null;
+        _diagnostics.Command(observation, health, error != null);
+    }
+    internal void SupportPass(WearNTear wear)
+    {
+        var view = wear.GetComponent<ZNetView>();
+        if (view != null && view.IsValid() && view.IsOwner() && Protects(view.GetZDO().m_uid)) _supportPasses++;
+    }
+    private string Describe(ZDO zdo)
+        => $"object={zdo.m_uid}; prefab={ZNetScene.instance.GetPrefab(zdo.GetPrefab())?.name ?? "unknown"}; position={zdo.GetPosition()}; sector={zdo.GetSector()}";
+    private static void Count(Dictionary<string, int> counts, string reason)
+    { counts.TryGetValue(reason, out int count); counts[reason] = count + 1; }
 
     public void Tick(float now)
     {
@@ -73,11 +148,15 @@ internal sealed class WeatherGuardController : IDisposable
         if (manager == null || scene == null || zones == null) return;
         _near.Clear(); _distant.Clear(); _nearIds.Clear(); _distantIds.Clear(); _regions.Clear(); _positions.Clear(); _readyContexts.Clear();
         bool limited = false;
+        _peers = _readyPeers = _characterWaits = 0; _exclusions.Clear(); _releaseReasons.Clear();
         foreach (var peer in ZNet.instance.GetPeers())
         {
-            if (!peer.IsReady() || peer.m_characterID.IsNone()) continue;
+            _peers++;
+            if (!peer.IsReady()) continue;
+            _readyPeers++;
+            if (peer.m_characterID.IsNone()) { _characterWaits++; continue; }
             var character = manager.GetZDO(peer.m_characterID);
-            if (character == null || !character.IsValid() || character.GetOwner() != peer.m_uid) continue;
+            if (character == null || !character.IsValid() || character.GetOwner() != peer.m_uid) { _characterWaits++; continue; }
             var position = character.GetPosition();
             var sector = ZoneSystem.GetZone(position);
             if (_regions.Contains(sector)) continue;
@@ -98,22 +177,40 @@ internal sealed class WeatherGuardController : IDisposable
         foreach (var pair in _protected)
         {
             var zdo = manager.GetZDO(pair.Key);
-            if (zdo == null || !zdo.IsValid() || !_nearIds.Contains(pair.Key) || !IsEligible(zdo, scene) || !Ready(zdo, scene, zones))
-                _release.Add(pair.Key);
+            string reason = zdo == null || !zdo.IsValid() ? "destroyed/invalid" : !_nearIds.Contains(pair.Key) ? "outside retained region" :
+                Eligibility(zdo, scene) != "eligible" ? Eligibility(zdo, scene) : !Ready(zdo, scene, zones) ? "context lost" : "";
+            if (reason != "")
+            { _release.Add(pair.Key); Count(_releaseReasons, reason); _diagnostics.Sample(now, "ownership", () => $"server control released; object={pair.Key}; reason={reason}; previous owner={pair.Value.GetOwner()}"); }
+            else if (zdo!.GetOwner() != ServerId)
+            {
+                _ownerLosses++;
+                _diagnostics.Sample(now, "ownership", () => $"ownership loss observed; {Describe(zdo)}; observed owner={zdo.GetOwner()}; reasserting server={ServerId}; cause unknown");
+                zdo.SetOwner(ServerId); manager.ForceSendZDO(zdo.m_uid);
+            }
         }
         foreach (var id in _release) Release(id);
         _eligible = _waiting = _waitingTerrain = _waitingObjects = _waitingInstance = 0;
         foreach (var zdo in _near)
         {
-            if (!IsEligible(zdo, scene)) continue;
+            string exclusion = Eligibility(zdo, scene);
+            if (exclusion != "eligible")
+            {
+                Count(_exclusions, exclusion);
+                if (exclusion != "not a wear piece") _diagnostics.Sample(now, "eligibility", () => $"excluded; {Describe(zdo)}; reason={exclusion}; creator present={zdo.GetLong(ZDOVars.s_creator) != 0}; health={zdo.GetFloat(ZDOVars.s_health, -1f)}");
+                continue;
+            }
             _eligible++;
             if (_protected.ContainsKey(zdo.m_uid)) continue;
-            if (_protected.Count >= WeatherGuardRules.MaximumProtected) { limited = true; break; }
+            if (_protected.Count >= WeatherGuardRules.MaximumProtected) { limited = true; continue; }
             bool instanceReady = scene.FindInstance(zdo) != null;
             bool terrainReady = TerrainReady(zdo, zones);
             bool objectsReady = terrainReady && ContextReady(zdo, scene, zones);
             if (!WeatherGuardRules.MayAcquire(instanceReady, terrainReady, objectsReady, true))
-            { _waiting++; if (!terrainReady) _waitingTerrain++; if (!instanceReady) _waitingInstance++; if (terrainReady && !objectsReady) _waitingObjects++; continue; }
+            {
+                _waiting++; if (!terrainReady) _waitingTerrain++; if (!instanceReady) _waitingInstance++; if (terrainReady && !objectsReady) _waitingObjects++;
+                _diagnostics.Sample(now, "context", () => $"context blocked; {Describe(zdo)}; instance={instanceReady}; terrain={terrainReady}; surrounding objects={objectsReady}; locations generated={zones.LocationsGenerated}; server active terrain={zones.IsActiveAreaLoaded()}; {ContextBlocker(zdo, scene, zones)}");
+                continue;
+            }
             // Insert before changing owner so ownership guards cover the whole transition.
             _protected.Add(zdo.m_uid, zdo);
             // A server instance may precede the client's creator-data update. Refresh only
@@ -121,10 +218,11 @@ internal sealed class WeatherGuardController : IDisposable
             var piece = scene.FindInstance(zdo).GetComponent<Piece>();
             AccessTools.Field(typeof(Piece), "m_creator").SetValue(piece, zdo.GetLong(ZDOVars.s_creator));
             AccessTools.Field(typeof(Piece), "m_creatorPlatformUserIDIndex").SetValue(piece, zdo.GetInt(ZDOVars.s_creatorIndex, -1));
+            long previousOwner = zdo.GetOwner();
             zdo.SetOwner(ServerId);
             manager.ForceSendZDO(zdo.m_uid);
             _acquired++;
-            _diagnostics.Sample(now, () => $"server control acquired; object={zdo.m_uid}; prefab={scene.GetPrefab(zdo.GetPrefab()).name}; creator preserved=true; health={zdo.GetFloat(ZDOVars.s_health, -1f)}; owner={ServerId}");
+            _diagnostics.Sample(now, () => $"server control acquired; {Describe(zdo)}; creator preserved=true; health={zdo.GetFloat(ZDOVars.s_health, -1f)}; previous owner={previousOwner}; owner={zdo.GetOwner()}; wear enabled={scene.FindInstance(zdo).GetComponent<WearNTear>().enabled}");
         }
         if (_protected.Count > 0 && !_announced)
         {
@@ -140,26 +238,44 @@ internal sealed class WeatherGuardController : IDisposable
             WaitingTerrain = _waitingTerrain, WaitingInstance = _waitingInstance, WaitingObjects = _waitingObjects,
             Regions = _regions.Count, Nearby = _near.Count, Distant = _distant.Count,
             Acquired = _acquired, Released = _released, BlockedData = _blockedData, BlockedOwner = _blockedOwner,
-            BlockedBroadcast = _blockedBroadcast, Commands = _commands, WearPasses = _wearPasses, Limited = limited
+            BlockedBroadcast = _blockedBroadcast, Commands = _commands, WearPasses = _wearPasses, Limited = limited,
+            Peers = _peers, ReadyPeers = _readyPeers, CharacterWaits = _characterWaits,
+            Exclusions = new Dictionary<string, int>(_exclusions), ReleaseReasons = new Dictionary<string, int>(_releaseReasons),
+            OwnerLosses = _ownerLosses, WeatherGates = _weatherGates, WetOpportunities = _wetOpportunities,
+            NativeCommands = _nativeCommands, SupportPasses = _supportPasses
         });
     }
-    private static bool IsEligible(ZDO zdo, ZNetScene scene)
+    private static string Eligibility(ZDO zdo, ZNetScene scene)
     {
-        if (!zdo.IsValid()) return false;
+        if (!zdo.IsValid()) return "invalid world data";
         var prefab = scene.GetPrefab(zdo.GetPrefab());
         // Container inventory changes require client ownership and must not be filtered.
-        return prefab != null && prefab.TryGetComponent<Piece>(out var piece) && prefab.TryGetComponent<WearNTear>(out var wear) &&
-            WeatherGuardRules.Eligible(zdo.GetLong(ZDOVars.s_creator), zdo.Persistent, wear.m_staticPosition,
+        if (prefab == null) return "missing prefab";
+        if (!prefab.TryGetComponent<Piece>(out var piece) || !prefab.TryGetComponent<WearNTear>(out var wear)) return "not a wear piece";
+        return WeatherGuardRules.Exclusion(zdo.GetLong(ZDOVars.s_creator), zdo.Persistent, wear.m_staticPosition,
                 wear.m_noRoofWear, zdo.GetFloat(ZDOVars.s_health, wear.m_health),
                 piece.m_category == Piece.PieceCategory.BuildingWorkbench || piece.m_category == Piece.PieceCategory.BuildingStonecutter || piece.m_category == Piece.PieceCategory.DeepNorth,
                 prefab.GetComponent<Container>() != null);
+    }
+    private string ContextBlocker(ZDO zdo, ZNetScene scene, ZoneSystem zones)
+    {
+        var sector = zdo.GetSector();
+        for (int x = sector.x - 1; x <= sector.x + 1; x++)
+        for (int y = sector.y - 1; y <= sector.y + 1; y++)
+            if (!zones.IsZoneLoaded(new Vector2s(x, y))) return $"first missing terrain=({x},{y})";
+        var objects = new List<ZDO>();
+        _manager.FindSectorObjects(sector, new SimulationDistance(1, 0), objects);
+        foreach (var candidate in objects)
+            if (scene.GetPrefab(candidate.GetPrefab()) != null && scene.FindInstance(candidate) == null)
+                return $"first missing context object: {Describe(candidate)}; retained near={_nearIds.Contains(candidate.m_uid)}; retained distant={_distantIds.Contains(candidate.m_uid)}";
+        return "no missing context object found in diagnostic sample";
     }
     private static bool TerrainReady(ZDO zdo, ZoneSystem zones)
     {
         var sector = zdo.GetSector();
         // Support can cross sector edges: do not take ownership with only the central terrain loaded.
-        for (short x = (short)(sector.x - 1); x <= sector.x + 1; x++)
-        for (short y = (short)(sector.y - 1); y <= sector.y + 1; y++)
+        for (int x = sector.x - 1; x <= sector.x + 1; x++)
+        for (int y = sector.y - 1; y <= sector.y + 1; y++)
             if (!zones.IsZoneLoaded(new Vector2s(x, y))) return false;
         return true;
     }
@@ -207,6 +323,7 @@ internal sealed class WeatherGuardController : IDisposable
         if (!_protected.TryGetValue(id, out var zdo)) return;
         _protected.Remove(id);
         if (zdo.IsValid() && zdo.GetOwner() == ServerId) zdo.SetOwner(0L);
+        if (zdo.IsValid()) _manager.ForceSendZDO(id);
         _released++;
     }
     public void Dispose()

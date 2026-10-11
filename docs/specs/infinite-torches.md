@@ -4,7 +4,7 @@
 
 Infinite Torches periodically refills eligible torches to their ordinary maximum fuel on a Windows Valheim dedicated server, without spending player inventory materials. It uses existing vanilla networking and is designed for unmodified clients. Environmental conditions can still extinguish a fueled torch.
 
-Supported game and loader versions are documented in [README.md](../../README.md#supported-environment). Local builds and automated checks pass. Wooden-torch refilling and lighting passed an initial live test; broader multiplayer, ownership-transfer and crossplay behavior remain unverified.
+Supported game and loader versions are documented in [server setup](../server-setup.md#supported-environment).
 
 ## Configuration
 
@@ -64,6 +64,6 @@ Removing the plugin leaves ordinary fuel values to burn normally. No custom worl
 | Models/RefillObservation.cs | Observed owner and fuel data for reconciliation. |
 | Models/RefillRequest.cs | Pending request owner, fuel target and timing data. |
 
-User installation, testing and troubleshooting instructions belong in [README.md](../../README.md). Project design belongs in [architecture.md](../architecture.md); file placement and development procedures belong in [contributing.md](../contributing.md).
+User installation and general configuration belong in [server setup](../server-setup.md); feature usage and troubleshooting belong in the [feature guide](../features/infinite-torches.md). Project design belongs in [architecture.md](../architecture.md); file placement and development procedures belong in [contributing.md](../contributing.md).
 
 ConfigurationLoader manages the shared file, and DiagnosticsSettings binds the common debug switch. The main class activates the controller only after enable and compatibility checks pass; the controller performs gameplay work and reports processing failures to the main class.

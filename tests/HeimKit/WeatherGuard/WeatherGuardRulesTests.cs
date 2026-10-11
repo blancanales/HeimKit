@@ -35,6 +35,9 @@ internal static class WeatherGuardRulesTests
             "client data Harmony parameters match installed game");
         Check(WeatherGuardRules.Eligible(111, true, true, true, 234f, true, false), "player-built piece is primary candidate");
         Check(!WeatherGuardRules.Eligible(0, true, true, true, 234f, true, false), "world piece is unchanged");
+        Check(WeatherGuardRules.Exclusion(0, true, true, true, 234f, true, false) == "world-created", "world control reason");
+        Check(WeatherGuardRules.Exclusion(0, true, true, true, 234f, true, true) == "container", "container exclusion takes precedence over creator");
+        Check(WeatherGuardRules.Exclusion(111, true, true, false, 234f, true, false) == "weather immune", "immune material reason");
         foreach (float health in new[] { 0f, -1f, float.NaN, float.PositiveInfinity })
             Check(!WeatherGuardRules.Eligible(111, true, true, true, health, true, false), "dead/invalid health excluded");
         Check(!WeatherGuardRules.Eligible(111, true, true, true, 234f, true, true), "inventory containers are not seized");

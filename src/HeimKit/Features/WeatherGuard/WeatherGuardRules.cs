@@ -7,8 +7,17 @@ public static class WeatherGuardRules
     public const int MaximumObjects = 32768;
     public const int MaximumProtected = 8192;
     public static bool Eligible(long creator, bool persistent, bool staticPiece, bool hasWeatherWear, float health, bool buildingCategory, bool container)
-        => creator != 0 && persistent && staticPiece && hasWeatherWear && buildingCategory && !container && health > 0 &&
-            !float.IsNaN(health) && !float.IsInfinity(health);
+        => Exclusion(creator, persistent, staticPiece, hasWeatherWear, health, buildingCategory, container) == "eligible";
+    public static string Exclusion(long creator, bool persistent, bool staticPiece, bool hasWeatherWear, float health, bool buildingCategory, bool container)
+    {
+        if (container) return "container";
+        if (!buildingCategory) return "non-building category";
+        if (!persistent) return "nonpersistent";
+        if (!staticPiece) return "moving piece";
+        if (!hasWeatherWear) return "weather immune";
+        if (health <= 0 || float.IsNaN(health) || float.IsInfinity(health)) return "dead/invalid health";
+        return creator == 0 ? "world-created" : "eligible";
+    }
     public static bool MayAcquire(bool instanceLoaded, bool terrainReady, bool surroundingObjectsReady, bool withinCapacity)
         => instanceLoaded && terrainReady && surroundingObjectsReady && withinCapacity;
     public static Routing Route(int method, long target, long server)

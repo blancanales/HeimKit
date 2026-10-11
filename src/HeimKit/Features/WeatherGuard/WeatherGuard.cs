@@ -45,7 +45,7 @@ public sealed class WeatherGuard : IServerModule
         {
             _controller = new WeatherGuardController(this, _logger, _settings.DebugMode.Value);
             _controller.Install();
-            _logger.LogInfo("WeatherGuard: ready. Server processing and client-update guards installed; awaiting eligible player-built structures. Rain/water wear is suppressed only during protected server wear passes.");
+            _logger.LogInfo("WeatherGuard: ready. Server processing, weather-damage gate and client-update guards installed; awaiting eligible player-built structures. Native wetness, support and commands retained; live verification required.");
         }
         _controller.Tick(now);
     }

@@ -2,6 +2,12 @@
 
 Use this guide when adding or changing code. Read the relevant feature specification and inspect the working tree first. Preserve unrelated local edits. Architecture explains the design; this guide explains how to work within it.
 
+## Development references
+
+Use the [plugin development and Thunderstore references](development.md#plugin-development-and-thunderstore-references) for BepInEx plugin setup, Valheim modding examples, Harmony patch semantics and package requirements. Consult the relevant guide before introducing a new patch mechanism or changing loader integration. Follow this repository's [supported environment](server-setup.md#supported-environment) and build commands when tutorial examples use different dependencies or framework targets.
+
+For gameplay or networking changes, inspect the actual methods and ownership paths in the installed supported game assemblies. Record implemented behavior and material limitations in the current feature specification. External guides supplement this procedure; they do not prove dedicated-server feasibility or live correctness.
+
 ## Set up a feature
 
 Add a feature only when requested. Establish its intended behavior and dedicated-server-only feasibility before writing gameplay code. Inspect the actual game APIs and ownership behavior; identify blockers for unmodified clients. Keep the feature specification current as implementation proceeds, without a task diary or completion checklist.
@@ -17,24 +23,47 @@ Add a feature only when requested. Establish its intended behavior and dedicated
 
 The current main classes construct their settings internally during the central loader callback. This preserves the existing registration flow; settings binding still happens before configuration saving and module initialization. ConfigurationLoader remains responsible for the shared file, and DiagnosticsSettings defines the common troubleshooting switch.
 
-## Place tests
-
-Use `tests/HeimKit/`, with `HeimKit.Tests.csproj` referencing the source project. Feature folders use the chosen feature name directly, using the same responsibility grouping as the source:
-
-| Source responsibility | Test location |
-| --- | --- |
-| Features/InfiniteTorches | tests/HeimKit/InfiniteTorches/ |
-| Features/WeatherGuard | tests/HeimKit/WeatherGuard/ |
-| Configuration/ConfigurationLoader | tests/HeimKit/Configuration/ConfigurationLoaderTests.cs |
-| Shared/<ClassName> | tests/HeimKit/Shared/<ClassName>Tests.cs |
-| Feature Models/<TypeName> | tests/HeimKit/<FeatureName>/Models/<TypeName>Tests.cs |
-
-Every test class and its file ends in `Tests`, never Checks or Test. Program.cs is only the executable runner that invokes suites; it contains no tests. Keep existing check logic when reorganizing. Create folders only when they contain meaningful tests. Do not invent tests for empty models or mirror trivial implementation details.
-
-Verify enable/disable behavior, configuration preservation, logging and relevant feature behavior. Test independent operation and relevant combinations. Local checks cannot prove Unity-world or client networking behavior. Use README.md for build commands and live test procedures; report local and live results separately. Build output remains in the standard source bin directory.
-
 ## Update documentation
 
-Update the current feature specification with implemented behavior, configuration, algorithms, file responsibilities and limitations. Keep one specification per feature. Put installation, supported versions, user test instructions and troubleshooting in README.md. Add verified functionality to its feature descriptions; distinguish code that still awaits live verification. Update architecture when the design changes and this guide when contributor procedures change. Keep shared documentation independent of AI tools or vendors.
+### Main README
+
+The root `README.md` introduces and promotes HeimKit for prospective users and server owners. It should explain the application's value, what users can expect and where to find details. Include:
+
+- The project name, purpose and practical benefits for users.
+- A high-level introduction to each feature: what it does, the user-facing benefit, expected behavior and the essential scope or limitations. A short paragraph is appropriate; feature descriptions are not restricted to one sentence.
+- A concise compatibility overview covering the supported platform, required loader and client installation expectations, linked to [Supported environment](server-setup.md#supported-environment). Do not repeat version values in the README.
+- Links from each feature to its usage guide and technical specification under `docs/`.
+- A concise world-corruption disclaimer requiring a backup before installing or enabling the mod, linked to `docs/world-backups.md` for the backup procedure.
+- A general usage disclaimer at the bottom of the README stating that the mod can corrupt worlds and that we are not responsible for resulting damage or data loss. Put specific corruption risks and prevention instructions in the relevant operational document, not in that general disclaimer.
+- A documentation index with short descriptions and links.
+- License information.
+
+Keep the README focused on the user's decision to use HeimKit. Put detailed configuration blocks, setting tables, eligibility rules, algorithms, implementation/class responsibilities, diagnostic fields or sample logs, installation/build commands, full dependency/runtime version tables, troubleshooting steps and external development reference lists in the documents below and link to them. High-level feature expectations and essential limitations belong in the README; their technical explanation belongs under `docs/`. Testing information follows the chat-only rule below.
+
+### Detailed documents
+
+| Content | Destination |
+| --- | --- |
+| Supported game/loader/runtime versions, installation, shared configuration, general troubleshooting and removal | `docs/server-setup.md` |
+| World-save backup and recovery instructions for File Explorer and in-game save management | `docs/world-backups.md` |
+| Build commands, development environment and external BepInEx/Valheim/Harmony/Thunderstore references | `docs/development.md` |
+| Feature usage, user-facing limitations and diagnostic semantics | `docs/features/<feature-name>.md` |
+| Implemented feature behavior, configuration contract, eligibility, algorithms, ownership/network rules, bounds and source responsibilities | `docs/specs/<feature-name>.md` |
+| Shared design, code placement, naming, lifecycle and documentation ownership | `docs/architecture.md` |
+| Contributor workflow and the README/content placement rules | `docs/contributing.md` |
+| Required-reading pointers, authorized scope and operational boundaries | `AGENTS.md` |
+
+Keep one current guide and one current specification per feature. Guides explain how to use a feature; specifications define its implemented behavior. Maintain each detailed fact in its owning document and link from other documents rather than copying it. Update architecture when the design changes and this guide when contributor procedures change. Keep shared documentation independent of AI tools or vendors.
+
+### Supported versions have one source
+
+List supported application, game, loader, runtime and framework versions only in [Supported environment](server-setup.md#supported-environment). Every other document must link to that section instead of repeating exact versions, version ranges, loader major versions or framework target values. This applies to the README, feature guides, specifications, development references and contributor instructions. When compatibility changes, update this one documentation source along with the relevant code guards or build definitions. Keep required version constants in executable code; this rule governs documentation.
 
 Do not create development journals, task-tracking Markdown, completion checklists or abandoned-design histories. Do not commit generated output, proprietary assemblies, worlds, credentials or machine-specific paths. Leave local changes reviewable; commit and push only when requested. Installing or restarting a live server requires explicit authorization.
+
+
+### Testing information belongs in chat only
+
+Never add testing information to persistent documents, including README files, guides, specifications, contributor documents or development references. Do not store test procedures, test commands, scenarios, expected test results, pass/fail reports, validation-status notes, test evidence requests or testing checklists in those documents. Do not move that information to another file or an appendix.
+
+The assistant gives the user it is communicating with the relevant testing instructions directly in the active chat, including what to test, expected behavior and what evidence to return. Report automated results and observed gameplay outcomes in chat, clearly distinguishing observations from inference. This documentation rule does not remove executable test code or change the need to check implementation changes. Persistent documents describe behavior, configuration, design, operational usage and diagnostic semantics.
