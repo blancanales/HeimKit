@@ -88,15 +88,14 @@ internal sealed class WeatherGuardPatches : IDisposable
             // Inspect only the routing header first. Unrelated vanilla RPCs (such as
             // large map transfers) must not inherit WeatherGuard's payload limits.
             if (!WeatherGuardNetworkFilter.RelevantRouted(pkg, active.Protects)) return true;
-            if (pkg.Size() > WeatherGuardNetworkFilter.MaximumPacketBytes) throw new System.IO.InvalidDataException("Oversized routed packet.");
-            var data = new ZRoutedRpc.RoutedRPCData(); data.Deserialize(pkg);
-            pkg.SetPos(cursor);
+            var data = WeatherGuardNetworkFilter.ReadRouted(pkg);
             if (!Connected(rpc, null)) return true;
             if (!Connected(rpc, data.m_senderPeerID)) { active.BroadcastBlocked(); return false; }
             bool changed = false;
             if (data.m_targetZDO.IsNone() && data.m_methodHash == Destroyed)
             {
-                var destroyed = data.m_parameters.ReadPackage();
+                var destroyed = WeatherGuardNetworkFilter.ReadPackage(data.m_parameters);
+                if (data.m_parameters.GetPos() != data.m_parameters.Size()) throw new System.IO.InvalidDataException("Trailing destruction parameters.");
                 var filtered = WeatherGuardNetworkFilter.FilterDestroyed(destroyed, active.Protects, out int blocked, active.Resend);
                 if (blocked == 0) return true;
                 data.m_parameters = new ZPackage(); data.m_parameters.Write(filtered);

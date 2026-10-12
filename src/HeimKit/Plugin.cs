@@ -5,38 +5,41 @@ using BepInEx.Logging;
 using HeimKit.Configuration;
 using HeimKit.Features.InfiniteTorches;
 using HeimKit.Features.WeatherGuard;
-using HeimKit.Features.MajoritySleep;
-using HeimKit.Features.AfkSleepExclusion;
-using HeimKit.Features.AfkRaidProtection;
+using HeimKit.Features.AFKNightWatch;
 using HeimKit.Shared;
+using HeimKit.Shared.Players;
+using HeimKit.Features.AFKRaidWatch;
 using UnityEngine;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.1.20")]
+[BepInPlugin("heimkit", "HeimKit", "0.1.22")]
 [BepInProcess("valheim_server.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
     private readonly List<IServerModule> _features = new();
 
+    private PlayerServices? _players;
+
     private void Awake()
     {
         DiagnosticLog.StartSession();
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting", new (string, object?)[] { ("version", "0.1.20"), ("log_schema", 1) });
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.22.");
         try
         {
             ConfigurationLoader.Load(Paths.ConfigPath, Logger, config =>
             {
-                Register(() => new InfiniteTorches(config, Logger), "Infinite Torches");
-                Register(() => new WeatherGuard(config, Logger), "WeatherGuard");
-                Register(() => new MajoritySleep(config, Logger), "MajoritySleep");
-                Register(() => new AfkSleepExclusion(config, Logger), "AfkSleepExclusion");
-                Register(() => new AfkRaidProtection(config, Logger), "AfkRaidProtection");
+                _players = new PlayerServices(config, Logger);
+                Register(() => new InfiniteTorches(config, Logger, _players), "Infinite Torches");
+                Register(() => new WeatherGuard(config, Logger, _players), "WeatherGuard");
+                Register(() => new AFKNightWatch(config, Logger, _players), "AFKNightWatch");
+                Register(() => new AFKRaidWatch(config, Logger, _players), "AFKRaidWatch");
                 return config;
             });
         }
         catch (Exception ex)
         {
+            _players?.Dispose(); _players = null;
             _features.Clear();
             DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, $"modules DISABLED because configuration setup failed: {ex.Message}", level: LogLevel.Error);
             return;
@@ -49,7 +52,7 @@ public sealed class Plugin : BaseUnityPlugin
             }
             catch (Exception ex)
             {
-                feature.Shutdown();
+                ModuleCleanup.Run(Logger, feature.Name, feature.Shutdown);
                 DiagnosticLog.Write(Logger, feature.Name, DiagnosticEvent.Lifecycle, $"DISABLED after startup error: {ex}", level: LogLevel.Error);
             }
         }
@@ -63,6 +66,7 @@ public sealed class Plugin : BaseUnityPlugin
 
     private void Update()
     {
+        _players?.Tick(Time.unscaledTime);
         foreach (var feature in _features)
         {
             // Tick inactive modules too so explicit operator requests remain available.
@@ -73,7 +77,7 @@ public sealed class Plugin : BaseUnityPlugin
             }
             catch (Exception ex)
             {
-                feature.Shutdown();
+                ModuleCleanup.Run(Logger, feature.Name, feature.Shutdown);
                 DiagnosticLog.Write(Logger, feature.Name, DiagnosticEvent.Lifecycle, $"DISABLED after runtime error: {ex}", level: LogLevel.Error);
             }
         }
@@ -83,9 +87,9 @@ public sealed class Plugin : BaseUnityPlugin
     {
         foreach (var feature in _features)
         {
-            try { feature.Shutdown(); }
-            catch (Exception ex) { DiagnosticLog.Write(Logger, feature.Name, DiagnosticEvent.Lifecycle, $"shutdown error: {ex}", level: LogLevel.Error); }
+            ModuleCleanup.Run(Logger, feature.Name, feature.Shutdown);
         }
         _features.Clear();
+        _players?.Dispose(); _players = null;
     }
 }

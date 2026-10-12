@@ -18,7 +18,7 @@ public static class DebugLoggingResolver
         public bool Warned;
     }
     private static readonly ConditionalWeakTable<ConfigFile, Dictionary<string, OverrideState>> Cache = new();
-    public static DebugLoggingPolicy Resolve(ConfigFile config, string section, ConfigEntry<bool> global, ManualLogSource? logger = null)
+    public static DebugLoggingPolicy Resolve(ConfigFile config, string section, ConfigEntry<bool> global, ManualLogSource? logger = null, ConfigEntry<bool>? feature = null)
     {
         var states = Cache.GetOrCreateValue(config);
         lock (states)
@@ -46,7 +46,7 @@ public static class DebugLoggingResolver
                     "Invalid or unreadable feature debug override; feature diagnostics suppressed until corrected and restarted",
                     new (string, object?)[] { ("section", section), ("key", Key), ("fallback", "suppress_debug") }, LogLevel.Warning);
             }
-            return new DebugLoggingPolicy(global, state.Suppressed);
+            return new DebugLoggingPolicy(global, state.Suppressed, feature);
         }
     }
     private static string? Read(ConfigFile config, string section)

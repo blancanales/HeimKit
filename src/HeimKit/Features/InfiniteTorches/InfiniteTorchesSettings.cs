@@ -11,6 +11,7 @@ public sealed class InfiniteTorchesSettings
     public ConfigEntry<int> MaxMessagesPerPass { get; }
     public ConfigEntry<string> Prefabs { get; }
     public ConfigEntry<bool> DebugMode { get; }
+    public ConfigEntry<bool> GlobalDebugMode { get; }
     public DebugLoggingPolicy DebugLogging { get; }
 
     public InfiniteTorchesSettings(ConfigFile config, ManualLogSource? logger = null)
@@ -23,7 +24,8 @@ public sealed class InfiniteTorchesSettings
         Prefabs = config.Bind("Torches", "Prefabs",
             "piece_groundtorch_wood,piece_groundtorch,piece_groundtorch_green,piece_groundtorch_blue,piece_walltorch",
             "Exact prefab allowlist. Only refillable non-toggle lights without wet-flame objects qualify. Fires and braziers are excluded by default.");
-        DebugMode = DiagnosticsSettings.Bind(config);
-        DebugLogging = DebugLoggingResolver.Resolve(config, "Torches", DebugMode, logger);
+        GlobalDebugMode = DiagnosticsSettings.Bind(config);
+        DebugMode = config.Bind("Torches", "DebugMode", false, "Enable diagnostics for this feature even when global DebugMode is off. The hidden suppression override still takes precedence. Restart after edits.");
+        DebugLogging = DebugLoggingResolver.Resolve(config, "Torches", GlobalDebugMode, logger, DebugMode);
     }
 }

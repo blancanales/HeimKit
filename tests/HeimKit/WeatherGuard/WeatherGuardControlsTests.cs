@@ -47,15 +47,15 @@ internal static class WeatherGuardControlsTests
         logger.LogEvent += (_, args) => messages.Add((args.Data.ToString()!, args.Level));
         var suppressed = new WeatherGuardDiagnostics(logger, false);
         suppressed.Coverage(coverage);
-        Check(messages.Count == 1 && messages[0].Text.Contains("requested=true") && messages[0].Text.Contains("protected_now=1") &&
-            messages[0].Text.Contains("world_outside_scope=not_observed"), "Requested coverage hidden by debug-off or overclaimed global scope.");
+        Check(messages.Count == 1 && messages[0].Level == LogLevel.Info && messages[0].Text.Contains("Requested coverage report") && messages[0].Text.Contains("protected 1") &&
+            messages[0].Text.Contains("rest of the world is unobserved"), "Requested coverage hidden by debug-off or overclaimed global scope.");
         suppressed.Coverage(new CoverageSnapshot { State = "waiting_for_world" });
-        Check(messages[^1].Text.Contains("eligible_now=unknown") && messages[^1].Text.Contains("protected_now=unknown"), "Unobserved scope falsely reported measured zeros.");
+        Check(messages[^1].Text.Contains("counts are unknown"), "Unobserved scope falsely reported measured zeros.");
 
         var medium = new WeatherGuardDiagnostics(logger, true, DebugLogLevel.Medium, false);
         medium.Report(0, () => throw new Exception(), null, () => new[] { new ProtectionObservation
         { Identity = new() { ["object"] = "partial" }, Protected = true, RainProtection = false, UnderwaterProtection = true, Reason = "eligible" } });
-        Check(messages[^1].Text.Contains("protected=true") && messages[^1].Text.Contains("rain_protected=false") && messages[^1].Text.Contains("underwater_protected=true"),
+        Check(messages[^1].Level == LogLevel.Debug && messages[^2].Level == LogLevel.Debug && messages[^1].Text.Contains("protected=true") && messages[^1].Text.Contains("rain_protected=false") && messages[^1].Text.Contains("underwater_protected=true"),
             "Medium output presented partial protection as both-channel protection.");
         var root = Path.Combine(AppContext.BaseDirectory, "weather-controls-" + Guid.NewGuid());
         Directory.CreateDirectory(root);
@@ -66,6 +66,15 @@ internal static class WeatherGuardControlsTests
             var config = new ConfigFile(configPath, false) { SaveOnConfigSet = false };
             var settings = new WeatherGuardSettings(config, logger);
             Check(settings.ProtectRain.Value && settings.ProtectUnderwater.Value && settings.ExcludedPrefabs.Value == "", "Protection defaults changed existing behavior.");
+            File.WriteAllText(configPath, "[WeatherGuard]\nDebugLogLevel = 123\n");
+            var invalidLevel = new WeatherGuardSettings(new ConfigFile(configPath, false) { SaveOnConfigSet = false }, logger);
+            Check(invalidLevel.DebugLogLevel.Value == DebugLogLevel.Medium, "Undefined numeric diagnostic level must fall back to Medium.");
+            foreach (var level in new[] { DebugLogLevel.Medium, DebugLogLevel.Detailed })
+            {
+                File.WriteAllText(configPath, "[WeatherGuard]\nDebugLogLevel = " + level + "\n");
+                var validLevel = ConfigurationLoader.Load(root, logger, cfg => new WeatherGuardSettings(cfg, logger));
+                Check(validLevel.DebugLogLevel.Value == level, "Diagnostic-level validation reset a recognized setting.");
+            }
             File.WriteAllText(configPath, "[WeatherGuard]\nProtectRain = false\nProtectUnderwater = true\nExcludedPrefabs = wood_floor\nDisableDebugLogging = true\n[Diagnostics]\nDebugMode = true\n");
             var migrated = ConfigurationLoader.Load(root, logger, cfg => new WeatherGuardSettings(cfg, logger));
             Check(!migrated.ProtectRain.Value && migrated.ProtectUnderwater.Value && migrated.ExcludedPrefabs.Value == "wood_floor" && !migrated.DebugLogging.Enabled,
@@ -98,11 +107,35 @@ internal static class WeatherGuardControlsTests
             Check(reports == 3, "Report failure broke later requests.");
             // Disabled module still services explicit reports without initializing Unity gameplay.
             var moduleConfig = new ConfigFile(configPath, false) { SaveOnConfigSet = false };
-            var module = new WeatherGuard(moduleConfig, logger);
+            var module = new WeatherGuard(moduleConfig, logger, PlayerServicesTests.For(moduleConfig, logger));
             module.Initialize("1.0.17");
             File.WriteAllText(requestPath, ""); module.Tick(10);
-            Check(!module.IsActive && messages[^1].Text.Contains("state=module_inactive") && !File.Exists(requestPath), "Inactive module ignored explicit coverage request.");
+            Check(!module.IsActive && messages[^1].Text.Contains("module_inactive") && !File.Exists(requestPath), "Inactive module ignored explicit coverage request.");
             module.Shutdown();
+            // Gameplay stays gated while operator requests survive every presence state.
+            var hub = PlayerServicesTests.For(moduleConfig, logger);
+            moduleConfig.Bind("WeatherGuard", "Enabled", false).Value = true;
+            module.Initialize("1.0.17");
+            var controller = typeof(WeatherGuard).GetField("_controller", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            Check(controller.GetValue(module) == null, "Unknown presence initialized WeatherGuard gameplay.");
+            Check(module.IsActive && hub.Events.Subscribers == 1, "WeatherGuard did not subscribe while enabled.");
+            File.WriteAllText(requestPath, ""); module.Tick(11);
+            Check(messages[^1].Text.Contains("player_presence_unavailable"), "Unknown presence report was misleading.");
+            hub.Events.Observe(false);
+            File.WriteAllText(requestPath, ""); module.Tick(12);
+            Check(module.IsActive && messages[^1].Text.Contains("server_empty"), "Empty server disabled the module or blocked its report.");
+            hub.Events.Observe(true); hub.Events.Observe(true);
+            File.WriteAllText(requestPath, ""); module.Tick(13);
+            Check(controller.GetValue(module) == null && module.IsActive && hub.Activity.Consumers == 0 && messages[^1].Text.Contains("waiting_for_world"), "WeatherGuard bypassed world readiness or acquired AFK tracking.");
+            hub.Events.Observe(null);
+            File.WriteAllText(requestPath, ""); module.Tick(14);
+            Check(messages[^1].Text.Contains("player_presence_unavailable"), "Lost presence retained occupied report state.");
+            typeof(WeatherGuard).GetMethod("Fail", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(module, new object[] { new InvalidOperationException("Simulated feature failure") });
+            Check(!module.IsActive && hub.Events.Subscribers == 0, "WeatherGuard failure retained its registration.");
+            hub.Events.Observe(false); hub.Events.Observe(true);
+            Check(!module.IsActive, "Failed WeatherGuard restarted on connection.");
+            module.Initialize("1.0.17"); module.Shutdown(); module.Shutdown();
+            Check(hub.Events.Subscribers == 0, "Repeated WeatherGuard shutdown retained its registration.");
         }
         finally
         {
@@ -111,6 +144,6 @@ internal static class WeatherGuardControlsTests
             if (!resolved.StartsWith(allowed, StringComparison.OrdinalIgnoreCase)) throw new Exception("Unsafe test cleanup path.");
             Directory.Delete(resolved, true);
         }
-        System.Console.WriteLine("PASS: rain/underwater switches and overlap, exact bounded exclusions/priority, honest debug-off coverage, one-shot local admin requests, access/error recovery and config preservation.");
+        System.Console.WriteLine("PASS: rain/underwater switches and overlap, exact bounded exclusions/priority, honest debug-off coverage, one-shot local admin requests, access/error recovery, presence-gated gameplay, retained paused reports, isolated lifecycle cleanup and config preservation.");
     }
 }

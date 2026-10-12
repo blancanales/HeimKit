@@ -19,17 +19,17 @@ public sealed class InfiniteTorchesDiagnostics
     private bool _reported;
     public const int RefillDetailLimit = 4;
     public InfiniteTorchesDiagnostics(ConfigFile config, ManualLogSource logger)
-        : this(HeimKit.Configuration.DebugLoggingResolver.Resolve(config, "Torches", HeimKit.Configuration.DiagnosticsSettings.Bind(config), logger), logger) { }
+        : this(new InfiniteTorchesSettings(config, logger).DebugLogging, logger) { }
     public InfiniteTorchesDiagnostics(ConfigEntry<bool> debugMode, ManualLogSource logger, Func<Dictionary<string, long>>? totals = null)
         : this(() => debugMode.Value, logger, totals) { }
     public InfiniteTorchesDiagnostics(HeimKit.Configuration.DebugLoggingPolicy policy, ManualLogSource logger)
         : this(() => policy.Enabled, logger) { }
     public InfiniteTorchesDiagnostics(Func<bool> debugEnabled, ManualLogSource logger, Func<Dictionary<string, long>>? totals = null)
     { _logger = logger; _debugEnabled = debugEnabled; _totals = totals; }
-    public bool IsDebugEnabled => _debugEnabled();
+    public bool IsDebugEnabled => _debugEnabled() && DiagnosticLog.ServerActivity.Allowed;
     public string SettingsDescription => $"debug mode {IsDebugEnabled}; automatic diagnostic interval 60s";
     private void Write(DiagnosticEvent category, string message, Dictionary<string, object?> fields)
-        => DiagnosticLog.Write(_logger, "Infinite Torches", category, message, fields.Select(p => (p.Key, p.Value)));
+        => DiagnosticLog.Write(_logger, "Infinite Torches", category, message, fields.Select(p => (p.Key, p.Value)), LogLevel.Debug);
     private static (string Message, Dictionary<string, object?> Fields) Payload(string text)
     {
         var segments = text.Split(new[] { "; " }, StringSplitOptions.None);

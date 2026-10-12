@@ -9,6 +9,30 @@ public static class WeatherGuardNetworkFilter
 {
     public const int MaximumPacketBytes = 2 * 1024 * 1024;
     public const int MaximumRecords = 32768;
+    internal static ZPackage ReadPackage(ZPackage packet)
+    {
+        int length = packet.ReadInt();
+        if (length < 0 || length > MaximumPacketBytes || length > packet.Size() - packet.GetPos())
+            throw new InvalidDataException("Invalid embedded package length.");
+        // Native ReadPackage trusts the declared length before allocating its byte buffer.
+        return new ZPackage(packet.ReadByteArray(length));
+    }
+    public static ZRoutedRpc.RoutedRPCData ReadRouted(ZPackage packet)
+    {
+        int cursor = packet.GetPos();
+        try
+        {
+            if (packet.Size() > MaximumPacketBytes) throw new InvalidDataException("Oversized routed packet.");
+            var data = new ZRoutedRpc.RoutedRPCData
+            {
+                m_msgID = packet.ReadLong(), m_senderPeerID = packet.ReadLong(), m_targetPeerID = packet.ReadLong(),
+                m_targetZDO = packet.ReadZDOID(), m_methodHash = packet.ReadInt(), m_parameters = ReadPackage(packet)
+            };
+            if (packet.GetPos() != packet.Size()) throw new InvalidDataException("Trailing routed data.");
+            return data;
+        }
+        finally { packet.SetPos(cursor); }
+    }
     public static bool RelevantRouted(ZPackage packet, Func<ZDOID, bool> protectedId)
     {
         int cursor = packet.GetPos();
@@ -50,7 +74,7 @@ public static class WeatherGuardNetworkFilter
                 uint revision = original.ReadUInt();
                 long owner = original.ReadLong();
                 var position = original.ReadVector3();
-                var data = original.ReadPackage();
+                var data = ReadPackage(original);
                 if (protectedId(id)) { blocked++; rejectedRecords.Add((id, revision, ownerRevision)); continue; }
                 output.Write(id); output.Write(ownerRevision); output.Write(revision);
                 output.Write(owner); output.Write(position); output.Write(data);

@@ -1,3 +1,4 @@
+using HeimKit.Shared.Players;
 using HeimKit.Features.InfiniteTorches.Models;
 using System;
 using System.Collections.Generic;
@@ -10,6 +11,7 @@ namespace HeimKit.Features.InfiniteTorches;
 internal sealed class InfiniteTorchesController : IDisposable
 {
     private readonly ManualLogSource _logger;
+    private readonly IPlayerPresence _presence;
     private readonly InfiniteTorches _module;
     // No custom RPCs, client patches, ownership changes or direct ZDO writes.
     private readonly InfiniteTorchesSettings _settings;
@@ -28,9 +30,10 @@ internal sealed class InfiniteTorchesController : IDisposable
     private bool _announced;
     private readonly Dictionary<string, long> _outcomes = new();
 
-    public InfiniteTorchesController(InfiniteTorches module, InfiniteTorchesSettings settings, ManualLogSource logger)
+    public InfiniteTorchesController(InfiniteTorches module, InfiniteTorchesSettings settings, ManualLogSource logger, IPlayerPresence presence)
     {
         _logger = logger;
+        _presence = presence;
         _module = module;
         _settings = settings;
         _diagnostics = new InfiniteTorchesDiagnostics(() => _settings.DebugLogging.Enabled, logger, () => new Dictionary<string, long>(_outcomes));
@@ -78,7 +81,7 @@ internal sealed class InfiniteTorchesController : IDisposable
                 return;
             }
             _owners.Clear();
-            foreach (var peer in net.GetPeers())
+            foreach (var peer in _presence.Peers)
                 if (peer.IsReady() && !peer.m_characterID.IsNone()) _owners[peer.m_uid] = peer;
 
             _candidates.Clear();
@@ -188,7 +191,11 @@ internal sealed class InfiniteTorchesController : IDisposable
         _configuredNames = _settings.Prefabs.Value;
         if (!_announced)
         {
-            DiagnosticLog.Write(_logger, "Infinite Torches", DiagnosticEvent.Lifecycle, $"ready with {_torches.Count} prefabs. Vanilla owners receive vanilla fuel RPCs. Unloaded or transferring objects retry on later passes.");
+            DiagnosticLog.Write(_logger, "Infinite Torches", DiagnosticEvent.Lifecycle,
+                _torches.Count > 0 ? "Ready." : "No supported torch prefabs are available; refilling is unavailable.",
+                level: _torches.Count > 0 ? LogLevel.Info : LogLevel.Warning);
+            if (_diagnostics.IsDebugEnabled)
+                DiagnosticLog.Write(_logger, "Infinite Torches", DiagnosticEvent.Detail, "Torch prefabs resolved", new (string, object?)[] { ("prefab_types", _torches.Count) }, LogLevel.Debug);
             _announced = true;
         }
     }

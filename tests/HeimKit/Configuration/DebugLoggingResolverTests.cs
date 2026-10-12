@@ -1,7 +1,9 @@
+using HeimKit.Features.AFKRaidWatch;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
 using HeimKit.Features.InfiniteTorches;
+using HeimKit.Features.AFKNightWatch;
 using HeimKit.Features.WeatherGuard;
 using HeimKit.Features.WeatherGuard.Models;
 
@@ -18,6 +20,35 @@ internal static class DebugLoggingResolverTests
         logger.LogEvent += (_, args) => messages.Add((args.Data.ToString()!, args.Level));
         try
         {
+            // Production constructors bind all settings before startup, including disabled modules.
+            void BindModules() => ConfigurationLoader.Load(root, logger, config => new HeimKit.Shared.IServerModule[] {
+                new InfiniteTorches(config, logger, PlayerServicesTests.For(config, logger)), new WeatherGuard(config, logger, PlayerServicesTests.For(config, logger)), new AFKNightWatch(config, logger, PlayerServicesTests.For(config, logger)), new AFKRaidWatch(config, logger, PlayerServicesTests.For(config, logger)) });
+            string SavedValue(string section, string key)
+            {
+                string current = "";
+                foreach (string line in File.ReadAllLines(path))
+                {
+                    string text = line.Trim();
+                    if (text.StartsWith("[") && text.EndsWith("]")) current = text[1..^1];
+                    else if (current == section && text.StartsWith(key + " = ")) return text[(key.Length + 3)..];
+                }
+                throw new Exception("Setting missing from saved config: " + section + "." + key);
+            }
+            BindModules();
+            foreach (string section in new[] { "Diagnostics", "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" })
+                Check(SavedValue(section, "DebugMode") == "false", "First-use debug defaults missing");
+            File.WriteAllText(path, "[Diagnostics]\nDebugMode = true\n[Torches]\nEnabled = false\n[WeatherGuard]\nEnabled = false\n[AFKNightWatch]\nEnabled = false\n[AFKRaidWatch]\nEnabled = false\n");
+            BindModules();
+            foreach (string section in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" })
+            {
+                Check(SavedValue(section, "DebugMode") == "false", "Missing debug default not saved for disabled feature");
+                Check(SavedValue(section, "Enabled") == "false", "Default addition changed disabled feature");
+            }
+            Check(SavedValue("Diagnostics", "DebugMode") == "true", "Existing global debug value changed");
+            File.WriteAllText(path, "[Torches]\nDebugMode = true\n[WeatherGuard]\nDebugMode = false\n[AFKNightWatch]\nEnabled = false\n[AFKRaidWatch]\nEnabled = false\n");
+            BindModules();
+            Check(SavedValue("Torches", "DebugMode") == "true" && SavedValue("WeatherGuard", "DebugMode") == "false" &&
+                SavedValue("AFKNightWatch", "DebugMode") == "false" && SavedValue("Diagnostics", "DebugMode") == "false", "Mixed existing debug values changed or missing defaults omitted");
             foreach (bool global in new[] { false, true })
             foreach (string? torchOverride in new string?[] { null, "false", "true", "invalid", "" })
             foreach (string? weatherOverride in new string?[] { null, "false", "true" })
@@ -48,7 +79,7 @@ internal static class DebugLoggingResolverTests
                 {
                     int warnings = messages.Count(m => m.Level == LogLevel.Warning);
                     Check(warnings == 2, "Invalid override must warn once per loaded configuration, including global-off.");
-                    for (int i = 0; i < 20; i++) DebugLoggingResolver.Resolve(settings.Config, "Torches", settings.Torch.DebugMode, logger);
+                    for (int i = 0; i < 20; i++) DebugLoggingResolver.Resolve(settings.Config, "Torches", settings.Torch.GlobalDebugMode, logger, settings.Torch.DebugMode);
                     Check(messages.Count(m => m.Level == LogLevel.Warning) == warnings, "Invalid override warning flooded.");
                 }
                 if (!torchEnabled)
@@ -72,14 +103,43 @@ internal static class DebugLoggingResolverTests
                     }
                 }
             }
+            // Exercise each real Settings class: feature-only selection and hidden precedence.
+            foreach (string selected in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" })
+            foreach (bool global in new[] { false, true })
+            foreach (bool local in new[] { false, true })
+            foreach (string? hidden in new string?[] { null, "false", "true", "invalid", "" })
+            {
+                File.WriteAllText(path, "[Diagnostics]\nDebugMode = " + global + "\n[" + selected + "]\nDebugMode = " + local + "\n" +
+                    (hidden == null ? "" : "DisableDebugLogging = " + hidden + "\n"));
+                var policies = ConfigurationLoader.Load(root, logger, file => new[] {
+                    new InfiniteTorchesSettings(file, logger).DebugLogging,
+                    new WeatherGuardSettings(file, logger).DebugLogging,
+                    new AFKNightWatchSettings(file, logger).DebugLogging,
+                    new AFKRaidWatchSettings(file, logger).DebugLogging });
+                int index = Array.IndexOf(new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" }, selected);
+                for (int i = 0; i < policies.Length; i++)
+                    Check(policies[i].Enabled == (i == index ? (global || local) && (hidden == null || hidden == "false") : global), "Per-feature selection/hidden precedence leaked between features");
+                var reload = new ConfigFile(path, false) { SaveOnConfigSet = false };
+                var savedPolicies = new[] { new InfiniteTorchesSettings(reload, logger).DebugLogging, new WeatherGuardSettings(reload, logger).DebugLogging, new AFKNightWatchSettings(reload, logger).DebugLogging, new AFKRaidWatchSettings(reload, logger).DebugLogging };
+                Check(savedPolicies.Select(p => p.Enabled).SequenceEqual(policies.Select(p => p.Enabled)), "Feature diagnostic selections changed after save/reload");
+                string saved = File.ReadAllText(path);
+                Check(saved.Split("DisableDebugLogging").Length - 1 == (hidden == null ? 0 : 1), "New feature switches generated hidden overrides");
+                if (selected == "Torches" && !global && local && hidden == null)
+                {
+                    var diagnostic = new InfiniteTorchesDiagnostics(reload, logger);
+                    Check(diagnostic.IsDebugEnabled, "Config-based torch diagnostics ignored feature-only switch");
+                    var entry = reload.Bind("Torches", "DebugMode", false); entry.Value = false;
+                    Check(!diagnostic.IsDebugEnabled, "Policy did not read feature setting");
+                }
+            }
             // Suppression leaves ordinary lifecycle and version warnings visible.
             File.WriteAllText(path, "[Diagnostics]\nDebugMode = true\n[Torches]\nEnabled = true\nDisableDebugLogging = true\n[WeatherGuard]\nEnabled = true\nDisableDebugLogging = true\n");
             var config = new ConfigFile(path, false) { SaveOnConfigSet = false };
-            var torches = new InfiniteTorches(config, logger);
-            var weather = new WeatherGuard(config, logger);
+            var torches = new InfiniteTorches(config, logger, PlayerServicesTests.For(config, logger));
+            var weather = new WeatherGuard(config, logger, PlayerServicesTests.For(config, logger));
             messages.Clear(); torches.Initialize("1.0.17"); weather.Initialize("1.0.17");
-            Check(torches.IsActive && weather.IsActive && messages.Count(m => m.Text.Contains("ENABLED")) == 2 &&
-                messages.Count(m => m.Text.Contains("debug_suppressed=true")) == 2, "Suppression changed gameplay enablement or hid startup.");
+            Check(torches.IsActive && weather.IsActive && messages.Count(m => m.Text.EndsWith(": Enabled.")) == 2 &&
+                messages.All(m => m.Level != LogLevel.Debug), "Suppression changed gameplay enablement or hid startup.");
             torches.Initialize("unsupported"); weather.Initialize("unsupported");
             Check(messages.Count(m => m.Level == LogLevel.Warning) == 2, "Suppression hid compatibility warnings.");
             torches.Shutdown(); weather.Shutdown();
@@ -97,6 +157,6 @@ internal static class DebugLoggingResolverTests
             if (!resolved.StartsWith(allowed, StringComparison.OrdinalIgnoreCase)) throw new Exception("Unsafe test cleanup path.");
             Directory.Delete(resolved, true);
         }
-        System.Console.WriteLine("PASS: suppression-only debug matrix, module independence, hidden omission/manual preservation, invalid fallback/bounded warnings, migration, lazy diagnostics and retained lifecycle warnings.");
+        System.Console.WriteLine("PASS: global/feature/hidden debug matrix across all four features, selective diagnostics and save/reload preservation; suppression-only debug matrix, module independence, hidden omission/manual preservation, invalid fallback/bounded warnings, migration, lazy diagnostics and retained lifecycle warnings.");
     }
 }

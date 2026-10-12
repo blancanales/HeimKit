@@ -6,6 +6,7 @@ using HarmonyLib;
 using BepInEx.Logging;
 using UnityEngine;
 using HeimKit.Shared;
+using HeimKit.Shared.Players;
 
 namespace HeimKit.Features.WeatherGuard;
 
@@ -13,6 +14,7 @@ namespace HeimKit.Features.WeatherGuard;
 internal sealed class WeatherGuardController : IDisposable
 {
     private readonly WeatherGuard _module;
+    private readonly IPlayerPresence _presence;
     private readonly ManualLogSource _log;
     private readonly WeatherGuardDiagnostics _diagnostics;
     private readonly bool _protectRain, _protectUnderwater;
@@ -64,8 +66,9 @@ internal sealed class WeatherGuardController : IDisposable
     internal bool Running => Active == this && _module.IsActive && ReferenceEquals(_manager, ZDOMan.instance) &&
         (_protectRain || _protectUnderwater) && ZNetScene.instance != null && ZNet.instance != null && ZNet.instance.IsDedicated() && ZNet.instance.IsServer();
 
-    public WeatherGuardController(WeatherGuard module, ManualLogSource log, bool debug, DebugLogLevel level, bool logWorldCreated, bool protectRain, bool protectUnderwater, string excludedPrefabs)
+    public WeatherGuardController(WeatherGuard module, ManualLogSource log, bool debug, DebugLogLevel level, bool logWorldCreated, bool protectRain, bool protectUnderwater, string excludedPrefabs, IPlayerPresence presence)
     {
+        _presence = presence;
         _protectRain = protectRain; _protectUnderwater = protectUnderwater;
         _excludedPrefabs = WeatherGuardRules.ParseExcludedPrefabs(excludedPrefabs, out int rejected);
         if (rejected > 0) DiagnosticLog.Write(log, "WeatherGuard", DiagnosticEvent.Lifecycle,
@@ -309,7 +312,7 @@ internal sealed class WeatherGuardController : IDisposable
         _near.Clear(); _distant.Clear(); _nearIds.Clear(); _distantIds.Clear(); _regions.Clear(); _positions.Clear(); _readyContexts.Clear();
         bool limited = false;
         _peers = _readyPeers = _characterWaits = 0; _exclusions.Clear(); _releaseReasons.Clear();
-        foreach (var peer in ZNet.instance.GetPeers())
+        foreach (var peer in _presence.Peers)
         {
             _peers++;
             if (!peer.IsReady()) continue;
@@ -587,14 +590,28 @@ internal sealed class WeatherGuardController : IDisposable
     {
         _diagnostics.Reset();
         if (Active == this) Active = null;
-        try { _patches.Dispose(); }
+        try { ModuleCleanup.Run(_log, _module.Name, _patches.Dispose); }
         finally
         {
             // With guards inactive, let vanilla choose a new owner even if unpatching failed.
             try
             {
+                Exception? firstError = null;
+                int failures = 0;
+                // Release through the captured world, never a replacement world's manager.
                 foreach (var zdo in _protected.Values)
-                    if (zdo.IsValid() && ZDOMan.instance != null && zdo.GetOwner() == ZDOMan.GetSessionID()) zdo.SetOwner(0L);
+                {
+                    try
+                    {
+                        if (!zdo.IsValid() || !ReferenceEquals(_manager, ZDOMan.instance) || zdo.GetOwner() != ServerId) continue;
+                        zdo.SetOwner(0L);
+                        _manager.ForceSendZDO(zdo.m_uid);
+                    }
+                    catch (Exception error) { firstError ??= error; failures++; }
+                }
+                if (firstError != null) DiagnosticLog.Write(_log, _module.Name, DiagnosticEvent.Lifecycle,
+                    "Ownership release failed for some pieces; remaining releases attempted: " + firstError,
+                    new (string, object?)[] { ("release_failures", failures) }, LogLevel.Error);
             }
             finally { _protected.Clear(); _positions.Clear(); _near.Clear(); _distant.Clear(); _rainEvidence.Clear(); _observedCandidates.Clear(); _contextPrefabs.Clear(); _candidateReasons.Clear(); }
         }

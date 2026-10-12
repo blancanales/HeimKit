@@ -10,7 +10,10 @@ namespace HeimKit.Shared;
 public static class DiagnosticLog
 {
     private static readonly Stopwatch Clock = Stopwatch.StartNew();
-    public static void StartSession() => Clock.Restart();
+    public static ServerDebugActivity ServerActivity { get; } = new();
+    public static void StartSession() { Clock.Restart(); ServerActivity.Reset(); }
+    public static void ObservePlayers(bool? hasConnectedPlayers)
+        => ServerActivity.Observe(Clock.Elapsed.TotalSeconds, hasConnectedPlayers);
     public static string Format(string feature, DiagnosticEvent category, string message,
         IEnumerable<(string Key, object? Value)>? fields = null, double? elapsedSeconds = null)
     {
@@ -27,7 +30,12 @@ public static class DiagnosticLog
     }
     public static void Write(ManualLogSource logger, string feature, DiagnosticEvent category, string message,
         IEnumerable<(string Key, object? Value)>? fields = null, LogLevel level = LogLevel.Info)
-        => logger.Log(level, Format(feature, category, message, fields));
+    {
+        if (level == LogLevel.Debug && !ServerActivity.Allowed) return;
+        logger.Log(level, level == LogLevel.Info || level == LogLevel.Warning || level == LogLevel.Message
+            ? $"{Plain(feature)}: {Plain(message)}" : Format(feature, category, message, fields));
+    }
+    private static string Plain(string value) => value.Replace("\r", " ").Replace("\n", " ");
     public static string Value(object? value) => value == null ? "unknown" : value is bool flag ? (flag ? "true" : "false") :
         value is float single ? single.ToString("R", CultureInfo.InvariantCulture) : value is double precise ? precise.ToString("R", CultureInfo.InvariantCulture) :
         value is IFormattable number ? number.ToString(null, CultureInfo.InvariantCulture) : value.ToString() ?? "unknown";

@@ -1,0 +1,13 @@
+# AFKNightWatch
+
+Coordinates majority sleep and prevents inferred-idle players from blocking sleep. Clients need no mod. AFKRaidWatch controls raid protection independently.
+
+Defaults require strictly more than half of non-idle participants: one of two is insufficient, two of three is enough. A known living player must actually be in bed. Native bed requirements, afternoon/night allowance, cooldown and broadcasts remain. Inferred idle defaults to five minutes without observed activity; some local camera/menu/inventory actions are invisible.
+
+`[AFKNightWatch] Enabled` controls sleep. MajoritySleepEnabled and ExcludeAFKFromSleep can be chosen independently. Turning majority off retains unanimity among non-excluded participants; turning exclusion off keeps idle players in the vote. Majority sleep alone does not require AFK tracking. Shared thresholds live under `[PlayerActivity]`. Stop the server before edits and restart to apply them. See [server configuration](../server-setup.md#afknightwatch), [specification](../specs/afk-night-watch.md) and [supported environment](../server-setup.md#supported-environment).
+
+DebugMode defaults false, is generated even for disabled features and follows [global/hidden precedence](../server-setup.md#configuration). Sleep summaries describe relevant votes and server outcomes, with observation ages and unknown values; a met quorum does not prove a completed skip. Actor transitions appear once under PlayerActivity when a registered consumer permits shared diagnostics. Raid debug does not enable sleep output. Changed summaries and bounded details follow the [logging contract](../architecture.md#repetition-and-volume-limits), including the [five-minute empty-server pause](../architecture.md#empty-server-debug-pause). Warnings, errors and requested reports remain available. The specification describes remaining diagnostic incident limitations.
+
+Player-dependent processing pauses when the server becomes empty or player presence is unavailable, and resumes on the first connection once required world services are ready. Additional connections do not restart processing. The feature stays configured Enabled during this pause; native game systems continue. See the [presence lifecycle](../architecture.md#presence-driven-lifecycle).
+
+Player-dependent processing pauses when the server becomes empty or player presence is unavailable, and resumes on the first connection once required world services are ready. Additional connections do not restart processing. The feature stays configured Enabled during this pause; native game systems continue. See the [presence lifecycle](../architecture.md#presence-driven-lifecycle).

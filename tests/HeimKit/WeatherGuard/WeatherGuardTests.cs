@@ -19,14 +19,13 @@ internal static class WeatherGuardTests
             config.Bind("WeatherGuard", "Enabled", weatherOn);
             using var log = new ManualLogSource("WeatherGuard lifecycle checks");
             var messages = new List<string>(); log.LogEvent += (_, args) => messages.Add(args.Data.ToString()!);
-            var torches = new InfiniteTorches(config, log);
-            var weather = new WeatherGuard(config, log);
+            var torches = new InfiniteTorches(config, log, PlayerServicesTests.For(config, log));
+            var weather = new WeatherGuard(config, log, PlayerServicesTests.For(config, log));
             torches.Initialize(version); weather.Initialize(version);
             Check(torches.IsActive == (torchesOn && version == "1.0.17"), "torch isolation");
             Check(weather.IsActive == (weatherOn && version == "1.0.17"), "weather isolation/version guard");
-            Check(weather.Name == "WeatherGuard" && messages[1].StartsWith("WeatherGuard: "), "exact feature name");
-            if (weather.IsActive) Check(messages[2].Contains("player-built") && messages[2].Contains("No logout") &&
-                messages[2].Contains("creators are preserved") && messages[2].Contains("World-created claims are inactive"), "honest startup scope and validation");
+            Check(weather.Name == "WeatherGuard" && messages.Any(m => m == (weatherOn ? "WeatherGuard: Enabled." : "WeatherGuard: Disabled.")), "exact feature name and configuration status");
+            Check(messages.All(m => !m.Contains("elapsed_s") && !m.Contains("player-built") && !m.Contains("waiting")), "debug-off startup must be concise");
             weather.Shutdown(); weather.Shutdown(); torches.Shutdown();
             Check(!weather.IsActive, "repeatable shutdown");
         }
@@ -36,13 +35,13 @@ internal static class WeatherGuardTests
         try
         {
             var path = Path.Combine(folder, "heimkit.cfg");
-            ConfigurationLoader.Load(folder, configLog, config => new WeatherGuard(config, configLog));
+            ConfigurationLoader.Load(folder, configLog, config => new WeatherGuard(config, configLog, PlayerServicesTests.For(config, configLog)));
             var first = File.ReadAllText(path);
             Check(first.Contains("[WeatherGuard]") && first.Contains("Enabled = false"), "complete first-use config with one feature switch");
             foreach (bool enabled in new[] { false, true })
             {
                 File.WriteAllText(path, "[WeatherGuard]\nEnabled = " + enabled + "\n[Torches]\nEnabled = false\n[Diagnostics]\nDebugMode = true\n");
-                ConfigurationLoader.Load(folder, configLog, config => { _ = new InfiniteTorches(config, configLog); return new WeatherGuard(config, configLog); });
+                ConfigurationLoader.Load(folder, configLog, config => { _ = new InfiniteTorches(config, configLog, PlayerServicesTests.For(config, configLog)); return new WeatherGuard(config, configLog, PlayerServicesTests.For(config, configLog)); });
                 var loaded = new ConfigFile(path, false) { SaveOnConfigSet = false };
                 Check(loaded.Bind("WeatherGuard", "Enabled", !enabled).Value == enabled &&
                     loaded.Bind("Diagnostics", "DebugMode", false).Value && !loaded.Bind("Torches", "Enabled", true).Value,

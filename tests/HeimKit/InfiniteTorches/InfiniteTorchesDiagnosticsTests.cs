@@ -13,7 +13,11 @@ internal static class InfiniteTorchesDiagnosticsTests
         };
         using var statusLogger = new ManualLogSource("Diagnostic checks");
         var statusMessages = new List<string>();
-        statusLogger.LogEvent += (_, args) => statusMessages.Add(args.Data.ToString()!);
+        statusLogger.LogEvent += (_, args) =>
+        {
+            if (args.Level != LogLevel.Debug) throw new Exception("Optional torch diagnostics must use Debug severity.");
+            statusMessages.Add(args.Data.ToString()!);
+        };
         var status = new InfiniteTorchesDiagnostics(statusConfig, statusLogger);
         status.Report(0f, () => throw new Exception("Debug mode off must suppress diagnostic formatting."));
         status.LogRefillRequest(0f, () => throw new Exception("Default debug-off refill details must not be formatted."));

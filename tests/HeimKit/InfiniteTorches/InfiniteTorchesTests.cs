@@ -10,10 +10,10 @@ internal static class InfiniteTorchesTests
         // Exercise actual feature configuration and startup logs without a running Unity world.
         var cases = new[]
         {
-            (Enabled: true, Version: "1.0.17", Active: true, Message: "Infinite Torches: LIFECYCLE | ENABLED"),
-            (Enabled: false, Version: "1.0.17", Active: false, Message: "DISABLED (Torches.Enabled = false)"),
+            (Enabled: true, Version: "1.0.17", Active: true, Message: "Infinite Torches: Enabled."),
+            (Enabled: false, Version: "1.0.17", Active: false, Message: "Infinite Torches: Disabled."),
             (Enabled: true, Version: "1.0.18", Active: false, Message: "DISABLED (unsupported Valheim version 1.0.18"),
-            (Enabled: false, Version: "1.0.18", Active: false, Message: "DISABLED (Torches.Enabled = false)")
+            (Enabled: false, Version: "1.0.18", Active: false, Message: "Infinite Torches: Disabled.")
         };
         foreach (var test in cases)
         {
@@ -25,11 +25,11 @@ internal static class InfiniteTorchesTests
             using var logger = new ManualLogSource("HeimKit checks");
             var messages = new List<string>();
             logger.LogEvent += (_, args) => messages.Add(args.Data.ToString()!);
-            var feature = new InfiniteTorches(config, logger);
+            var feature = new InfiniteTorches(config, logger, PlayerServicesTests.For(config, logger));
             feature.Initialize(test.Version);
-            if (feature.IsActive != test.Active || messages.Count != 1 || !messages[0].Contains(test.Message))
+            if (feature.IsActive != test.Active || messages.Count != (test.Enabled && !test.Active ? 2 : 1) || !messages.Any(m => m.Contains(test.Message)))
                 throw new Exception($"Incorrect startup state/log: {test}. Logs: {string.Join("; ", messages)}");
-            if (!test.Active && messages.Any(m => m.Contains(": ENABLED")))
+            if (!test.Enabled && messages.Any(m => m.Contains(": Enabled.")))
                 throw new Exception("Disabled feature falsely logged enabled.");
             feature.Shutdown();
             feature.Shutdown();
@@ -43,7 +43,7 @@ internal static class InfiniteTorchesTests
             SaveOnConfigSet = false
         };
         using var configLogger = new ManualLogSource("Supplied config check");
-        var suppliedFeature = new InfiniteTorches(suppliedConfig, configLogger);
+        var suppliedFeature = new InfiniteTorches(suppliedConfig, configLogger, PlayerServicesTests.For(suppliedConfig, configLogger));
         if (!suppliedConfig.TryGetEntry<bool>("Diagnostics", "DebugMode", out var diagnostics) || diagnostics.Value)
             throw new Exception("Supplied configuration must default DebugMode off.");
         suppliedConfig.Bind("Torches", "Enabled", true).Value = false;

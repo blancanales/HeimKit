@@ -25,17 +25,17 @@ public sealed class WeatherGuardDiagnostics
     private float _lastSummary;
     public const int SampleLimit = 6;
     public const int WearSampleLimit = 3;
-    internal bool DebugEnabled => _debug && _level == DebugLogLevel.Detailed;
+    internal bool DebugEnabled => _debug && DiagnosticLog.ServerActivity.Allowed && _level == DebugLogLevel.Detailed;
     public WeatherGuardDiagnostics(ManualLogSource logger, bool debug, DebugLogLevel level = DebugLogLevel.Detailed, bool logWorldCreated = true)
     { _logger = logger; _debug = debug; _level = level; LogWorldCreatedItems = logWorldCreated; }
-    private void Write(DiagnosticEvent category, string result, Dictionary<string, object?> fields, LogLevel level = LogLevel.Info)
+    private void Write(DiagnosticEvent category, string result, Dictionary<string, object?> fields, LogLevel level = LogLevel.Debug)
         => DiagnosticLog.Write(_logger, "WeatherGuard", category, result, fields.Select(p => (p.Key, p.Value)), level);
     private static string Counts(Dictionary<string, int> counts)
         => string.Join(",", counts.OrderBy(p => p.Key).Select(p => $"{p.Key}:{p.Value}"));
     private static long Delta(long current, long previous) => Math.Max(0, current - previous);
     public void Report(float now, Func<WeatherGuardStatus> snapshot, Func<IEnumerable<RainEvidence>>? rain = null, Func<IEnumerable<ProtectionObservation>>? protection = null)
     {
-        if (!_debug || !_budget.Reserve(now, "SUMMARY", 1, false)) return;
+        if (!_debug || !DiagnosticLog.ServerActivity.Allowed || !_budget.Reserve(now, "SUMMARY", 1, false)) return;
         if (_level == DebugLogLevel.Medium)
         { Medium(now, protection?.Invoke() ?? Array.Empty<ProtectionObservation>()); return; }
         var s = snapshot(); var old = _previous ?? new WeatherGuardStatus();
@@ -157,7 +157,7 @@ public sealed class WeatherGuardDiagnostics
     public bool ReserveCommand(float now) => DebugEnabled && _budget.Reserve(now, "native_RESULT", SampleLimit);
     public void Command(WearObservation observation, float? after, bool failed)
     {
-        if (!DebugEnabled) return;
+        if (!DebugEnabled && !failed) return;
         var fields = new Dictionary<string, object?>(observation.Identity);
         foreach (var field in observation.Fields) fields[field.Key] = field.Value;
         fields["health_before"] = observation.Before; fields["health_after"] = after;
@@ -168,7 +168,7 @@ public sealed class WeatherGuardDiagnostics
         fields["weather_damage"] = "unconfirmed";
         fields["damage_context"] = "native_command";
         if (failed) fields["exception"] = true;
-        Write(DiagnosticEvent.Result, failed ? "Native receiver raised an exception" : "Native receiver executed; health outcome observed", fields, failed ? LogLevel.Error : LogLevel.Info);
+        Write(DiagnosticEvent.Result, failed ? "Native receiver raised an exception" : "Native receiver executed; health outcome observed", fields, failed ? LogLevel.Error : LogLevel.Debug);
     }
     public bool TryWearSample(float now, string id, bool protectedPiece, bool exposed = false)
     {
@@ -182,7 +182,7 @@ public sealed class WeatherGuardDiagnostics
     }
     public void Wear(WearObservation observation, float? after, bool failed)
     {
-        if (!DebugEnabled) return;
+        if (!DebugEnabled && !failed) return;
         var fields = new Dictionary<string, object?>(observation.Identity);
         foreach (var field in observation.Fields) fields[field.Key] = field.Value;
         fields["blockers"] = Blockers(observation.Fields, observation.Owner, observation.Warmup);
@@ -200,7 +200,7 @@ public sealed class WeatherGuardDiagnostics
         if (failed) fields["exception"] = true;
         Write(DiagnosticEvent.Detail, !observation.Owner ? "Wear calculation runs on another owner or is unassigned" : observation.Warmup ?
             "Waiting for native loading warmup" : !observation.GateReached ? "Native weather gate was not reached" :
-            "Native weather gate reached; condition details captured", fields, failed ? LogLevel.Error : LogLevel.Info);
+            "Native weather gate reached; condition details captured", fields, failed ? LogLevel.Error : LogLevel.Debug);
     }
     private void Medium(float now, IEnumerable<ProtectionObservation> observations)
     {
@@ -241,20 +241,16 @@ public sealed class WeatherGuardDiagnostics
     }
     public void Coverage(CoverageSnapshot s)
     {
-        Write(DiagnosticEvent.Summary, "Coverage report requested by server operator", new()
-        {
-            ["requested"] = true, ["state"] = s.State, ["scope"] = "retained_nearby_ready_player_regions",
-            ["scope_observed"] = s.Observed, ["scan_age_s"] = s.ScanAge,
-            ["eligible_now"] = s.Observed ? s.Eligible : null, ["protected_now"] = s.Observed ? s.Protected : null,
-            ["skipped_now"] = s.Observed ? s.Skipped : null, ["waiting_now"] = s.Observed ? s.Waiting : null,
-            ["unloaded_eligible_now"] = s.Observed ? s.UnloadedEligible : null,
-            ["skip_reasons_now"] = s.Observed ? Counts(s.SkipReasons) : "not_observed",
-            ["wait_reasons_now"] = s.Observed ? Counts(s.WaitReasons) : "not_observed",
-            ["nearby_records_now"] = s.NearbyRecords, ["distant_records_not_evaluated"] = s.DistantRecords,
-            ["regions_now"] = s.Regions, ["capacity_limited"] = s.Limited,
-            ["rain_protection_enabled"] = s.RainEnabled, ["underwater_protection_enabled"] = s.UnderwaterEnabled,
-            ["world_outside_scope"] = "not_observed", ["rain_protection_verified"] = "not_evaluated"
-        });
+        string measured = s.Observed
+            ? $"Eligible {s.Eligible}, protected {s.Protected}, waiting {s.Waiting}, skipped {s.Skipped}, unloaded eligible {s.UnloadedEligible}. " +
+              $"Skip reasons: {Counts(s.SkipReasons)}. Wait reasons: {Counts(s.WaitReasons)}. "
+            : "Eligible, protected, waiting and skipped counts are unknown. ";
+        DiagnosticLog.Write(_logger, "WeatherGuard", DiagnosticEvent.Summary,
+            $"Requested coverage report ({s.State}): {measured}" +
+            $"Scope: retained nearby ready-player regions; observed {s.Observed}; scan age {DiagnosticLog.Value(s.ScanAge)} seconds; " +
+            $"regions {s.Regions}, nearby records {s.NearbyRecords}, distant records unevaluated {s.DistantRecords}; capacity limited {s.Limited}. " +
+            $"Rain protection {s.RainEnabled}; underwater protection {s.UnderwaterEnabled}. " +
+            "The rest of the world is unobserved; weather-damage prevention is not verified.");
     }
     public void Reset() { _budget.Reset(); _wearStreams.Clear(); _previous = null; _reported.Clear(); _mediumStates.Clear(); _mediumCursor = 0; _lastSummary = 0; }
 }

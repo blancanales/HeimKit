@@ -2,7 +2,7 @@
 
 HeimKit brings quality-of-life features to Windows Valheim dedicated servers, helping server owners reduce upkeep, coordinate night skipping and limit automatic raids around idle players.
 
-Install HeimKit on the server and choose the features you want independently. It is designed for players using unmodified clients, with configuration managed by the server. The project is under local development; no production release is advertised.
+Install HeimKit on the server and choose the features you want independently. It is designed for players using unmodified clients, with configuration managed by the server. Gameplay features pause when nobody is connected and resume when players return; requested administrative reports remain available. The project is under local development; no production release is advertised.
 
 ## World safety
 
@@ -22,23 +22,17 @@ Designed to prevent rain and wetness wear on eligible existing and newly player-
 
 [Usage and protection scope](docs/features/weather-guard.md) · [Technical specification](docs/specs/weather-guard.md)
 
-### MajoritySleep
+### AFKNightWatch
 
-Lets the night advance when a configurable share of players is in bed, rather than requiring everyone. The default is more than half. Normal bed requirements and native night-skip behavior remain.
+Coordinates configurable majority sleep and idle-player sleep exclusion, so players can coordinate time skipping without waiting for inferred-idle players. Normal bed requirements and the native afternoon/night allowance remain. Server-observed activity informs idle detection, which cannot observe every local menu action.
 
-[Usage](docs/features/majority-sleep.md) · [Technical specification](docs/specs/majority-sleep.md)
+[Usage and scope](docs/features/afk-night-watch.md) · [Technical specification](docs/specs/afk-night-watch.md)
 
-### AfkSleepExclusion
+### AFKRaidWatch
 
-Keeps players inferred idle from blocking sleep. It works independently of majority sleep and uses configurable server-observed activity, with conservative treatment of loading and uncertain players.
+Protects idle-only locations from new normal automatic random raids, independently of sleep. Active or uncertain nearby players retain normal eligibility; active players elsewhere do not remove local protection. Existing raids and explicit, forced or standalone events remain unchanged. Idle protection uses the same server activity inference as sleep exclusion.
 
-[Usage and activity limits](docs/features/afk-sleep-exclusion.md) · [Technical specification](docs/specs/afk-sleep-exclusion.md)
-
-### AfkRaidProtection
-
-Helps protect areas occupied only by players inferred idle from new automatic raids. Active nearby players keep normal raid eligibility, and existing raids continue. Idle inference cannot observe every local menu action.
-
-[Usage and scope](docs/features/afk-raid-protection.md) · [Technical specification](docs/specs/afk-raid-protection.md)
+[Usage and scope](docs/features/afk-raid-watch.md) · [Technical specification](docs/specs/afk-raid-watch.md)
 
 ## Compatibility
 

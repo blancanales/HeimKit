@@ -20,8 +20,8 @@ public static class ConfigurationLoader
             config.Save();
             config.SaveOnConfigSet = true;
             DiagnosticLog.Write(logger, "HeimKit", DiagnosticEvent.Lifecycle, existed
-                ? $"Loaded configuration: {path}. Existing settings preserved; missing settings added with defaults."
-                : $"Created default configuration: {path}. All feature settings are included.");
+                ? $"Loaded configuration: {path}."
+                : $"Created default configuration: {path}.");
             return result;
         }
         catch (Exception ex)

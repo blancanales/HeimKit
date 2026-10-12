@@ -8,7 +8,12 @@ internal static class WeatherGuardDiagnosticsTests
     {
         using var logger = new ManualLogSource("WeatherGuard diagnostics tests");
         var messages = new List<string>();
-        logger.LogEvent += (_, args) => messages.Add(args.Data.ToString()!);
+        logger.LogEvent += (_, args) =>
+        {
+            if (args.Level != LogLevel.Debug && args.Level != LogLevel.Error)
+                throw new Exception("Optional weather diagnostics must use Debug severity or preserve Error severity.");
+            messages.Add(args.Data.ToString()!);
+        };
         var disabled = new WeatherGuardDiagnostics(logger, false);
         disabled.Report(0f, () => throw new Exception("Debug-off snapshot evaluated."));
         disabled.Sample(0f, () => throw new Exception("Debug-off sample formatted."));

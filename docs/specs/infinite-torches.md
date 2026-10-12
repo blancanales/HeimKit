@@ -8,6 +8,8 @@ Supported game and loader versions are documented in [server setup](../server-se
 
 ## Configuration
 
+Automatic Debug output follows the shared [five-minute empty-server pause](../architecture.md#empty-server-debug-pause). Reconnection resumes eligible diagnostics without restarting the feature; warnings, errors, requested reports and gameplay remain available.
+
 The shared [hidden debug suppression contract](../server-setup.md#hidden-per-feature-debug-suppression) applies in this feature's existing configuration section. Settings resolve it through DebugLoggingResolver; effective debug policy gates optional output and diagnostic collection while gameplay and standard lifecycle/warnings/errors remain active. The key has no generated default.
 
 | Section | Setting | Default | Rules |
@@ -16,7 +18,8 @@ The shared [hidden debug suppression contract](../server-setup.md#hidden-per-fea
 | Torches | IntervalSeconds | 5 | Range 2–60 seconds. |
 | Torches | MaxMessagesPerPass | 32 | Range 1–256 requests. |
 | Torches | Prefabs | Listed below | Comma-separated candidates, checked at runtime. |
-| Diagnostics | DebugMode | false | Shared troubleshooting switch. |
+| Torches | DebugMode | false | Enable this feature’s diagnostics with global debug off; hidden suppression takes precedence. |
+| Diagnostics | DebugMode | false | Enable diagnostics across features unless suppressed. |
 
 Default prefabs are `piece_groundtorch_wood`, `piece_groundtorch`, `piece_groundtorch_green`, `piece_groundtorch_blue` and `piece_walltorch`.
 
@@ -44,7 +47,7 @@ The module initializes only when enabled and the audited game-version guard pass
 
 ## Logging
 
-All messages follow the [shared logging contract](../architecture.md#logging). Standard LIFECYCLE output includes configuration, effective startup state, world/prefab readiness, warnings and errors. DebugMode adds one SUMMARY per 60 seconds with explicitly labeled latest-pass/current counts, interval refill-request and reconciliation-outcome counts and omitted-message counts.
+All messages follow the [shared logging contract](../architecture.md#logging). Info uses concise configuration, effective startup state and readiness messages; Warning uses concise problem messages. Settings and prefab-processing details belong in Debug; Error and exception evidence retain structured output. Optional diagnostics use BepInEx Debug severity. The shared [repetition and volume limits](../architecture.md#repetition-and-volume-limits) govern all streams. DebugMode permits at most one changed-state SUMMARY per 60 seconds with explicitly labeled latest-pass/current counts, interval refill-request and reconciliation-outcome counts and omitted-message counts.
 
 Refill ACTION records are limited to four per 60 seconds. They identify object, prefab, position, prior fuel and target; they report a request sent without asserting client application. Pending-operation RESULT records are limited to six per 60 seconds. They identify observed fuel increase, timeout, owner change or missing object, with prior/target/observed fuel and elapsed wait. An owner-change result includes the owners needed to explain that transition. Missing observed data is `unknown`.
 
@@ -64,10 +67,17 @@ Removing the plugin leaves ordinary fuel values to burn normally. No custom worl
 | InfiniteTorchesSettings.cs | Feature configuration bindings, defaults and validation ranges. |
 | InfiniteTorchesController.cs | World readiness, scheduling, scanning, selection and native refill requests. |
 | InfiniteTorchesPendingRefills.cs | Duplicate suppression, reconciliation, timeout and capacity control. |
-| InfiniteTorchesDiagnostics.cs | Bounded diagnostic output using the shared debug switch. |
+| InfiniteTorchesDiagnostics.cs | Bounded diagnostic output using the global-or-feature debug policy. |
 | Models/RefillObservation.cs | Observed owner and fuel data for reconciliation. |
 | Models/RefillRequest.cs | Pending request owner, fuel target and timing data. |
+| Models/RefillResult.cs | Reconciled request outcome, observed state and elapsed wait. |
 
 User installation and general configuration belong in [server setup](../server-setup.md); feature usage and troubleshooting belong in the [feature guide](../features/infinite-torches.md). Project design belongs in [architecture.md](../architecture.md); file placement and development procedures belong in [contributing.md](../contributing.md).
 
 ConfigurationLoader manages the shared file, and DiagnosticsSettings binds the common debug switch. The main class activates the controller only after enable and compatibility checks pass; the controller performs gameplay work and reports processing failures to the main class.
+
+## Player-service integration
+
+Follow the [required hookup](../architecture.md#required-feature-hookup). Plugin injects PlayerServices into Infinite Torches. The enabled module subscribes once to occupancy and releases its controller/pending-request state when empty or unavailable. Occupancy recreates the controller, retaining native world/prefab readiness checks and the configured refill interval. Ready-owner selection uses the shared presence snapshot. There is no activity lease because fuel eligibility does not depend on inferred idle. Shutdown or failure removes the presence registration; other consumers remain independent. The module sends no offline refill requests.
+
+No empty-server exception applies; refill eligibility uses ready characters and native world/prefab readiness.

@@ -26,6 +26,15 @@ internal static class DiagnosticLogTests
         DiagnosticLog.Write(logger, "Feature", DiagnosticEvent.Lifecycle, "Limited", level: LogLevel.Warning);
         DiagnosticLog.Write(logger, "Feature", DiagnosticEvent.Lifecycle, "Failed", level: LogLevel.Error);
         if (!levels.SequenceEqual(new[] { LogLevel.Info, LogLevel.Warning, LogLevel.Error })) throw new Exception("Severity was altered by the schema.");
+        var messages = new List<string>(); logger.LogEvent += (_, args) => messages.Add(args.Data.ToString()!);
+        DiagnosticLog.Write(logger, "Feature", DiagnosticEvent.Lifecycle, "Ready.", new[] { ("metric", (object?)1) });
+        DiagnosticLog.Write(logger, "Feature", DiagnosticEvent.Lifecycle, "Could not read C:\\config.\nRetry later.", level: LogLevel.Warning);
+        DiagnosticLog.Write(logger, "Feature", DiagnosticEvent.Detail, "Evidence", new[] { ("metric", (object?)1) }, LogLevel.Debug);
+        DiagnosticLog.Write(logger, "Feature", DiagnosticEvent.Lifecycle, "Operation failed", level: LogLevel.Error);
+        if (messages[0] != "Feature: Ready." || messages[1] != "Feature: Could not read C:\\config. Retry later." ||
+            !messages[2].StartsWith("Feature: DETAIL | Evidence | elapsed_s=") || !messages[2].Contains("metric=1") ||
+            !messages[3].StartsWith("Feature: LIFECYCLE | Operation failed | elapsed_s="))
+            throw new Exception("Info/Warning must be concise; Debug/Error must retain structured evidence.");
         var budget = new DiagnosticBudget();
         for (int i = 0; i < 6; i++) if (!budget.Reserve(0, "ACTION", 6)) throw new Exception("Sample budget missing.");
         for (int i = 0; i < 100; i++) if (budget.Reserve(59, "ACTION", 6)) throw new Exception("Busy stream exceeded its budget.");

@@ -1,6 +1,9 @@
+using HeimKit.Features.AFKRaidWatch;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Features.InfiniteTorches;
+using HeimKit.Features.WeatherGuard;
+using HeimKit.Features.AFKNightWatch;
 using HeimKit.Configuration;
 
 internal static class ConfigurationLoaderTests
@@ -16,7 +19,7 @@ internal static class ConfigurationLoaderTests
         setupLogger.LogEvent += (_, args) => setupMessages.Add(args.Data.ToString()!);
         try
         {
-            ConfigurationLoader.Load(directory, setupLogger, config => new InfiniteTorches(config, setupLogger));
+            ConfigurationLoader.Load(directory, setupLogger, config => new InfiniteTorches(config, setupLogger, PlayerServicesTests.For(config, setupLogger)));
             if (!File.Exists(path)) throw new Exception("First-use config was not created in the correct folder.");
             var text = File.ReadAllText(path);
             foreach (string setting in new[] { "[Torches]", "Enabled = true", "IntervalSeconds = 5", "MaxMessagesPerPass = 32", "Prefabs = piece_groundtorch_wood", "[Diagnostics]", "DebugMode = false" })
@@ -25,10 +28,33 @@ internal static class ConfigurationLoaderTests
                 throw new Exception("Creation was not logged.");
             System.Console.WriteLine("PASS: missing config directory and file created with every default and a creation log.");
 
+            var reference = new Dictionary<ConfigDefinition, string>();
+            string section = "";
+            foreach (string line in File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "heimkit.cfg")))
+            {
+                string value = line.Trim();
+                if (value.StartsWith('#')) continue;
+                if (value.StartsWith('[') && value.EndsWith(']')) { section = value[1..^1]; continue; }
+                int equals = value.IndexOf('=');
+                if (equals >= 0) reference.Add(new ConfigDefinition(section, value[..equals].Trim()), value[(equals + 1)..].Trim());
+            }
+            var complete = ConfigurationLoader.Load(Path.Combine(scratch, "complete"), setupLogger, config =>
+            {
+                _ = new InfiniteTorches(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new WeatherGuard(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new AFKNightWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new AFKRaidWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                return config;
+            });
+            if (complete.Count != reference.Count || complete.Any(entry =>
+                !reference.TryGetValue(entry.Key, out var value) || value != entry.Value.GetSerializedValue()))
+                throw new Exception("Reference configuration differs from the complete generated defaults.");
+            System.Console.WriteLine("PASS: every reference setting matches generated defaults across all four features, with no hidden or retired keys.");
+
             // Simulate an existing user config that disables refilling and diagnostics and omits newer settings.
             File.WriteAllText(path, "[Torches]\nEnabled = false\nIntervalSeconds = 12\n\n[Diagnostics]\nDebugMode = true\nLogStatus = false\nLogRefillRequests = false\nLogRefillDetails = false\nStatusIntervalSeconds = 120\n");
             setupMessages.Clear();
-            var reloaded = ConfigurationLoader.Load(directory, setupLogger, config => new InfiniteTorches(config, setupLogger));
+            var reloaded = ConfigurationLoader.Load(directory, setupLogger, config => new InfiniteTorches(config, setupLogger, PlayerServicesTests.For(config, setupLogger)));
             reloaded.Initialize("1.0.17");
             text = File.ReadAllText(path);
             foreach (string retired in new[] { "LogStatus", "LogRefillRequests", "LogRefillDetails", "StatusIntervalSeconds" })
@@ -44,7 +70,7 @@ internal static class ConfigurationLoaderTests
             File.WriteAllText(blocked, "This is a file, not a configuration directory.");
             setupMessages.Clear();
             bool failed = false;
-            try { ConfigurationLoader.Load(blocked, setupLogger, config => new InfiniteTorches(config, setupLogger)); }
+            try { ConfigurationLoader.Load(blocked, setupLogger, config => new InfiniteTorches(config, setupLogger, PlayerServicesTests.For(config, setupLogger))); }
             catch (IOException) { failed = true; }
             if (!failed || !setupMessages.Any(m => m.Contains("Could not load or create configuration")) || setupMessages.Any(m => m.StartsWith("Created default configuration:")))
                 throw new Exception("Configuration setup failure was not handled correctly.");
