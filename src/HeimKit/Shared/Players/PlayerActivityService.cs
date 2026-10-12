@@ -32,10 +32,11 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
     private readonly Func<List<PlayerActivityObservation>> _readActors;
     private readonly Action<bool> _observer;
     private readonly PlayerActivityDiagnostics _diagnostics;
+    private readonly PlayerActivityNotices _notices;
     public bool Reliable { get; private set; }
     public int Consumers => _consumers.Count;
     public long Samples { get; private set; }
-    public bool Available => _ready() && _presence.HasConnectedPlayers == true;
+    public bool Available => _ready() && _presence.HasJoinedPlayers == true;
     private float _last = -1;
     private ZDOMan? _world;
     private IReadOnlyList<PlayerActivityView> _views = Array.Empty<PlayerActivityView>();
@@ -70,6 +71,7 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
     {
         _logName = "PlayerActivity"; _options = options; _tracker = new(options); _logger = logger;
         _presence = presence; _ready = ready ?? (() => Ready); _readActors = readActors ?? (() => ReadActors(_presence, _craftingKey));
+        _notices = new(logger);
         _observer = observer ?? SetObserver; _diagnostics = new(logger, () => _consumers.Values.Any(enabled => enabled()));
         Hooks.Add("routed_hook_calls", 0); Hooks.Add("routed_not_ready", 0); Hooks.Add("authenticated_activity_signals", 0);
     }
@@ -81,10 +83,12 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
         _harmony.Patch(AccessTools.Method(typeof(ZRoutedRpc), "RPC_RoutedRPC"), prefix: new HarmonyMethod(typeof(PlayerActivityService), nameof(Observe)));
         _current = this;
     }
-    private void Reset()
+    private void Reset(string reason = "activity tracking stopped")
     {
         Reliable = false; _tracker.Clear(); _containers.Clear(); _views = Array.Empty<PlayerActivityView>(); _last = -1;
         _diagnostics.Reset();
+        try { _notices.Reset(reason, _presence.JoinedCount); }
+        catch (Exception error) { Incident(0, "diagnostics:afk_notices", error); }
     }
     private void Release(Lease lease)
     {
@@ -106,13 +110,19 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
     public static bool Ready => ZNet.instance != null && ZNet.instance.IsServer() && ZNet.instance.IsDedicated() && ZDOMan.instance != null && Game.instance != null;
     public IReadOnlyList<PlayerActivityView> Snapshot(float now)
     {
-        try { return Sample(now); }
-        catch (Exception error) { Reset(); _last = now; Incident(now, "sampling", error); return _views; }
+        try { Sample(now); }
+        catch (Exception error) { Reset("activity observations unavailable"); _last = now; Incident(now, "sampling", error); }
+        return _views;
+    }
+    private void ReportAFK(float now)
+    {
+        try { _notices.Observe(_views, _presence.JoinedCount); }
+        catch (Exception error) { Incident(now, "diagnostics:afk_notices", error); }
     }
     private IReadOnlyList<PlayerActivityView> Sample(float now)
     {
-        if (_consumers.Count == 0 || !Available) { Reset(); return _views; }
-        if (!ReferenceEquals(_world, ZDOMan.instance)) { _world = ZDOMan.instance; _tracker.Clear(); _containers.Clear(); _last = -1; }
+        if (_consumers.Count == 0 || !Available) { Reset(_presence.HasJoinedPlayers == false ? "server empty" : "player or world observations unavailable"); return _views; }
+        if (!ReferenceEquals(_world, ZDOMan.instance)) { Reset("world changed"); _world = ZDOMan.instance; }
         if (_last >= 0 && now >= _last && now - _last < _options.Interval) return _views;
         _last = now;
         var observations = _readActors(); Samples++;
@@ -134,6 +144,7 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
             foreach (string identity in recovered) _incidents.Remove(identity);
             DiagnosticLog.Write(_logger, _logName, DiagnosticEvent.Lifecycle, "Activity observations recovered; idle grace restarted.");
         }
+        ReportAFK(now);
         return _views;
     }
     public static List<PlayerActivityObservation> ReadActors(IPlayerPresence presence, int craftingKey = 0)
@@ -143,8 +154,8 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
         foreach (var peer in presence.Peers)
         {
             if (result.Count >= 4096) { result.Add(new PlayerActivityObservation { Peer = long.MinValue }); break; }
-            if (!peer.IsReady()) { result.Add(new PlayerActivityObservation { Peer = peer.m_uid }); continue; }
-            var actor = new PlayerActivityObservation { Peer = peer.m_uid, Character = peer.m_characterID.ToString() };
+            if (!peer.IsReady()) { result.Add(new PlayerActivityObservation { Peer = peer.m_uid, Name = peer.m_playerName ?? "" }); continue; }
+            var actor = new PlayerActivityObservation { Peer = peer.m_uid, Name = peer.m_playerName ?? "", Character = peer.m_characterID.ToString() };
             result.Add(actor);
             if (peer.m_characterID == ZDOID.None) continue;
             var zdo = ZDOMan.instance.GetZDO(peer.m_characterID);
@@ -178,13 +189,14 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
             if (method == "SetTrigger".GetStableHashCode() && target != peer.m_characterID) return;
             service.Hooks.Hit("authenticated_activity_signals");
             service._tracker.Signal(peer.m_uid, Time.unscaledTime, RoutedActivityReader.ActivityName(method));
+            if (service.Reliable) service.ReportAFK(Time.unscaledTime);
             if (method == "RPC_RequestOpen".GetStableHashCode() && target != ZDOID.None && service._containers.Count < 4096)
                 service._containers[peer.m_uid] = (target, Time.unscaledTime);
         }
         catch (Exception error)
         {
             // Discard unreliable inference and restore join grace. Native RPC still runs unchanged.
-            service.Reset();
+            service.Reset("activity observations unavailable");
             service.Incident(Time.unscaledTime, "routed_observation", error);
         }
     }

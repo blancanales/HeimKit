@@ -4,6 +4,7 @@ namespace HeimKit.Shared.Players.Models;
 public sealed class PlayerActivityObservation
 {
     public long Peer { get; set; }
+    public string Name { get; set; } = "";
     public string Character { get; set; } = "";
     public bool Known { get; set; }
     public bool Alive { get; set; }

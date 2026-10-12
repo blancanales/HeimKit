@@ -13,7 +13,7 @@ using UnityEngine;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.1.22")]
+[BepInPlugin("heimkit", "HeimKit", "0.1.47")]
 [BepInProcess("valheim_server.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -24,13 +24,13 @@ public sealed class Plugin : BaseUnityPlugin
     private void Awake()
     {
         DiagnosticLog.StartSession();
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.22.");
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.47.");
         try
         {
             ConfigurationLoader.Load(Paths.ConfigPath, Logger, config =>
             {
                 _players = new PlayerServices(config, Logger);
-                Register(() => new InfiniteTorches(config, Logger, _players), "Infinite Torches");
+                Register(() => new InfiniteTorches(config, Logger, _players), "InfiniteTorches");
                 Register(() => new WeatherGuard(config, Logger, _players), "WeatherGuard");
                 Register(() => new AFKNightWatch(config, Logger, _players), "AFKNightWatch");
                 Register(() => new AFKRaidWatch(config, Logger, _players), "AFKRaidWatch");
@@ -81,6 +81,7 @@ public sealed class Plugin : BaseUnityPlugin
                 DiagnosticLog.Write(Logger, feature.Name, DiagnosticEvent.Lifecycle, $"DISABLED after runtime error: {ex}", level: LogLevel.Error);
             }
         }
+        _players?.Events.ReportProcessing();
     }
 
     private void OnDestroy()

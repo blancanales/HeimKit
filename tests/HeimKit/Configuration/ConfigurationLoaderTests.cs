@@ -8,6 +8,17 @@ using HeimKit.Configuration;
 
 internal static class ConfigurationLoaderTests
 {
+    private static void AssertSharedFirst(string contents)
+    {
+        int diagnostics = contents.IndexOf("[Diagnostics]", StringComparison.Ordinal);
+        int activity = contents.IndexOf("[PlayerActivity]", StringComparison.Ordinal);
+        foreach (string feature in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" })
+        {
+            int at = contents.IndexOf("[" + feature + "]", StringComparison.Ordinal);
+            if (diagnostics < 0 || activity < 0 || at < 0 || diagnostics > at || activity > at)
+                throw new Exception("Shared settings must precede every feature section.");
+        }
+    }
     public static void Run()
     {
         // Use a new isolated directory to exercise real file creation and reload, not just in-memory settings.
@@ -50,6 +61,31 @@ internal static class ConfigurationLoaderTests
                 !reference.TryGetValue(entry.Key, out var value) || value != entry.Value.GetSerializedValue()))
                 throw new Exception("Reference configuration differs from the complete generated defaults.");
             System.Console.WriteLine("PASS: every reference setting matches generated defaults across all four features, with no hidden or retired keys.");
+            AssertSharedFirst(File.ReadAllText(complete.ConfigFilePath));
+            AssertSharedFirst(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "heimkit.cfg")));
+            // Setting changes trigger BepInEx's native alphabetical save before the layout handler.
+            complete[new ConfigDefinition("WeatherGuard", "Enabled")].BoxedValue = false;
+            AssertSharedFirst(File.ReadAllText(complete.ConfigFilePath));
+            var manuallyConfigured = File.ReadAllText(complete.ConfigFilePath).Replace("[WeatherGuard]", "[WeatherGuard]\nDisableDebugLogging = true");
+            File.WriteAllText(complete.ConfigFilePath, manuallyConfigured);
+            ConfigurationLoader.Load(Path.GetDirectoryName(complete.ConfigFilePath)!, setupLogger, config =>
+            {
+                _ = new InfiniteTorches(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new WeatherGuard(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new AFKNightWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new AFKRaidWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                return config;
+            });
+            var reordered = File.ReadAllText(complete.ConfigFilePath);
+            AssertSharedFirst(reordered);
+            if (!reordered.Contains("DisableDebugLogging = true") || !reordered.Contains("# Default value: true") || !reordered.Contains("# Setting type: Boolean"))
+                throw new Exception("Configuration layout lost manual values or generated descriptions.");
+            var roundTrip = new ConfigFile(complete.ConfigFilePath, false) { SaveOnConfigSet = false };
+            if (roundTrip.Bind("WeatherGuard", "Enabled", true).Value || !roundTrip.Bind("WeatherGuard", "DisableDebugLogging", false).Value)
+                throw new Exception("Reordering changed stored feature values.");
+            ConfigurationLayout.Apply(complete.ConfigFilePath);
+            if (File.ReadAllText(complete.ConfigFilePath) != reordered) throw new Exception("Layout was not idempotent.");
+            System.Console.WriteLine("PASS: shared config sections precede features on creation, reload and automatic saves, with reference parity and preserved manual values/descriptions.");
 
             // Simulate an existing user config that disables refilling and diagnostics and omits newer settings.
             File.WriteAllText(path, "[Torches]\nEnabled = false\nIntervalSeconds = 12\n\n[Diagnostics]\nDebugMode = true\nLogStatus = false\nLogRefillRequests = false\nLogRefillDetails = false\nStatusIntervalSeconds = 120\n");

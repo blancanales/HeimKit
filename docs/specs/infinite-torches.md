@@ -1,8 +1,10 @@
-# Infinite Torches specification
+# InfiniteTorches specification
 
 ## Purpose and scope
 
-Infinite Torches periodically refills eligible torches to their ordinary maximum fuel on a Windows Valheim dedicated server, without spending player inventory materials. It uses existing vanilla networking and is designed for unmodified clients. Environmental conditions can still extinguish a fueled torch.
+The feature display name and log prefix are exactly `InfiniteTorches`. Its existing configuration section remains `[Torches]`.
+
+InfiniteTorches periodically refills eligible torches to their ordinary maximum fuel on a Windows Valheim dedicated server, without spending player inventory materials. It uses existing vanilla networking and is designed for unmodified clients. Environmental conditions can still extinguish a fueled torch.
 
 Supported game and loader versions are documented in [server setup](../server-setup.md#supported-environment).
 
@@ -49,6 +51,8 @@ The module initializes only when enabled and the audited game-version guard pass
 
 All messages follow the [shared logging contract](../architecture.md#logging). Info uses concise configuration, effective startup state and readiness messages; Warning uses concise problem messages. Settings and prefab-processing details belong in Debug; Error and exception evidence retain structured output. Optional diagnostics use BepInEx Debug severity. The shared [repetition and volume limits](../architecture.md#repetition-and-volume-limits) govern all streams. DebugMode permits at most one changed-state SUMMARY per 60 seconds with explicitly labeled latest-pass/current counts, interval refill-request and reconciliation-outcome counts and omitted-message counts.
 
+Each reconciliation pass with sufficient replicated fuel increases emits one concise Info entry: `InfiniteTorches: Fuel increase observed for N torches.` A single update uses singular wording. All observed updates in that pass share the entry, independently of DebugMode and optional sample limits. The pending tracker returns the observed-update count after clearing completed requests, preventing repeated notices for unchanged fuel. Empty passes, requests merely sent, insufficient increases, timeouts, missing objects and owner changes do not produce a successful-update summary. The count covers pending requests confirmed by the existing sufficient-progress criteria, not all world torches. Responses observed in different passes have separate summaries; this remains evidence of replicated fuel progress rather than delivery acknowledgement or causation. Pause/shutdown clears pending state.
+
 Refill ACTION records are limited to four per 60 seconds. They identify object, prefab, position, prior fuel and target; they report a request sent without asserting client application. Pending-operation RESULT records are limited to six per 60 seconds. They identify observed fuel increase, timeout, owner change or missing object, with prior/target/observed fuel and elapsed wait. An owner-change result includes the owners needed to explain that transition. Missing observed data is `unknown`.
 
 Every reconciliation outcome is counted by the controller, even when its individual RESULT message is omitted. There is no unbounded per-pass request message or direct pending-refill logging bypass. A replicated fuel increase is not a delivery acknowledgement or proof of causation. SUMMARY counters labeled `_pass` refer to the latest examined pass, not every torch in the world; `_interval` counters cover activity since the preceding emitted summary.
@@ -78,6 +82,14 @@ ConfigurationLoader manages the shared file, and DiagnosticsSettings binds the c
 
 ## Player-service integration
 
-Follow the [required hookup](../architecture.md#required-feature-hookup). Plugin injects PlayerServices into Infinite Torches. The enabled module subscribes once to occupancy and releases its controller/pending-request state when empty or unavailable. Occupancy recreates the controller, retaining native world/prefab readiness checks and the configured refill interval. Ready-owner selection uses the shared presence snapshot. There is no activity lease because fuel eligibility does not depend on inferred idle. Shutdown or failure removes the presence registration; other consumers remain independent. The module sends no offline refill requests.
+Follow the [required hookup](../architecture.md#required-feature-hookup). Plugin injects PlayerServices into InfiniteTorches. The enabled module subscribes once to occupancy and releases its controller/pending-request state when empty or unavailable. Occupancy recreates the controller, retaining native world/prefab readiness checks and the configured refill interval. Ready-owner selection uses the shared presence snapshot. There is no activity lease because fuel eligibility does not depend on inferred idle. Shutdown or failure removes the presence registration; other consumers remain independent. The module sends no offline refill requests.
 
 No empty-server exception applies; refill eligibility uses ready characters and native world/prefab readiness.
+
+Gameplay lifecycle uses the shared joined-world state, established by native character spawning rather than an incoming connection or login handshake. After its own cleanup completes, the module acknowledges an empty-server pause to the shared service. One shared PlayerPresence notice confirms all features are inactive until a player joins; individual empty-server notices are suppressed. After a player joins, the shared active notice waits for successful initialization of all enabled consumers. Each enabled module reports Ready once when its required dedicated-server services become available, regardless of players. This indicates readiness to process, not installed player-dependent hooks or a verified gameplay effect. Individual processing activation and pause reasons belong in Debug, including later starts; no per-feature Resumed notice appears in normal output. Death/respawn does not end a joined session. See the [shared lifecycle](../architecture.md#presence-driven-lifecycle).
+
+Prefab lookup combines all unsupported entries into one Warning containing the total and counts grouped by rejection reason, with Torches.Prefabs as the setting to review. Successful definitions still participate normally. If no supported definitions remain, the separate availability warning describes that distinct failure to become ready. Per-object diagnostics remain Debug; ordinary fuel-update batches keep their existing reconciliation boundary. See the [standard logging contract](../architecture.md#standard-feature-events-and-grouping).
+
+Debug policy startup declarations follow the [shared contract](../architecture.md#debug-policy-startup-declaration), identifying global/feature enablement and hidden suppression independently of gameplay enablement.
+
+Detected loader Debug filtering is explained by a Warning followed immediately by Info instructions for the affected outputs; see [server configuration](../server-setup.md#configuration).

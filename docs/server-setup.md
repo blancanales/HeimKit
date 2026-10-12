@@ -1,12 +1,12 @@
 # Server setup
 
-Install HeimKit on a Windows Valheim dedicated server using Thunderstore Mod Manager or a manual installation. Both routes use the same plugin and feature configuration. See the [Infinite Torches guide](features/infinite-torches.md) and [WeatherGuard guide](features/weather-guard.md) and [AFKNightWatch guide](features/afk-night-watch.md) and [AFKRaidWatch guide](features/afk-raid-watch.md) for feature-specific usage.
+Install HeimKit on a Windows Valheim dedicated server using Thunderstore Mod Manager or a manual installation. Both routes use the same plugin and feature configuration. See the [InfiniteTorches guide](features/infinite-torches.md) and [WeatherGuard guide](features/weather-guard.md) and [AFKNightWatch guide](features/afk-night-watch.md) and [AFKRaidWatch guide](features/afk-raid-watch.md) for feature-specific usage.
 
 ## Supported environment
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit build | 0.1.22 |
+| HeimKit build | 0.1.47 |
 | Valheim Dedicated Server | 1.0.17; enforced by module compatibility guards. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
@@ -60,37 +60,9 @@ With the server stopped, replace the DLL in the same active location used during
 
 ## Configuration
 
-HeimKit uses the configuration directory supplied by BepInEx. Existing values are preserved, and missing settings are added with defaults. The supplied [config/heimkit.cfg](../config/heimkit.cfg) is an optional reference; do not overwrite an existing server config with it.
+Shared settings (`[Diagnostics]` and `[PlayerActivity]`) appear first; feature sections follow, with no required order among features. HeimKit uses the configuration directory supplied by BepInEx. Existing values are preserved, and missing settings are added with defaults. The supplied [config/heimkit.cfg](../config/heimkit.cfg) is an optional reference; do not overwrite an existing server config with it.
 
 ```ini
-[Torches]
-DebugMode = false
-Enabled = true
-IntervalSeconds = 5
-MaxMessagesPerPass = 32
-Prefabs = piece_groundtorch_wood,piece_groundtorch,piece_groundtorch_green,piece_groundtorch_blue,piece_walltorch
-
-[WeatherGuard]
-DebugMode = false
-Enabled = false
-ProtectRain = true
-ProtectUnderwater = true
-ExcludedPrefabs =
-DebugLogLevel = Medium
-LogWorldCreatedItems = false
-
-[AFKNightWatch]
-DebugMode = false
-Enabled = true
-MajoritySleepEnabled = true
-ExcludeAFKFromSleep = true
-RequiredSleepingPercent = 50
-RequireMoreThanPercent = true
-
-[AFKRaidWatch]
-Enabled = true
-DebugMode = false
-
 [PlayerActivity]
 IdleTimeoutSeconds = 300
 JoinGraceSeconds = 60
@@ -100,11 +72,42 @@ SampleIntervalSeconds = 1
 
 [Diagnostics]
 DebugMode = false
+
+[Torches]
+DebugMode = false
+Enabled = true
+IntervalSeconds = 5
+MaxMessagesPerPass = 32
+Prefabs = piece_groundtorch_wood,piece_groundtorch,piece_groundtorch_green,piece_groundtorch_blue,piece_walltorch
+
+[WeatherGuard]
+DebugMode = false
+Enabled = true
+ProtectRain = true
+ProtectUnderwater = true
+ExcludedPrefabs =
+DebugLogLevel = Detailed
+LogWorldCreatedItems = false
+
+[AFKNightWatch]
+DebugMode = false
+Enabled = true
+MajoritySleepEnabled = true
+ExcludeAFKFromSleep = true
+RequiredSleepingPercent = 50
+RequireMoreThanPercent = true
+SleepDelaySeconds = 30
+
+[AFKRaidWatch]
+Enabled = true
+DebugMode = false
 ```
 
 Each feature has an independent Enabled switch. Stop the server, edit the appropriate value, save and restart. Startup reports each feature's configured Enabled or Disabled state. An enabled feature then reports Ready when initialization succeeds, or a clear issue if it cannot initialize. Normal waiting and technical details appear only at Debug. Unsupported game versions disable the affected module.
 
 Global `[Diagnostics] DebugMode` enables bounded diagnostics across all features. Each feature also has a visible DebugMode setting, default false, in its own section. Startup adds any missing global or feature DebugMode keys to the active heimkit.cfg with that default, including disabled features, and preserves existing values. The hidden DisableDebugLogging key remains manual-only and is never added just because it is missing. With global debug off, set only the desired feature’s DebugMode to true. A false feature setting inherits global debug; it does not suppress global output. Startup, readiness, warnings and errors remain visible regardless. Optional diagnostic messages use BepInEx Debug severity; ordinary lifecycle messages and explicitly requested coverage reports retain Info severity. The [logging contract](architecture.md#logging) uses concise `Feature: Message` output for Info/Warning and structured evidence for Debug/Error/exception details. Its [repetition limits](architecture.md#repetition-and-volume-limits) keep unchanged status, empty scopes and repeated incidents from flooding logs.
+
+When any debug switch or hidden suppression is requested, each affected feature emits one startup Debug policy entry naming the source and effective configuration, including disabled features. A suppressed feature still emits this one declaration to explain its override; recurring diagnostics remain suppressed. All-off configurations stay quiet. These entries still require the loader's Debug filter.
 
 To display optional diagnostics, stop the server and add `Debug` to the existing `LogLevels` list under `[Logging.Console]` and/or `[Logging.Disk]` in the active loader's `BepInEx/config/BepInEx.cfg`, then restart. Console controls console output; Disk controls `LogOutput.log`. Preserve the other enabled levels, for example `LogLevels = Fatal, Error, Warning, Message, Info, Debug`. HeimKit's effective DebugMode must also be enabled. HeimKit does not alter BepInEx's log filters automatically.
 
@@ -112,7 +115,7 @@ Automatic Debug output across all features pauses after five minutes with no con
 
 ### AFKNightWatch
 
-AFKNightWatch owns majority sleep and idle exclusion from sleep. Enabled controls sleep; MajoritySleepEnabled and ExcludeAFKFromSleep select its two independent behaviors. The default threshold is strictly more than half after exclusion: one of two participants is insufficient. Set RequiredSleepingPercent to 100 for unanimity, or RequireMoreThanPercent false for an inclusive threshold. With majority off, every non-idle participant must sleep. With both behaviors off, native voting applies. Modified votes require a known living bed sleeper and preserve native afternoon/night, cooldown and bed requirements. See the [guide](features/afk-night-watch.md) and [specification](specs/afk-night-watch.md).
+AFKNightWatch owns majority sleep and idle exclusion from sleep. Enabled controls sleep; MajoritySleepEnabled and ExcludeAFKFromSleep select its two independent behaviors. The default threshold is strictly more than half after exclusion: one of two participants is insufficient. Set RequiredSleepingPercent to 100 for unanimity, or RequireMoreThanPercent false for an inclusive threshold. With majority off, every non-idle participant must sleep. With both behaviors off, native voting applies. SleepDelaySeconds defaults to 30 real seconds (0–300): the threshold must remain met throughout the wait while some players are not in bed. If everyone reaches bed, sleep may start immediately. Losing quorum or reliable observations restarts the wait. Modified votes require a known living bed sleeper and preserve native afternoon/night, cooldown and bed requirements. See the [guide](features/afk-night-watch.md) and [specification](specs/afk-night-watch.md).
 
 ### AFKRaidWatch
 
@@ -136,9 +139,9 @@ Idle is an estimate based on what the server can see. Some local camera, menu an
 
 This is a fresh configuration layout. HeimKit does not convert legacy sections, read legacy aliases or automatically delete them. Recognized current values are preserved and missing current settings are added. For a clean configuration, with the server stopped the operator can remove the active heimkit.cfg and allow the next startup to generate complete defaults, then reapply desired settings. The plugin does not delete the server configuration. Unbound legacy entries may remain if an old file is retained, but do not control these features.
 
-All four features use shared presence notifications to pause their gameplay controllers when empty or player presence is unavailable, then resume on the first connection subject to native world readiness. Additional logins do not restart them. WeatherGuard releases retained ownership and protection hooks during the pause; explicitly requested coverage reports remain available separately. See the [required lifecycle hookup and exceptions](architecture.md#required-feature-hookup).
+All four features use shared presence notifications to pause their gameplay controllers when empty or player presence is unavailable, then resume after the first player has spawned in the world, subject to native world readiness. Additional logins do not restart them. WeatherGuard releases retained ownership and protection hooks during the pause; explicitly requested coverage reports remain available separately. See the [required lifecycle hookup and exceptions](architecture.md#required-feature-hookup).
 
-Normal Info logs announce `PlayerPresence: Server is empty.` once when the server is first observed empty or its last connected player leaves. `PlayerPresence: Server has connected players.` appears when it is first observed occupied or the first player connects to an empty server. Additional connections and departures while others remain do not repeat these notices. Connecting/loading players count as connected. The notices work with debugging off; unavailable population does not produce a false empty/connection notice.
+Normal Info logs distinguish transport connections from world entry. PlayerPresence reports all features inactive after confirmed empty-server cleanup, and all enabled features active after the first joined player and successful feature initialization. Delayed readiness defers the active notice. Incoming connections and completed login handshakes alone do not resume gameplay features. Death/respawn keeps the same session joined until disconnect. After every enabled consumer confirms its own cleanup, one shared entry reports `PlayerPresence: No players have joined the world; all features are inactive until a player joins.` A cleanup failure remains visible and suppresses this combined success notice for that empty interval. Each enabled feature reports Ready once when its required dedicated-server services are available, regardless of players. The shared presence status follows those Ready entries. Individual processing transitions, including other pause reasons and later starts, belong only in Debug; warnings/errors remain visible. Additional players and unchanged polls do not repeat these notices. Unavailable presence is not reported as an empty server. See the [presence lifecycle](architecture.md#presence-driven-lifecycle).
 
 Shared PlayerActivity debug output has no additional switch. It uses one transition stream permitted by any registered consumer's effective global/feature/hidden policy. This does not enable the other consumer's feature-specific output. Required gameplay inference is independent of diagnostics.
 
@@ -163,7 +166,7 @@ For example, to keep WeatherGuard diagnostics while suppressing torch diagnostic
 DisableDebugLogging = true
 ```
 
-The key only suppresses that feature's optional output and diagnostic collection. It cannot force diagnostics on, disable gameplay, hide startup/readiness messages or suppress warnings/errors. Features remain independent. WeatherGuard's Medium/Detailed selection, optional world-item scope and all sample limits still apply when its effective diagnostics are enabled. Removing the key or setting it to false restores the global-or-feature rule.
+The key suppresses that feature's recurring optional output and diagnostic collection; the one startup Debug policy declaration remains available to explain suppression. It cannot force diagnostics on, disable gameplay, hide startup/readiness messages or suppress warnings/errors. Features remain independent. WeatherGuard's Medium/Detailed selection, optional world-item scope and all sample limits still apply when its effective diagnostics are enabled. Removing the key or setting it to false restores the global-or-feature rule.
 
 Use `true` or `false` (case-insensitive). Empty strings, other values and an unreadable override use the safe fallback of suppressing that feature's diagnostics. One warning per feature per loaded configuration identifies the section, key and fallback without echoing the supplied text. Invalid manual values are retained rather than silently rewritten. Section and key names are case-sensitive. Inline comments on the value are not supported.
 
@@ -188,3 +191,7 @@ The report remains available when global debug is off, the feature's hidden debu
 If the plugin does not load, inspect `BepInEx/LogOutput.log` in the active loader location. For Option A, use the server profile's files and the manager's server launch; for Option B, use the dedicated-server folder's files and its startup script. Version warnings require API review before changing the guard. Logs report transmission attempts, not confirmed delivery. Remove credentials and join codes before sharing logs.
 
 To disable a module, stop the server, set its Enabled value to false in the active `heimkit.cfg` and restart using the same launch route. To remove HeimKit, stop the server and remove its DLL from the active profile or manual server installation. Torch fuel remains ordinary saved data. WeatherGuard releases network ownership and does not persist a new protection flag or creator; existing custom world fields from other implementations are not automatically removed.
+
+The shared AFK detector logs individual AFK entry and exit at Info, including the character name/peer ID and current AFK count out of joined players. Debugging is not required. Notices appear only while an enabled feature requires AFK inference. See the [AFK notice contract](architecture.md#ordinary-afk-notices) for count scope and tracking-loss behavior.
+
+When feature diagnostics are configured on, startup checks the currently registered native disk and console listeners. A known listener excluding Debug produces one visible feature Warning identifying its LogLevels setting, immediately followed by Info messages explaining the independent loader filter, the config file and each affected section with a LogLevels example, preservation of existing levels and the required restart. The explanation also states that feature DebugMode can operate with global HeimKit DebugMode off. Intentional hidden suppression does not produce a delivery warning. The check does not alter loader settings or infer the behavior of unknown/custom listeners.

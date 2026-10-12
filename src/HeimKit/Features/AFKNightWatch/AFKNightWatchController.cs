@@ -14,6 +14,7 @@ public sealed class AFKNightWatchController : IDisposable
     private readonly ManualLogSource _logger;
     private PlayerActivityService.Lease? _lease;
     private readonly AFKNightWatchDiagnostics _diagnostics;
+    private readonly AFKNightWatchSleepNotices _sleepNotices;
     private long _evaluations, _sleepOutcomes;
     private readonly PlayerServices _players;
     private IDisposable? _sleepVote;
@@ -25,7 +26,7 @@ public sealed class AFKNightWatchController : IDisposable
     internal bool DebugEnabled => _diagnostics.Enabled;
     public AFKNightWatchController(AFKNightWatch module, AFKNightWatchSettings settings, ManualLogSource logger, PlayerServices players)
     {
-        _module = module; _logger = logger; _players = players; _settings = settings; _diagnostics = new(logger, settings.DebugLogging);
+        _module = module; _logger = logger; _players = players; _settings = settings; _diagnostics = new(logger, settings.DebugLogging); _sleepNotices = new(logger, vote => _diagnostics.SleepStarted(vote, settings));
         foreach (string key in new[] { "vote_hook_calls", "update_sleeping_invocations", "empty_vote_rosters", "no_living_sleeper_votes", "unknown_actor_native_fallbacks", "vote_not_ready_fallback", "vote_returned_true", "vote_returned_false", "native_vote_exceptions", "native_sleep_update_exceptions", "skip_to_morning_invocations", "sleep_probe_failures", "time_skip_activations_observed", "time_skip_endings_observed" }) _hooks.Add(key, 0);
         try
         {
@@ -33,7 +34,7 @@ public sealed class AFKNightWatchController : IDisposable
             if (settings.MajoritySleepEnabled.Value || settings.ExcludeAFKFromSleep.Value)
             {
                 Func<(int, bool)>? quorum = settings.MajoritySleepEnabled.Value ? () => (settings.RequiredSleepingPercent.Value, settings.RequireMoreThanPercent.Value) : null;
-                _sleepVote = AFKNightWatchSleepVoteCoordinator.Register(quorum, settings.ExcludeAFKFromSleep.Value ? _lease!.Service : null, ObserveVote, module.Fail, () => _diagnostics.Enabled, ObserveSleepHook, logger, module.Name, players.Presence);
+                _sleepVote = AFKNightWatchSleepVoteCoordinator.Register(quorum, settings.ExcludeAFKFromSleep.Value ? _lease!.Service : null, ObserveVote, module.Fail, () => _diagnostics.Enabled, ObserveSleepHook, logger, module.Name, players.Presence, _sleepNotices.Observe, () => settings.SleepDelaySeconds.Value);
             }
         }
         catch { Dispose(); throw; }
@@ -64,7 +65,9 @@ public sealed class AFKNightWatchController : IDisposable
     }
     public void Dispose()
     {
+        _sleepNotices.Reset();
         var sleepVote = _sleepVote; var lease = _lease; _sleepVote = null; _lease = null;
-        ModuleCleanup.Run(_logger, _module.Name, () => sleepVote?.Dispose(), () => lease?.Dispose());
+        if (!ModuleCleanup.Run(_logger, _module.Name, () => sleepVote?.Dispose(), () => lease?.Dispose()))
+            throw new InvalidOperationException("Controller cleanup did not complete; paused state cannot be confirmed.");
     }
 }

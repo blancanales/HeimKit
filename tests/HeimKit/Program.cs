@@ -27,3 +27,27 @@ RaidRulesTests.Run();
 PlayerPresenceDiagnosticsTests.Run();
 
 PlayerPresenceEventsTests.Run();
+
+PlayerActivityNoticesTests.Run();
+
+PlayerProcessingNoticesTests.Run();
+
+SleepDelayTests.Run();
+SleepNoticesTests.Run();
+SelectionNoticesTests.Run();
+WeatherGuardStandardNoticesTests.Run();
+InfiniteTorchesStandardNoticesTests.Run();
+
+DebugLoggingStartupTests.Run();
+
+WeatherGuardLiveDebugPolicyTests.Run();
+
+FeatureLiveDebugPolicyTests.Run();
+
+DebugLoggingDeliveryTests.Run();
+
+WeatherGuardExposureTrackingTests.Run();
+
+WeatherGuardWearPassTests.Run();
+
+WeatherGuardSettingsLoggingTests.Run();

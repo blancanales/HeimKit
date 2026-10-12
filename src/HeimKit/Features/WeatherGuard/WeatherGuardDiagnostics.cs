@@ -3,6 +3,7 @@ using System.Linq;
 using System.Collections.Generic;
 using BepInEx.Logging;
 using HeimKit.Shared;
+using HeimKit.Configuration;
 using HeimKit.Features.WeatherGuard.Models;
 
 namespace HeimKit.Features.WeatherGuard;
@@ -10,10 +11,9 @@ namespace HeimKit.Features.WeatherGuard;
 public sealed class WeatherGuardDiagnostics
 {
     private readonly ManualLogSource _logger;
-    private readonly bool _debug;
+    private readonly Func<bool> _debugEnabled;
     private readonly DebugLogLevel _level;
-    private readonly Dictionary<string, string> _mediumStates = new();
-    private int _mediumCursor;
+    private readonly HashSet<string> _wearPhases = new();
     public const int MediumSampleLimit = 12;
     internal bool LogWorldCreatedItems { get; }
     private readonly DiagnosticBudget _budget = new();
@@ -23,50 +23,119 @@ public sealed class WeatherGuardDiagnostics
     private (float Health, float Lost, long Bypasses, long Gates) Previous(RainEvidence watch)
         => _reported.TryGetValue(watch, out var previous) ? previous : (watch.FirstHealth, 0, 0, 0);
     private float _lastSummary;
+    private bool _capacityLimited;
     public const int SampleLimit = 6;
     public const int WearSampleLimit = 3;
-    internal bool DebugEnabled => _debug && DiagnosticLog.ServerActivity.Allowed && _level == DebugLogLevel.Detailed;
+    private bool Enabled => _debugEnabled() && DiagnosticLog.ServerActivity.Allowed;
+    internal bool StepsEnabled => Enabled;
+    internal bool DebugEnabled => Enabled && _level == DebugLogLevel.Detailed;
     public WeatherGuardDiagnostics(ManualLogSource logger, bool debug, DebugLogLevel level = DebugLogLevel.Detailed, bool logWorldCreated = true)
-    { _logger = logger; _debug = debug; _level = level; LogWorldCreatedItems = logWorldCreated; }
+        : this(logger, () => debug, level, logWorldCreated) { }
+    public WeatherGuardDiagnostics(ManualLogSource logger, DebugLoggingPolicy policy, DebugLogLevel level, bool logWorldCreated)
+        : this(logger, () => policy.Enabled, level, logWorldCreated) { }
+    private WeatherGuardDiagnostics(ManualLogSource logger, Func<bool> debugEnabled, DebugLogLevel level, bool logWorldCreated)
+    { _logger = logger; _debugEnabled = debugEnabled; _level = level; LogWorldCreatedItems = logWorldCreated; }
     private void Write(DiagnosticEvent category, string result, Dictionary<string, object?> fields, LogLevel level = LogLevel.Debug)
         => DiagnosticLog.Write(_logger, "WeatherGuard", category, result, fields.Select(p => (p.Key, p.Value)), level);
+    public static void StartupSettings(ManualLogSource logger, WeatherGuardSettings settings)
+    {
+        if (!settings.DebugLogging.Enabled || settings.DebugLogLevel.Value != DebugLogLevel.Detailed) return;
+        DiagnosticLog.Write(logger, "WeatherGuard", DiagnosticEvent.Detail, "Settings and processing limits", new (string, object?)[]
+        {
+            ("rain_protection_enabled", settings.ProtectRain.Value),
+            ("underwater_protection_enabled", settings.ProtectUnderwater.Value),
+            ("excluded_prefabs", settings.ExcludedPrefabs.Value),
+            ("debug_log_level", settings.DebugLogLevel.Value),
+            ("log_world_created_items", settings.LogWorldCreatedItems.Value),
+            ("maximum_regions", WeatherGuardRules.MaximumRegions),
+            ("maximum_objects", WeatherGuardRules.MaximumObjects),
+            ("maximum_protected", WeatherGuardRules.MaximumProtected),
+            ("roof_check_max_age_s", WeatherGuardExposureTracking.MaximumObservationAgeSeconds),
+            ("roof_probe_limit_per_scan", WeatherGuardExposureTracking.ProbeLimitPerScan),
+            ("native_wet_timer_threshold_game_s", 60),
+            ("native_weather_damage_percent", 5),
+            ("scope", "eligible_player_built_pieces_in_retained_regions"),
+            ("wetness_source", "server_environment_not_player_local_weather")
+        }, LogLevel.Debug);
+    }
+    public void CapacityState(bool limited)
+    {
+        if (limited == _capacityLimited) return;
+        _capacityLimited = limited;
+        DiagnosticLog.Write(_logger, "WeatherGuard", DiagnosticEvent.Lifecycle,
+            limited ? "Processing capacity reached. Unmanaged pieces retain vanilla processing; see debug status."
+                : "Processing capacity limit cleared.", level: limited ? LogLevel.Warning : LogLevel.Info);
+    }
+    public void WeatherDamageSuppressed(int count, string? singleId = null, string? singlePrefab = null)
+    {
+        if (count <= 0) return;
+        string target = count != 1 ? count + " pieces" : !string.IsNullOrEmpty(singleId)
+            ? !string.IsNullOrEmpty(singlePrefab) ? singlePrefab + " (piece " + singleId + ")" : "piece " + singleId
+            : "1 piece";
+        DiagnosticLog.Write(_logger, "WeatherGuard", DiagnosticEvent.Result,
+            "Prevented weather damage to " + target + ".");
+    }
+    public void InitialAcquisition(int protectedCount)
+    {
+        if (!Enabled) return;
+        Write(DiagnosticEvent.Detail, "Initial protection acquisition", new Dictionary<string, object?> { ["protected_now"] = protectedCount });
+    }
     private static string Counts(Dictionary<string, int> counts)
         => string.Join(",", counts.OrderBy(p => p.Key).Select(p => $"{p.Key}:{p.Value}"));
-    private static long Delta(long current, long previous) => Math.Max(0, current - previous);
-    public void Report(float now, Func<WeatherGuardStatus> snapshot, Func<IEnumerable<RainEvidence>>? rain = null, Func<IEnumerable<ProtectionObservation>>? protection = null)
+    private static string ReleaseChanges(Dictionary<string, int> current, Dictionary<string, int> previous)
     {
-        if (!_debug || !DiagnosticLog.ServerActivity.Allowed || !_budget.Reserve(now, "SUMMARY", 1, false)) return;
-        if (_level == DebugLogLevel.Medium)
-        { Medium(now, protection?.Invoke() ?? Array.Empty<ProtectionObservation>()); return; }
-        var s = snapshot(); var old = _previous ?? new WeatherGuardStatus();
-        var watches = rain?.Invoke().Take(6).ToArray() ?? Array.Empty<RainEvidence>();
-        Write(DiagnosticEvent.Summary, !s.RainProtection && !s.UnderwaterProtection ? "Rain and underwater protection are both disabled" : s.Waiting > 0 ? "Some eligible pieces are waiting for context" : s.Eligible == 0 ? "Waiting for eligible player-built pieces" : "Eligible pieces are managed; rain evidence reported separately", new()
+        var changes = new Dictionary<string, int>();
+        foreach (var reason in current)
         {
-            ["interval_s"] = _previous == null ? 0 : Math.Max(0, now - _lastSummary),
-            ["rain_protection_enabled"] = s.RainProtection, ["underwater_protection_enabled"] = s.UnderwaterProtection,
-            ["eligible_now"] = s.Eligible, ["managed_now"] = s.Protected,
-            ["waiting_terrain_now"] = s.WaitingTerrain, ["waiting_instance_now"] = s.WaitingInstance,
-            ["waiting_objects_now"] = s.WaitingObjects, ["ready_players_now"] = s.ReadyPeers, ["waiting_character_now"] = s.CharacterWaits,
-            ["watched_player_pieces_now"] = watches.Count(w => w.Eligibility == "eligible"),
-            ["watched_world_controls_now"] = watches.Count(w => w.Eligibility == "world-created"),
-            ["watched_health_losses_interval"] = watches.Count(w => w.HealthLost > Previous(w).Lost),
-            ["watched_weather_bypasses_interval"] = watches.Sum(w => Delta(w.WeatherBypasses, Previous(w).Bypasses)),
-            ["wet_gates_interval"] = Delta(s.WetOpportunities, old.WetOpportunities),
-            ["acquired_interval"] = Delta(s.Acquired, old.Acquired), ["released_interval"] = Delta(s.Released, old.Released),
-            ["exclusions_now"] = Counts(s.Exclusions), ["capacity_limited"] = s.Limited,
-            ["omitted_messages_interval"] = _budget.TakeOmitted()
-        });
+            previous.TryGetValue(reason.Key, out int before);
+            int count = Math.Max(0, reason.Value - before);
+            if (count > 0) changes[reason.Key] = count;
+        }
+        return Counts(changes);
+    }
+    private static long Delta(long current, long previous) => Math.Max(0, current - previous);
+    public void Report(float now, Func<WeatherGuardStatus> snapshot, Func<IEnumerable<RainEvidence>>? rain = null, Func<IEnumerable<ProtectionObservation>>? protection = null, Func<Dictionary<string, object?>>? exposure = null)
+    {
+        if (!Enabled || !_budget.Reserve(now, "SUMMARY", 1, false)) return;
+        var s = snapshot(); var old = _previous ?? new WeatherGuardStatus();
+        var steps = new Dictionary<string, object?>
+        {
+            ["eligible_now"] = s.Eligible, ["managed_now"] = s.Protected, ["waiting_now"] = s.Waiting,
+            ["wear_calls_interval"] = Delta(s.WearPasses, old.WearPasses),
+            ["native_weather_due_interval"] = Delta(s.WeatherGates, old.WeatherGates),
+            ["weather_contributions_removed_interval"] = Delta(s.WeatherSuppressed, old.WeatherSuppressed),
+            ["confirmed_preventions_interval"] = Delta(s.ConfirmedPreventions, old.ConfirmedPreventions)
+        };
+        foreach (var decision in s.Decisions)
+        {
+            old.Decisions.TryGetValue(decision.Key, out long previous);
+            steps[decision.Key + "_interval"] = Delta(decision.Value, previous);
+        }
+        if (exposure != null)
+            foreach (var field in exposure()) steps[field.Key] = field.Value;
+        if (_level == DebugLogLevel.Detailed)
+        {
+            steps["waiting_terrain_now"] = s.WaitingTerrain; steps["waiting_instance_now"] = s.WaitingInstance;
+            steps["waiting_objects_now"] = s.WaitingObjects; steps["ready_players_now"] = s.ReadyPeers;
+            steps["waiting_character_now"] = s.CharacterWaits; steps["exclusions_now"] = Counts(s.Exclusions);
+            steps["capacity_limited"] = s.Limited; steps["omitted_messages_interval"] = _budget.TakeOmitted();
+        }
+        Write(DiagnosticEvent.Summary, "Protection path: eligible pieces, ownership, native weather conditions, wet timer, prevention", steps);
+        if (_level == DebugLogLevel.Medium)
+        { _previous = s; _lastSummary = now; return; }
+        var watches = rain?.Invoke().Take(6).ToArray() ?? Array.Empty<RainEvidence>();
         // One reserved counter detail preserves networking/support evidence without
         // competing with object-loading and wear-detail samples.
         Write(DiagnosticEvent.Detail, "Processing and network counters", new()
         {
             ["interval_s"] = _previous == null ? 0 : Math.Max(0, now - _lastSummary),
-            ["wear_calls_interval"] = Delta(s.WearPasses, old.WearPasses), ["weather_gates_interval"] = Delta(s.WeatherGates, old.WeatherGates),
+            ["acquired_interval"] = Delta(s.Acquired, old.Acquired), ["released_interval"] = Delta(s.Released, old.Released),
+            ["release_reasons_interval"] = ReleaseChanges(s.ReleaseTotals, old.ReleaseTotals),
             ["support_passes_interval"] = Delta(s.SupportPasses, old.SupportPasses), ["native_commands_interval"] = Delta(s.NativeCommands, old.NativeCommands),
             ["blocked_client_records_interval"] = Delta(s.BlockedData, old.BlockedData), ["prevented_transfers_interval"] = Delta(s.BlockedOwner, old.BlockedOwner),
             ["blocked_broadcasts_interval"] = Delta(s.BlockedBroadcast, old.BlockedBroadcast), ["routed_commands_interval"] = Delta(s.Commands, old.Commands),
             ["owner_losses_interval"] = Delta(s.OwnerLosses, old.OwnerLosses), ["release_reasons_total"] = Counts(s.ReleaseTotals),
-            ["acquired_total"] = s.Acquired, ["released_total"] = s.Released, ["weather_gates_total"] = s.WeatherGates,
+            ["acquired_total"] = s.Acquired, ["released_total"] = s.Released, ["native_weather_due_total"] = s.WeatherGates,
             ["regions_now"] = s.Regions, ["nearby_records_now"] = s.Nearby, ["distant_records_now"] = s.Distant
         });
         foreach (var watch in watches) Rain(now, watch);
@@ -81,8 +150,8 @@ public sealed class WeatherGuardDiagnostics
         if (!owner) reasons.Add("not_server_processed");
         if (warmup) reasons.Add("warmup");
         if (!fields.ContainsKey("environment_wet")) reasons.Add("conditions_unknown");
-        else if (!Flag(fields, "environment_wet") && !Flag(fields, "underwater")) reasons.Add("dry");
-        if (Flag(fields, "cached_roof") && !Flag(fields, "underwater")) reasons.Add("covered");
+        else if (!Flag(fields, "environment_wet") && !Flag(fields, "underwater")) reasons.Add("server_environment_dry");
+        if (Flag(fields, "cached_roof") && !Flag(fields, "underwater")) reasons.Add((Flag(fields, "roof_cache_disagrees") || fields.TryGetValue("fresh_roof", out var freshRoof) && freshRoof is bool fresh && !fresh) ? "native_roof_cache_disagrees_with_geometry" : "covered");
         if (Flag(fields, "shielded")) reasons.Add("shielded");
         if (fields.ContainsKey("health_above_half") && !Flag(fields, "health_above_half")) reasons.Add("health_at_or_below_half");
         if (fields.TryGetValue("native_health_fraction", out var health) && health is float fraction && fraction <= 0.5f) reasons.Add("health_at_or_below_half");
@@ -92,51 +161,20 @@ public sealed class WeatherGuardDiagnostics
     }
     private void Rain(float now, RainEvidence watch)
     {
-        var fields = new Dictionary<string, object?>(watch.Identity);
-        bool serverOwned = watch.Protected && watch.Fields.TryGetValue("processor", out var actualProcessor) && Equals(actualProcessor, "server");
-        string blockers = Blockers(watch.Fields, serverOwned, Flag(watch.Fields, "warmup"));
-        string result;
         var previous = Previous(watch);
-        long bypasses = Delta(watch.WeatherBypasses, previous.Bypasses);
-        fields["protection"] = watch.Protected ? "active" : watch.Eligibility == "eligible" ? "waiting" : "excluded";
-        fields["protection_reason"] = watch.ProtectionReason;
-        fields["health_change"] = watch.HealthLost > previous.Lost ? "loss_observed" : watch.Health > previous.Health ? "increase_observed" : "unchanged";
-        fields["health_before"] = previous.Health; fields["health_after"] = watch.Health;
-        fields["health_lost_interval"] = Math.Max(0, watch.HealthLost - previous.Lost);
-        fields["health_loss_observations_total"] = watch.HealthLossObservations;
-        fields["weather_damage"] = "unconfirmed";
-        fields["damage_source"] = watch.HealthLossObservations > 0 ? "unobserved" : "no_health_loss_observed";
-        fields["action"] = bypasses > 0 ? "weather_branch_bypassed" : !watch.Protected ? "left_to_native_owner" : "weather_bypass_not_observed";
-        fields["weather_gates_interval"] = Delta(watch.Gates, previous.Gates);
-        fields["weather_bypasses_interval"] = bypasses; fields["weather_bypasses_total"] = watch.WeatherBypasses;
-        fields["action_scope"] = "reporting_interval";
-        fields["weather_opportunity"] = !serverOwned ? "owner_calculation_unavailable" : blockers != "none" ? "conditions_not_met" :
-            watch.WetSeconds > 60 ? "qualifying_duration_observed" : "qualifying_duration_not_reached";
-        if (watch.HealthLost > previous.Lost) result = "Health loss observed; weather cause unconfirmed";
-        else if (bypasses > 0) result = "Weather processing bypassed; no health loss observed in interval";
-        else if (!watch.Protected) result = "Piece unprotected; native owner controls wear";
-        else result = "Piece protected; weather bypass not observed in interval";
-        fields["source"] = serverOwned ? "server_owned_state" : "replicated_state";
-        fields["condition_source"] = "server_instance";
-        fields["rain_protection"] = watch.Fields.TryGetValue("rain_protection", out var rainMode) ? rainMode : null;
-        fields["underwater_protection"] = watch.Fields.TryGetValue("underwater_protection", out var waterMode) ? waterMode : null;
-        fields["eligibility"] = watch.Eligibility; fields["managed"] = watch.Protected;
-        fields["tracked_s"] = now - watch.Started; fields["blockers"] = blockers;
-        fields["health_first"] = watch.FirstHealth; fields["health_current"] = watch.Health; fields["health_minimum"] = watch.MinimumHealth;
-        fields["health_delta"] = watch.Health - watch.FirstHealth; fields["maximum_health"] = watch.MaximumHealth;
-        fields["wet_observed_s"] = watch.Eligibility == "world-created" ? null : watch.WetSeconds;
-        fields["longest_wet_observed_s"] = watch.Eligibility == "world-created" ? null : watch.LongestWetSeconds;
-        fields["weather_gates_total"] = watch.Gates; fields["wet_gates_total"] = watch.WetGates;
-        fields["creator_changed"] = watch.CreatorChanged;
-        fields["processor"] = watch.Fields.TryGetValue("processor", out var processor) ? processor : null;
-        if (Flag(watch.Fields, "warmup")) fields["warmup_remaining_s"] = watch.Fields.TryGetValue("warmup_remaining_s", out var remaining) ? remaining : null;
-        fields["cached_roof"] = watch.Fields.TryGetValue("cached_roof", out var roof) ? roof : null;
-        fields["environment_wet"] = watch.Fields.TryGetValue("environment_wet", out var wet) ? wet : null;
-        if (watch.FreshRoof.HasValue && (!roof?.Equals(watch.FreshRoof.Value) ?? true))
-        { fields["fresh_roof"] = watch.FreshRoof; fields["roof_probe_age_s"] = now - watch.FreshRoofAt; fields["cover_timer"] = watch.Fields.TryGetValue("cover_timer", out var timer) ? timer : null; }
-        if (watch.OwnerChanges > 0 || watch.ProtectionChanges > 0)
-        { fields["owner_changes_observed_total"] = watch.OwnerChanges; fields["management_changes_observed_total"] = watch.ProtectionChanges; }
-        Write(DiagnosticEvent.Result, result, fields);
+        if (watch.HealthLost <= previous.Lost) return;
+        var fields = new Dictionary<string, object?>(watch.Identity)
+        {
+            ["managed"] = watch.Protected, ["eligibility"] = watch.Eligibility,
+            ["health_before"] = previous.Health, ["health_after"] = watch.Health,
+            ["health_lost_interval"] = watch.HealthLost - previous.Lost, ["health_minimum"] = watch.MinimumHealth,
+            ["weather_cause"] = "unconfirmed",
+            ["weather_contributions_due_interval"] = Delta(watch.Gates, previous.Gates),
+            ["weather_contributions_removed_interval"] = Delta(watch.WeatherBypasses, previous.Bypasses),
+            ["owner_changes_observed_total"] = watch.OwnerChanges,
+            ["management_changes_observed_total"] = watch.ProtectionChanges
+        };
+        Write(DiagnosticEvent.Result, "Health loss observed; weather cause unconfirmed", fields);
     }
     public void Sample(float now, Func<string> describe) => Sample(now, "acquisition", describe);
     public void Sample(float now, string stream, Func<string> describe)
@@ -186,58 +224,24 @@ public sealed class WeatherGuardDiagnostics
         var fields = new Dictionary<string, object?>(observation.Identity);
         foreach (var field in observation.Fields) fields[field.Key] = field.Value;
         fields["blockers"] = Blockers(observation.Fields, observation.Owner, observation.Warmup);
+        string phase = fields["blockers"] + ":" + observation.GateReached + ":" + observation.Suppressed;
+        bool healthLoss = after.HasValue && after.Value < observation.Before;
+        if (!failed && !healthLoss && !_wearPhases.Add(phase)) return;
         fields["condition_source"] = "server_instance";
         fields.TryGetValue("eligibility", out var reason);
         fields["protection"] = observation.Protected ? "active" : Equals(reason, "eligible") ? "waiting" : "excluded";
         fields["protection_reason"] = observation.Protected ? "eligible" : Equals(reason, "eligible") ? "not_acquired" : reason;
-        fields["action"] = observation.Suppressed ? "weather_branch_bypassed" : !observation.Owner ? "left_to_native_owner" :
-            !observation.GateReached ? "weather_gate_not_reached" : "native_weather_branch_allowed";
+        fields["action"] = observation.Suppressed ? "weather_contribution_suppressed" : !observation.Owner ? "left_to_native_owner" :
+            !observation.GateReached ? "weather_contribution_not_due" : "native_weather_contribution_allowed";
         fields["health_change"] = !after.HasValue ? "unavailable" : after.Value < observation.Before ? "loss_observed" : after.Value > observation.Before ? "increase_observed" : "unchanged";
         fields["weather_damage"] = "unconfirmed"; fields["damage_source"] = "unobserved";
         fields["managed"] = observation.Protected; fields["warmup"] = observation.Warmup;
-        fields["weather_gate_reached"] = observation.GateReached; fields["weather_branch_bypassed"] = observation.Suppressed;
+        fields["native_weather_contribution_due"] = observation.GateReached; fields["weather_contribution_suppressed"] = observation.Suppressed;
         fields["health_before"] = observation.Before; fields["health_after"] = after;
         if (failed) fields["exception"] = true;
         Write(DiagnosticEvent.Detail, !observation.Owner ? "Wear calculation runs on another owner or is unassigned" : observation.Warmup ?
-            "Waiting for native loading warmup" : !observation.GateReached ? "Native weather gate was not reached" :
-            "Native weather gate reached; condition details captured", fields, failed ? LogLevel.Error : LogLevel.Debug);
-    }
-    private void Medium(float now, IEnumerable<ProtectionObservation> observations)
-    {
-        var items = observations.Where(item => item.Origin == "player_built" || LogWorldCreatedItems && item.Origin == "world_created")
-            .Take(WeatherGuardRules.MaximumObjects).ToArray();
-        var ids = new HashSet<string>(items.Select(item => Convert.ToString(item.Identity["object"])!));
-        foreach (var id in _mediumStates.Keys.Where(id => !ids.Contains(id)).ToArray()) _mediumStates.Remove(id);
-        string Key(ProtectionObservation item) => Convert.ToString(item.Identity["object"])!;
-        string State(ProtectionObservation item) => $"{item.Protected}:{item.Reason}";
-        var changed = items.Where(item => !_mediumStates.TryGetValue(Key(item), out var state) || state != State(item)).ToArray();
-        var selected = changed.Take(MediumSampleLimit).ToList();
-        var selectedIds = new HashSet<string>(selected.Select(Key));
-        for (int visited = 0; visited < items.Length && selected.Count < MediumSampleLimit; visited++)
-        {
-            _mediumCursor %= items.Length;
-            var item = items[_mediumCursor++];
-            if (selectedIds.Add(Key(item))) selected.Add(item);
-        }
-        Write(DiagnosticEvent.Summary, "Qualifying structure protection status", new()
-        {
-            ["log_level"] = "Medium", ["qualifying_items_now"] = items.Length,
-            ["protected_now"] = items.Count(item => item.Protected),
-            ["rain_protected_now"] = items.Count(item => item.Protected && item.RainProtection),
-            ["underwater_protected_now"] = items.Count(item => item.Protected && item.UnderwaterProtection),
-            ["unprotected_player_items_now"] = items.Count(item => !item.Protected && item.Origin == "player_built"),
-            ["unprotected_world_items_now"] = items.Count(item => !item.Protected && item.Origin == "world_created"),
-            ["world_items_included"] = LogWorldCreatedItems, ["item_samples_now"] = selected.Count,
-            ["pending_changed_samples_now"] = Math.Max(0, changed.Length - selected.Count)
-        });
-        foreach (var item in selected)
-        {
-            var fields = new Dictionary<string, object?>(item.Identity)
-            { ["protected"] = item.Protected, ["rain_protected"] = item.Protected && item.RainProtection,
-              ["underwater_protected"] = item.Protected && item.UnderwaterProtection, ["origin"] = item.Origin, ["reason"] = item.Reason };
-            Write(DiagnosticEvent.Result, item.Protected ? "Item protected" : "Item not protected", fields);
-            _mediumStates[Key(item)] = State(item);
-        }
+            "Waiting for native loading warmup" : !observation.GateReached ? "Native weather contribution was not due" :
+            "Native weather contribution reached after native wet timer; condition details captured", fields, failed ? LogLevel.Error : LogLevel.Debug);
     }
     public void Coverage(CoverageSnapshot s)
     {
@@ -252,5 +256,5 @@ public sealed class WeatherGuardDiagnostics
             $"Rain protection {s.RainEnabled}; underwater protection {s.UnderwaterEnabled}. " +
             "The rest of the world is unobserved; weather-damage prevention is not verified.");
     }
-    public void Reset() { _budget.Reset(); _wearStreams.Clear(); _previous = null; _reported.Clear(); _mediumStates.Clear(); _mediumCursor = 0; _lastSummary = 0; }
+    public void Reset() { _capacityLimited = false; _budget.Reset(); _wearStreams.Clear(); _previous = null; _reported.Clear(); _wearPhases.Clear(); _lastSummary = 0; }
 }

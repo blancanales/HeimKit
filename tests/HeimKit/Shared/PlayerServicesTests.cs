@@ -24,14 +24,27 @@ internal static class PlayerServicesTests
         int presenceReads = 0; bool unavailable = false;
         var loading = (ZNetPeer)RuntimeHelpers.GetUninitializedObject(typeof(ZNetPeer));
         var connected = (ZNetPeer)RuntimeHelpers.GetUninitializedObject(typeof(ZNetPeer)); connected.m_uid = 123;
-        var central = new PlayerPresence(() => { presenceReads++; return unavailable ? null : new[] { loading, connected }; });
+        IReadOnlyList<ZNetPeer> currentPeers = new[] { loading, connected };
+        var central = new PlayerPresence(() => { presenceReads++; return unavailable ? null : currentPeers; });
         central.Refresh();
         Check(central.ConnectedCount == 2 && central.ReadyCount == 1 && central.HasConnectedPlayers == true, "Loading connection lost or treated as character-ready");
         _ = central.Peers; _ = central.ReadyCount; _ = central.HasConnectedPlayers;
         Check(presenceReads == 1, "Consumers repeated central peer enumeration");
+        Check(central.JoinedCount == 0 && central.HasJoinedPlayers == false, "Login handshake resumed features before character spawn");
+        connected.m_characterID = new ZDOID(123, 1); central.Refresh();
+        Check(central.JoinedCount == 1 && central.HasJoinedPlayers == true, "Character spawn did not establish joined occupancy");
+        connected.m_characterID = ZDOID.None; central.Refresh();
+        Check(central.JoinedCount == 1, "Death/respawn was mistaken for logout");
+        currentPeers = new[] { loading }; central.Refresh();
+        Check(central.JoinedCount == 0 && central.ConnectedCount == 1 && central.HasJoinedPlayers == false, "Remaining login attempt prevented last-player pause");
+        var replacement = (ZNetPeer)RuntimeHelpers.GetUninitializedObject(typeof(ZNetPeer)); replacement.m_uid = 123;
+        currentPeers = new[] { replacement }; central.Refresh();
+        Check(central.JoinedCount == 0, "New connection inherited a prior player's joined session");
+        replacement.m_characterID = new ZDOID(123, 2); central.Refresh();
+        Check(central.JoinedCount == 1, "Reconnect failed after fresh character spawn");
         DiagnosticLog.ServerActivity.Observe(300, false); DiagnosticLog.ServerActivity.Observe(301, central.HasConnectedPlayers);
         Check(DiagnosticLog.ServerActivity.Allowed, "Connecting peer failed to resume shared Debug");
-        unavailable = true; central.Refresh(); Check(central.ConnectedCount == null && central.ReadyCount == null, "Unavailable presence conflated with empty");
+        unavailable = true; central.Refresh(); Check(central.ConnectedCount == null && central.ReadyCount == null && central.JoinedCount == null, "Unavailable presence conflated with empty");
         var brokenPresence = new PlayerPresence(() => throw new InvalidOperationException("native peers unavailable")); brokenPresence.Refresh();
         Check(brokenPresence.HasConnectedPlayers == null, "Presence failure retained stale population");
         DiagnosticLog.StartSession();
@@ -107,6 +120,8 @@ internal static class PlayerServicesTests
     }
     private sealed class Presence : IPlayerPresence
     {
+        public int? JoinedCount => ConnectedCount;
+        public bool? HasJoinedPlayers => HasConnectedPlayers;
         public int? Connected, Ready;
         public int? ConnectedCount => Connected;
         public int? ReadyCount => Ready;

@@ -15,6 +15,7 @@ public sealed class AFKRaidWatchController : IDisposable
     private PlayerActivityService.Lease? _lease;
     private AFKRaidWatchPatches? _patches;
     private readonly AFKRaidWatchDiagnostics _diagnostics;
+    private readonly AFKRaidWatchSelectionNotices _selectionNotices;
     private readonly ObservationCounters _hooks = new();
     private long _candidates, _suppressed;
     private RaidStartObservation? _lastOutcome;
@@ -22,7 +23,7 @@ public sealed class AFKRaidWatchController : IDisposable
     internal bool DebugEnabled => _diagnostics.Enabled;
     public AFKRaidWatchController(AFKRaidWatch module, AFKRaidWatchSettings settings, ManualLogSource logger, PlayerServices players)
     {
-        _module = module; _logger = logger; _players = players; _diagnostics = new(logger, settings.DebugLogging);
+        _module = module; _logger = logger; _players = players; _diagnostics = new(logger, settings.DebugLogging); _selectionNotices = new(logger);
         try
         {
             _lease = players.Activity.Acquire(() => _diagnostics.Enabled);
@@ -40,7 +41,7 @@ public sealed class AFKRaidWatchController : IDisposable
         foreach (var point in points)
         {
             bool suppressed = AFKRaidWatchRules.Suppress(point.x, point.z, ev.m_eventRange, players, out string reason);
-            _candidates++; if (suppressed) _suppressed++; else remaining.Add(point);
+            _candidates++; if (suppressed) { _suppressed++; _selectionNotices.Excluded(); } else remaining.Add(point);
             if (_diagnostics.Enabled) try { _diagnostics.Sample(Time.unscaledTime, ev.m_name, point, suppressed, reason, () => RaidLocalObservation.Read(point.x, point.z, ev.m_eventRange, players)); }
             catch (Exception error) { _diagnostics.Warning(Time.unscaledTime, error); }
         }
@@ -59,6 +60,8 @@ public sealed class AFKRaidWatchController : IDisposable
         _hooks.Add("native_records_rejected_before_afk", Math.Max(0, records - points));
         if (points == 0) _hooks.Hit("empty_native_candidate_results");
     }
+    internal void BeginSelection() => _selectionNotices.Begin();
+    internal void EndSelection(bool failed) => _selectionNotices.End(failed);
     internal void Hook(string name) => _hooks.Hit(name);
     internal void ObserveOutcome(RaidStartObservation outcome)
     {
@@ -78,8 +81,10 @@ public sealed class AFKRaidWatchController : IDisposable
     }
     public void Dispose()
     {
+        _selectionNotices.Reset();
         if (ReferenceEquals(Active, this)) Active = null;
         var patches = _patches; var lease = _lease; _patches = null; _lease = null;
-        ModuleCleanup.Run(_logger, _module.Name, () => patches?.Dispose(), () => lease?.Dispose());
+        if (!ModuleCleanup.Run(_logger, _module.Name, () => patches?.Dispose(), () => lease?.Dispose()))
+            throw new InvalidOperationException("Controller cleanup did not complete; paused state cannot be confirmed.");
     }
 }

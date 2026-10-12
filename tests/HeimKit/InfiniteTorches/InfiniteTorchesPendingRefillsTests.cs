@@ -41,6 +41,34 @@ internal static class InfiniteTorchesPendingRefillsTests
         pending.Clear();
         pending.Clear();
         if (pending.Count != 0) throw new Exception("Shutdown did not clear pending tracking.");
+        using var log = new ManualLogSource("Torch refill summary checks");
+        var records = new List<(LogLevel Level, string Text)>();
+        log.LogEvent += (_, args) => records.Add((args.Level, args.Data.ToString()!));
+        var diagnostics = new InfiniteTorchesDiagnostics(() => false, log);
+        for (uint index = 1; index <= 32; index++)
+            pending.TryTrack(new ZDOID(4L, index), 10L, 0f, 4f, 120f);
+        int updated = pending.Reconcile(125f, _ => new RefillObservation(10L, 3.99f), result => diagnostics.Result(125f, result));
+        diagnostics.RefillSummary(updated);
+        if (updated != 32 || records.Count != 1 || records[0].Level != LogLevel.Info || records[0].Text != "InfiniteTorches: Fuel increase observed for 32 torches.")
+            throw new Exception("Multiple confirmed fuel updates were not grouped into one debug-off Info entry.");
+        diagnostics.RefillSummary(pending.Reconcile(130f, _ => new RefillObservation(10L, 4f), null));
+        if (records.Count != 1) throw new Exception("Already reconciled or empty passes repeated a refill summary.");
+        pending.TryTrack(torchId, 10L, 0f, 4f, 140f);
+        pending.TryTrack(otherTorchId, 10L, 0f, 4f, 140f);
+        pending.TryTrack(new ZDOID(5L, 3U), 10L, 0f, 4f, 140f);
+        pending.TryTrack(new ZDOID(5L, 4U), 10L, 0f, 4f, 140f);
+        updated = pending.Reconcile(170f, id => id.Equals(torchId) ? new RefillObservation(10L, 3.99f) :
+            id.Equals(otherTorchId) ? new RefillObservation(20L, 4f) : id.ID == 3U ? (RefillObservation?)null : new RefillObservation(10L, 0f), null);
+        diagnostics.RefillSummary(updated);
+        if (updated != 1 || records.Count != 2 || records[^1].Text != "InfiniteTorches: Fuel increase observed for 1 torch.")
+            throw new Exception("Timeout/missing/owner-change outcomes were counted as updated torches.");
+        pending.TryTrack(torchId, 10L, 0f, 4f, 180f);
+        diagnostics.RefillSummary(pending.Reconcile(185f, _ => new RefillObservation(10L, 1f), null));
+        if (records.Count != 2) throw new Exception("Insufficient progress or a sent request was logged as a refill.");
+        pending.Clear(); diagnostics.Reset();
+        diagnostics.RefillSummary(pending.Reconcile(190f, _ => new RefillObservation(10L, 4f), null));
+        if (records.Count != 2) throw new Exception("Pause/reset retained a stale refill count.");
+        System.Console.WriteLine("PASS: one Info batch for 32 observed refill updates without debugging, singular wording, quiet unchanged/empty passes and exclusion of failed/unconfirmed requests.");
         System.Console.WriteLine("PASS: pending refills deduplicate IDs, wait for sufficient fuel, retry only after timeout, handle ownership/deletion, bound memory and clear on shutdown.");
     }
 }

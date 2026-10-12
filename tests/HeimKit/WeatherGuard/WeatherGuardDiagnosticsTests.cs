@@ -7,186 +7,85 @@ internal static class WeatherGuardDiagnosticsTests
     public static void Run()
     {
         using var logger = new ManualLogSource("WeatherGuard diagnostics tests");
-        var messages = new List<string>();
-        logger.LogEvent += (_, args) =>
-        {
-            if (args.Level != LogLevel.Debug && args.Level != LogLevel.Error)
-                throw new Exception("Optional weather diagnostics must use Debug severity or preserve Error severity.");
-            messages.Add(args.Data.ToString()!);
-        };
+        var messages = new List<(LogLevel Level, string Text)>();
+        logger.LogEvent += (_, args) => messages.Add((args.Level, args.Data.ToString()!));
         var disabled = new WeatherGuardDiagnostics(logger, false);
-        disabled.Report(0f, () => throw new Exception("Debug-off snapshot evaluated."));
-        disabled.Sample(0f, () => throw new Exception("Debug-off sample formatted."));
-        if (disabled.TryWearSample(0, "piece", true) || disabled.ReserveCommand(0)) throw new Exception("Debug-off evidence reserved.");
-        disabled.Wear(new WearObservation(), 100, false);
-        disabled.Command(new WearObservation(), 100, false);
-        if (messages.Count != 0) throw new Exception("Debug-off diagnostics emitted logs.");
-
-        var diagnostics = new WeatherGuardDiagnostics(logger, true);
-        diagnostics.Report(0f, () => new WeatherGuardStatus { Protected = 3, Eligible = 5, Limited = true });
-        if (messages.Count != 2 || !messages[0].Contains("eligible_now=5 | managed_now=3") || !messages[0].Contains("capacity_limited=true"))
-            throw new Exception("Status snapshot fields were not logged correctly.");
-        diagnostics.Report(59f, () => throw new Exception("Throttled snapshot evaluated."));
-        diagnostics.Report(60f, () => new WeatherGuardStatus { Protected = 8 });
-        if (messages.Count != 4 || !messages[2].Contains("managed_now=8")) throw new Exception("Summary interval failed.");
-        int formats = 0;
-        for (int i = 0; i < 32; i++) diagnostics.Sample(0f, () => { formats++; return "acquisition sample"; });
-        if (formats != WeatherGuardDiagnostics.SampleLimit || messages.Count != 4 + WeatherGuardDiagnostics.SampleLimit)
-            throw new Exception("Sample cap failed or suppressed samples were formatted.");
-        diagnostics.Sample(59f, () => throw new Exception("Sample budget reopened early."));
-        diagnostics.Sample(60f, () => "Next sample window");
-        if (!messages[^1].Contains("Next sample window")) throw new Exception("Sample budget did not recover.");
-        int before = messages.Count;
-        diagnostics.Reset();
-        diagnostics.Report(0f, () => new WeatherGuardStatus());
-        diagnostics.Sample(0f, () => "Reset sample window");
-        if (messages.Count != before + 3) throw new Exception("Reset retained summary or sample limits.");
-        // Loading/exclusion storms cannot consume acquisition, wear or command budgets.
-        for (int i = 0; i < 100; i++) diagnostics.Sample(0, "context", () => "context blocked");
-        diagnostics.Sample(0, "ownership", () => "ownership loss observed");
-        if (!messages[^1].Contains("ownership loss observed")) throw new Exception("Streams share a sample budget.");
-        diagnostics.Reset();
-        foreach (bool protectedPiece in new[] { true, false })
-        {
-            for (int i = 0; i < WeatherGuardDiagnostics.WearSampleLimit; i++)
-                if (!diagnostics.TryWearSample(0, "piece-" + i, protectedPiece)) throw new Exception("Wear samples missing.");
-            if (diagnostics.TryWearSample(1, "piece-0", protectedPiece) || diagnostics.TryWearSample(59, "overflow", protectedPiece))
-                throw new Exception("Wear evidence duplicated or cap exceeded.");
-            if (!diagnostics.TryWearSample(60, "piece-0", protectedPiece)) throw new Exception("Wear window did not recover.");
-        }
-        for (int i = 0; i < WeatherGuardDiagnostics.SampleLimit; i++)
-            if (!diagnostics.ReserveCommand(0)) throw new Exception("Native command budget missing.");
-        if (diagnostics.ReserveCommand(59) || !diagnostics.ReserveCommand(60)) throw new Exception("Native command cap/interval failed.");
-        diagnostics.Wear(new WearObservation { Identity = new() { ["object"] = "target" }, Protected = true, GateReached = false, Warmup = true, Before = 100 }, 100, false);
-        if (!messages[^1].Contains("weather_branch_bypassed=false") || !messages[^1].Contains("warmup=true"))
-            throw new Exception("Warmup was reported as suppression.");
-        diagnostics.Wear(new WearObservation { Protected = true, GateReached = true, Suppressed = true, Before = 100 }, null, false);
-        if (!messages[^1].Contains("health_after=unknown") || !messages[^1].Contains("weather_branch_bypassed=true"))
-            throw new Exception("Native destruction or weather gate evidence missing.");
-        diagnostics.Reset();
-        for (int i = 0; i < WeatherGuardDiagnostics.WearSampleLimit; i++)
-            diagnostics.TryWearSample(0, "covered-" + i, true);
-        if (!diagnostics.TryWearSample(0, "exposed", true, true))
-            throw new Exception("Covered pieces starved exposed evidence.");
-        diagnostics.Reset();
-        diagnostics.Report(0, () => new WeatherGuardStatus { OwnerLosses = 2, WeatherGates = 12, WetOpportunities = 5,
-            NativeCommands = 3, SupportPasses = 10, Exclusions = new() { ["world-created"] = 4 } });
-        if (!messages[^2].Contains("world-created:4") || !messages[^1].Contains("owner_losses_interval=2") ||
-            !messages[^1].Contains("weather_gates_interval=12") || !messages[^2].Contains("wet_gates_interval=5") ||
-            !messages[^1].Contains("support_passes_interval=10")) throw new Exception("Actionable evidence summary missing.");
-        var history = new RainEvidence { Identity = new() { ["object"] = "exposed" }, Eligibility = "eligible", FirstHealth = 400,
-            Health = 400, MinimumHealth = 400, Owner = 7, Creator = 10, Protected = true };
-        history.ObserveGate(100, true);
-        history.ObserveGate(105, true);
-        history.ObserveGate(110, false);
-        history.ObserveGate(115, true);
-        if (history.WetSeconds != 0 || history.LongestWetSeconds != 5) throw new Exception("Dry processing counted as continuous wet exposure.");
-        history.ObserveGate(120, true);
-        history.ObserveGate(140, true);
-        if (history.WetSeconds != 0) throw new Exception("Missing processing interval counted as continuous exposure.");
-        history.ObserveState(380, 8, false, 10);
-        history.ObserveState(400, 7, true, 10);
-        if (history.MinimumHealth != 380 || history.OwnerChanges != 2 || history.ProtectionChanges != 2 || history.CreatorChanged)
-            throw new Exception("Health loss or ownership interruption lost from history.");
-        history.ObserveState(400, 7, true, 11);
-        if (!history.CreatorChanged) throw new Exception("Creator change not detected.");
-        disabled.Report(0, () => throw new Exception("Disabled history snapshot evaluated."),
-            () => throw new Exception("Disabled rain history evaluated."));
-        diagnostics.Reset();
-        diagnostics.Report(0, () => new WeatherGuardStatus(), () => new[] { history });
-        if (!messages[^1].Contains("health_minimum=380") || !messages[^1].Contains("management_changes_observed_total=2") ||
-            !messages[^3].Contains("watched_player_pieces_now=1")) throw new Exception("Longitudinal rain evidence missing.");
-        if (!messages[^1].Contains("Health loss observed; weather cause unconfirmed")) throw new Exception("Current conditions hid recorded health loss.");
-        diagnostics.Reset();
-        var control = new RainEvidence { Eligibility = "world-created", FirstHealth = 400, Health = 400, MinimumHealth = 400 };
-        diagnostics.Report(0, () => new WeatherGuardStatus { Acquired = 10 }, () => new[] { control });
-        if (!messages[^1].Contains("wet_observed_s=unknown") || messages[^1].Contains("wet_observed_s=0"))
-            throw new Exception("Unavailable client rain calculation reported as measured zero.");
-        diagnostics.Report(60, () => new WeatherGuardStatus { Acquired = 13, Released = 2 });
-        if (!messages[^2].Contains("acquired_interval=3") || !messages[^1].Contains("acquired_total=13"))
-            throw new Exception("Interval counts were confused with lifetime counts.");
-        // A bypass is an observed action even when roof/dry conditions prevent a rain opportunity.
-        diagnostics.Reset();
-        var protectedWatch = new RainEvidence { Eligibility = "eligible", ProtectionReason = "eligible", Protected = true,
-            FirstHealth = 400, Health = 400, MinimumHealth = 400, MaximumHealth = 400,
-            Fields = new() { ["processor"] = "server", ["cached_roof"] = true, ["environment_wet"] = true } };
-        protectedWatch.ObserveGate(1, false, true);
-        protectedWatch.ObserveGate(2, false, true);
-        diagnostics.Report(0, () => new WeatherGuardStatus(), () => new[] { protectedWatch });
-        if (!messages[^1].Contains("protection=active") || !messages[^1].Contains("action=weather_branch_bypassed") ||
-            !messages[^1].Contains("weather_bypasses_interval=2") || !messages[^1].Contains("weather_opportunity=conditions_not_met") ||
-            !messages[^1].Contains("weather_damage=unconfirmed")) throw new Exception("Bypass was confused with a qualifying damage opportunity.");
-        // Loss then repair must survive equal endpoint health and detail-sample suppression.
-        protectedWatch.ObserveState(380, 0, true, 0);
-        protectedWatch.ObserveState(400, 0, true, 0);
-        diagnostics.Report(60, () => new WeatherGuardStatus(), () => new[] { protectedWatch });
-        if (!messages[^1].Contains("health_change=loss_observed") || !messages[^1].Contains("health_lost_interval=20") ||
-            !messages[^1].Contains("health_before=400") || !messages[^1].Contains("health_after=400") ||
-            !messages[^1].Contains("action=weather_bypass_not_observed") || !messages[^1].Contains("weather_bypasses_interval=0") ||
-            !messages[^3].Contains("watched_health_losses_interval=1")) throw new Exception("Repaired loss or interval action evidence was lost.");
-        diagnostics.Report(120, () => new WeatherGuardStatus(), () => new[] { protectedWatch });
-        if (!messages[^1].Contains("health_change=unchanged") || !messages[^1].Contains("health_lost_interval=0") ||
-            !messages[^1].Contains("health_minimum=380")) throw new Exception("Historical damage repeated as interval damage.");
-        diagnostics.Reset();
-        control.ProtectionReason = "world-created";
-        control.ObserveState(380, 0, false, 0);
-        diagnostics.Report(0, () => new WeatherGuardStatus(), () => new[] { control });
-        if (!messages[^1].Contains("protection=excluded") || !messages[^1].Contains("protection_reason=world-created") ||
-            !messages[^1].Contains("action=left_to_native_owner") || !messages[^1].Contains("damage_source=unobserved") ||
-            !messages[^1].Contains("weather_opportunity=owner_calculation_unavailable")) throw new Exception("Client health loss was attributed to weather or a server action.");
-        diagnostics.Reset();
-        var waiting = new RainEvidence { Eligibility = "eligible", ProtectionReason = "waiting_terrain", FirstHealth = 400, Health = 400, MinimumHealth = 400 };
-        diagnostics.Report(0, () => new WeatherGuardStatus(), () => new[] { waiting });
-        if (!messages[^1].Contains("protection=waiting") || !messages[^1].Contains("protection_reason=waiting_terrain"))
-            throw new Exception("Eligible waiting piece was reported as protected or excluded.");
-        protectedWatch.WetSeconds = 65;
-        protectedWatch.Fields["cached_roof"] = false;
-        diagnostics.Reset();
-        diagnostics.Report(0, () => new WeatherGuardStatus(), () => new[] { protectedWatch });
-        if (!messages[^1].Contains("weather_opportunity=qualifying_duration_observed") || !messages[^1].Contains("weather_damage=unconfirmed"))
-            throw new Exception("Qualifying duration asserted prevented damage.");
-        protectedWatch.Fields["no_building_fall"] = true;
-        diagnostics.Report(60, () => new WeatherGuardStatus(), () => new[] { protectedWatch });
-        if (!messages[^1].Contains("weather_opportunity=conditions_not_met")) throw new Exception("Duration overrode a native damage restriction.");
-        diagnostics.Command(new WearObservation { Protected = true, Owner = true, Before = 400, Fields = new() { ["command"] = "RPC_Damage" } }, 380, false);
-        if (!messages[^1].Contains("protection=active") || !messages[^1].Contains("action=native_command_executed") ||
-            !messages[^1].Contains("health_change=loss_observed") || !messages[^1].Contains("damage_context=native_command"))
-            throw new Exception("Native command outcome omitted protection, action or observed health change.");
-        diagnostics.Reset();
+        disabled.Report(0, () => throw new Exception("Disabled path collected data"), null, null,
+            () => throw new Exception("Disabled path collected geometry"));
+        disabled.Sample(0, () => throw new Exception("Disabled sample formatted"));
+        if (disabled.TryWearSample(0, "piece", true) || disabled.ReserveCommand(0) || messages.Count != 0)
+            throw new Exception("Disabled diagnostics collected or printed optional evidence.");
+        disabled.Wear(new WearObservation(), 100, true);
+        if (messages.Count != 1 || messages[0].Level != LogLevel.Error)
+            throw new Exception("Debug-off suppressed native failure reporting.");
         messages.Clear();
         var medium = new WeatherGuardDiagnostics(logger, true, DebugLogLevel.Medium, false);
-        var statusItems = Enumerable.Range(0, 15).Select(i => new ProtectionObservation
-        { Identity = new() { ["object"] = "player-" + i, ["prefab"] = "wood_floor" }, Protected = i != 14,
-            Reason = i == 14 ? "waiting_terrain" : "eligible" }).ToList();
-        statusItems.Add(new ProtectionObservation { Identity = new() { ["object"] = "world" }, Origin = "world_created", Reason = "world-created" });
-        medium.Report(0, () => throw new Exception("Medium evaluated detailed snapshot."),
-            () => throw new Exception("Medium gathered detailed histories."), () => statusItems);
-        if (messages.Count != 13 || messages.Any(m => m.Contains("DETAIL") || m.Contains("object=world")) ||
-            !messages[0].Contains("qualifying_items_now=15") || !messages[0].Contains("pending_changed_samples_now=3"))
-            throw new Exception("Medium scope or output cap failed.");
-        medium.Sample(0, () => throw new Exception("Medium formatted detailed sample."));
-        medium.Wear(new WearObservation(), 1, false);
-        if (medium.TryWearSample(0, "x", true) || medium.ReserveCommand(0))
-            throw new Exception("Medium gathered detailed wear evidence.");
-        medium.Report(59, () => throw new Exception(), null, () => throw new Exception("Medium interval reopened early."));
-        medium.Report(60, () => throw new Exception(), null, () => statusItems);
-        if (!messages.Any(m => m.Contains("object=player-14") && m.Contains("protected=false") && m.Contains("reason=waiting_terrain")))
-            throw new Exception("Pending unprotected qualifying item was not sampled.");
-        statusItems[0].Protected = false; statusItems[0].Reason = "waiting_objects";
-        medium.Report(120, () => throw new Exception(), null, () => statusItems);
-        if (!messages[^12].Contains("object=player-0") || !messages[^12].Contains("reason=waiting_objects"))
-            throw new Exception("Medium did not prioritize changed protection status.");
+        var first = new WeatherGuardStatus { Eligible = 61, Protected = 61, WearPasses = 100,
+            Decisions = new() { ["waiting_wet_timer"] = 80, ["native_environment_dry"] = 20 } };
+        medium.Report(0, () => first, () => throw new Exception("Medium collected detailed health histories"), null,
+            () => new() { ["roof_sample_exposed_now"] = 3, ["roof_sample_covered_now"] = 58, ["player_biomes"] = "Swamp:1" });
+        if (messages.Count != 1 || !messages[0].Text.Contains("Protection path") ||
+            !messages[0].Text.Contains("eligible_now=61") || !messages[0].Text.Contains("waiting_wet_timer_interval=80") ||
+            !messages[0].Text.Contains("native_weather_due_interval=0") || !messages[0].Text.Contains("roof_sample_exposed_now=3"))
+            throw new Exception("Medium does not explain the prevention path in one grouped summary.");
+        medium.Report(59, () => throw new Exception("Path interval opened early"));
+        medium.Report(60, () => new WeatherGuardStatus { Eligible = 61, Protected = 61, WeatherGates = 3,
+            WeatherSuppressed = 3, ConfirmedPreventions = 3, WearPasses = 161,
+            Decisions = new() { ["waiting_wet_timer"] = 138, ["native_environment_dry"] = 20 } });
+        if (messages.Count != 2 || !messages[1].Text.Contains("confirmed_preventions_interval=3") ||
+            !messages[1].Text.Contains("waiting_wet_timer_interval=58"))
+            throw new Exception("Medium confuses interval steps with lifetime counts or omits prevention.");
+        medium.Sample(0, () => throw new Exception("Medium formatted detailed sample"));
+        if (medium.TryWearSample(0, "piece", true)) throw new Exception("Medium reserved detailed evidence.");
         messages.Clear();
-        var mediumWorld = new WeatherGuardDiagnostics(logger, true, DebugLogLevel.Medium, true);
-        mediumWorld.Report(0, () => throw new Exception(), null, () => statusItems);
-        mediumWorld.Report(60, () => throw new Exception(), null, () => statusItems);
-        if (!messages.Any(m => m.Contains("object=world") && m.Contains("protected=false") && m.Contains("reason=world-created")))
-            throw new Exception("World inclusion changed eligibility or failed to log the world item.");
-        var mediumOff = new WeatherGuardDiagnostics(logger, false, DebugLogLevel.Medium, true);
-        mediumOff.Report(0, () => throw new Exception(), null, () => throw new Exception("Debug-off gathered medium status."));
-        mediumWorld.Reset();
-        mediumWorld.Report(0, () => throw new Exception(), null, () => Array.Empty<ProtectionObservation>());
-        if (!messages[^1].Contains("qualifying_items_now=0")) throw new Exception("Empty/reset medium status failed.");
-        System.Console.WriteLine("PASS: WeatherGuard diagnostics respect debug mode, format status snapshots, limit summaries and samples, defer suppressed formatting and reset.");
+        var detail = new WeatherGuardDiagnostics(logger, true);
+        var watch = new RainEvidence { Identity = new() { ["object"] = "wood-a" }, Eligibility = "eligible",
+            Protected = true, FirstHealth = 400, Health = 400, MinimumHealth = 400,
+            Fields = new() { ["processor"] = "server", ["cached_roof"] = true, ["environment_wet"] = false } };
+        detail.Report(0, () => first, () => new[] { watch });
+        if (messages.Count != 2 || !messages[1].Text.Contains("Processing and network counters"))
+            throw new Exception("Detailed mode lacks diagnostic counters or repeats routine piece-health results.");
+        detail.Report(60, () => first, () => new[] { watch, watch, watch });
+        if (messages.Count != 4 || messages.Any(m => m.Text.Contains("no health loss observed")))
+            throw new Exception("Detailed output repeats uninformative per-piece results.");
+        watch.ObserveState(380, 7, true, 0); watch.ObserveState(400, 7, true, 0);
+        detail.Report(120, () => first, () => new[] { watch });
+        if (!messages[^1].Text.Contains("Health loss observed; weather cause unconfirmed") ||
+            !messages[^1].Text.Contains("health_lost_interval=20") || !messages[^1].Text.Contains("health_after=400"))
+            throw new Exception("Health loss followed by repair vanished from useful diagnostics.");
+        int afterLoss = messages.Count;
+        detail.Report(180, () => first, () => new[] { watch });
+        if (messages.Count != afterLoss + 2) throw new Exception("Historical health loss repeated as a new anomaly.");
+        detail.Reset(); messages.Clear();
+        for (int i = 0; i < 3; i++) detail.Wear(new WearObservation { Owner = true, Protected = true,
+            Identity = new() { ["object"] = "wood-" + i }, Fields = new() { ["environment_wet"] = false, ["cached_roof"] = true } }, 400, false);
+        if (messages.Count != 1) throw new Exception("Identical native blocking phases printed separately for every piece.");
+        detail.Wear(new WearObservation { Owner = true, Protected = true, GateReached = true, Suppressed = true,
+            Fields = new() { ["environment_wet"] = true, ["cached_roof"] = false } }, 400, false);
+        if (!messages[^1].Text.Contains("native_weather_contribution_due=true") || !messages[^1].Text.Contains("weather_contribution_suppressed=true"))
+            throw new Exception("Detailed evidence does not distinguish native due damage from managed exposure.");
+        detail.Reset(); messages.Clear(); int formatted = 0;
+        for (int i = 0; i < 32; i++) detail.Sample(0, () => { formatted++; return "ownership evidence"; });
+        if (formatted != WeatherGuardDiagnostics.SampleLimit || messages.Count != WeatherGuardDiagnostics.SampleLimit)
+            throw new Exception("Detailed stream budget fails to bound formatting/output.");
+        detail.Sample(59, () => throw new Exception("Sample interval reopened early"));
+        detail.Sample(60, () => "new window");
+        if (!messages[^1].Text.Contains("new window")) throw new Exception("Detailed sample budget failed to recover.");
+        detail.Reset(); messages.Clear();
+        detail.Report(0, () => new WeatherGuardStatus { Eligible = 1765, Protected = 1765, WearPasses = 53350,
+            Acquired = 1997, Released = 232, ReleaseTotals = new() { ["context lost"] = 171, ["outside retained region"] = 61 } });
+        if (messages.Count != 2 || !messages[1].Text.Contains("acquired_interval=1997") ||
+            !messages[1].Text.Contains("released_interval=232") ||
+            !messages[1].Text.Contains("release_reasons_interval=context lost:171,outside retained region:61"))
+            throw new Exception("Acquisitions/releases are not reported as one grouped interval result with reason totals.");
+        if (messages[1].Text.Contains("wear_calls_interval") || messages[1].Text.Contains("weather_gates_interval") ||
+            messages[0].Text.Contains("eligible_player_pieces_now"))
+            throw new Exception("Companion diagnostics repeat identical wear/eligibility counters.");
+        detail.Report(60, () => new WeatherGuardStatus { Acquired = 3259, Released = 1494,
+            ReleaseTotals = new() { ["context lost"] = 1433, ["outside retained region"] = 61 } });
+        if (!messages[^1].Text.Contains("acquired_interval=1262") || !messages[^1].Text.Contains("released_interval=1262") ||
+            !messages[^1].Text.Contains("release_reasons_interval=context lost:1262 |"))
+            throw new Exception("Ownership churn interval repeats old release reasons or loses new grouped results.");
+        System.Console.WriteLine("PASS: Medium prevention steps, Detailed counters and representative blocking phases, quiet unchanged health, retained repaired loss/error evidence, lazy policy and bounded samples.");
     }
 }

@@ -13,6 +13,10 @@ internal sealed class WeatherGuardPatches : IDisposable
     private readonly Harmony _harmony = new("heimkit.weatherguard");
     [ThreadStatic] private static int _protectedWearDepth;
     [ThreadStatic] private static WearObservation? _wearObservation;
+    [ThreadStatic] private static bool _weatherSuppressed;
+    [ThreadStatic] private static WeatherGuardWearPass? _wearPass;
+    private static readonly Dictionary<WearNTearUpdater, WeatherGuardWearPass> PendingWearSweeps = new();
+    private static readonly FieldInfo? WearIndex = typeof(WearNTearUpdater).GetField("m_index", BindingFlags.Instance | BindingFlags.NonPublic);
     private static readonly int Destroyed = "DestroyZDO".GetStableHashCode();
     public void Install()
     {
@@ -22,6 +26,9 @@ internal sealed class WeatherGuardPatches : IDisposable
         Patch(typeof(ZDO), "SetOwner", nameof(Owner));
         Patch(typeof(ZDOMan), "RPC_ZDOData", nameof(Data));
         Patch(typeof(ZRoutedRpc), "RPC_RoutedRPC", nameof(Routed));
+        var updater = AccessTools.Method(typeof(WearNTearUpdater), "UpdateWearNTear", new[] { typeof(float), typeof(float) });
+        if (updater == null || WearIndex?.FieldType != typeof(int)) throw new MissingMemberException("WearNTearUpdater wear-sweep APIs");
+        _harmony.Patch(updater, prefix: Method(nameof(BeginWearPass)), finalizer: Method(nameof(EndWearPass)));
         var wear = AccessTools.Method(typeof(WearNTear), "UpdateWear", new[] { typeof(float) });
         if (wear == null) throw new MissingMethodException("WearNTear.UpdateWear");
         _harmony.Patch(wear, prefix: Method(nameof(Wear)), transpiler: Method(nameof(WeatherDamage)), finalizer: Method(nameof(RestoreWear)));
@@ -116,45 +123,97 @@ internal sealed class WeatherGuardPatches : IDisposable
         }
         catch (Exception error) { pkg.SetPos(cursor); active.Fail(error); return false; }
     }
-    // The first flag read computes rain wetness (also used by native fire handling).
-    // Only the second read gates weather DAMAGE. Reject changed IL rather than patching blindly.
+    // Keep wetness, warmup, shield, health and wet-timer evaluation native.
+    // Transform only the five-percent weather contribution after all these checks.
     internal static IEnumerable<CodeInstruction> WeatherDamage(IEnumerable<CodeInstruction> instructions)
     {
         var code = instructions.ToList();
         var flag = typeof(WearNTear).GetField(nameof(WearNTear.m_noRoofWear));
+        var timer = typeof(WearNTear).GetField("m_rainTimer", BindingFlags.Instance | BindingFlags.NonPublic);
         var reads = code.Select((instruction, index) => (instruction, index))
             .Where(pair => pair.instruction.opcode == OpCodes.Ldfld && Equals(pair.instruction.operand, flag)).Select(pair => pair.index).ToArray();
-        if (reads.Length != 2 || reads[1] + 1 >= code.Count ||
+        int support = code.FindIndex(i => i.operand is MethodInfo method && method.Name == "UpdateSupport");
+        if (reads.Length != 2 || support <= reads[1] ||
             (code[reads[1] + 1].opcode != OpCodes.Brfalse && code[reads[1] + 1].opcode != OpCodes.Brfalse_S) ||
             !code.Take(reads[1]).Any(i => i.opcode == OpCodes.Stfld && Equals(i.operand, typeof(WearNTear).GetField("m_rainWet", BindingFlags.Instance | BindingFlags.NonPublic))))
-            throw new MissingMethodException("WeatherGuard weather-damage gate does not match audited UpdateWear IL.");
-        code.InsertRange(reads[1] + 1, new[] { new CodeInstruction(OpCodes.Ldarg_0),
-            new CodeInstruction(OpCodes.Call, typeof(WeatherGuardPatches).GetMethod(nameof(AllowWeatherDamage), BindingFlags.Static | BindingFlags.NonPublic)) });
+            throw new MissingMethodException("WeatherGuard weather contribution does not match audited UpdateWear IL.");
+        var additions = Enumerable.Range(reads[1], support - reads[1]).Where(index => index >= 2 && index + 2 < code.Count &&
+            code[index].opcode == OpCodes.Ldc_R4 && Equals(code[index].operand, 5f) && code[index + 1].opcode == OpCodes.Add &&
+            code[index - 2].opcode == OpCodes.Stfld && Equals(code[index - 2].operand, timer) &&
+            code[index - 1].opcode.Name.StartsWith("ldloc") && code[index + 2].opcode.Name.StartsWith("stloc")).ToArray();
+        if (additions.Length != 1 || !code.Skip(reads[1]).Take(additions[0] - reads[1]).Any(i => i.opcode == OpCodes.Ldc_R4 && Equals(i.operand, 60f)))
+            throw new MissingMethodException("WeatherGuard timed weather addition does not match audited UpdateWear IL.");
+        code.InsertRange(additions[0] + 1, new[] { new CodeInstruction(OpCodes.Ldarg_0),
+            new CodeInstruction(OpCodes.Call, typeof(WeatherGuardPatches).GetMethod(nameof(WeatherContribution), BindingFlags.Static | BindingFlags.NonPublic)) });
         return code;
     }
-    private static bool AllowWeatherDamage(bool native, WearNTear wear)
+    private static float WeatherContribution(float native, WearNTear wear)
     {
         if (_wearObservation != null) _wearObservation.GateReached = true;
         var active = WeatherGuardController.Active;
         if (_protectedWearDepth == 0 || active?.Running != true) return native;
         var view = wear.GetComponent<ZNetView>();
         if (view == null || !view.IsValid() || !view.IsOwner() || !active.Protects(view.GetZDO().m_uid)) return native;
-        bool suppress;
-        try { suppress = active.SuppressWeather(wear, native); active.WeatherGate(wear, suppress); } catch (Exception error) { active.Fail(error); return native; }
-        if (_wearObservation != null) _wearObservation.Suppressed = suppress;
-        return suppress ? false : native;
+        try
+        {
+            bool suppress = active.SuppressWeather(wear, wear.m_noRoofWear);
+            active.WeatherGate(wear, suppress);
+            if (_wearObservation != null) _wearObservation.Suppressed = suppress;
+            // Do not announce a prevented contribution when final native restrictions
+            // would already cancel all wear. The weather contribution is still removed.
+            _weatherSuppressed = suppress && active.WeatherDamageMayApply(wear);
+            return suppress ? 0f : native;
+        }
+        catch (Exception error) { active.Fail(error); return native; }
+    }
+    private static void BeginWearPass(WearNTearUpdater __instance, out WeatherGuardWearPass? __state)
+    {
+        __state = _wearPass;
+        _wearPass = null;
+        if (WeatherGuardController.Active?.Running != true) return;
+        if (!PendingWearSweeps.TryGetValue(__instance, out var pass))
+        { pass = new WeatherGuardWearPass(); PendingWearSweeps.Add(__instance, pass); }
+        _wearPass = pass;
+    }
+    private static Exception? EndWearPass(WearNTearUpdater __instance, WeatherGuardWearPass? __state, Exception? __exception)
+    {
+        var pass = _wearPass;
+        _wearPass = __state;
+        var active = WeatherGuardController.Active;
+        try
+        {
+            if (pass != null && active?.Running == true)
+            {
+                bool finished = __exception != null || (int)WearIndex!.GetValue(__instance) == 0;
+                int count = pass.CompleteFrame(__exception == null, finished, out string? id, out string? prefab);
+                if (finished) PendingWearSweeps.Remove(__instance);
+                active.WeatherDamageSuppressed(count, id, prefab);
+            }
+            else PendingWearSweeps.Remove(__instance);
+        }
+        catch (Exception error) { active?.Fail(error); }
+        if (__exception != null) active?.Fail(__exception);
+        return __exception;
     }
     private static void Wear(WearNTear __instance, float time, out WearProcessingState __state)
     {
         __state = default;
+        __state.PreviousSuppression = _weatherSuppressed;
+        _weatherSuppressed = false;
         __state.PreviousObservation = _wearObservation;
         _wearObservation = null;
         var active = WeatherGuardController.Active;
         if (active == null || !active.Running) return;
         var view = __instance.GetComponent<ZNetView>();
         if (view == null || !view.IsValid()) return;
+        __state.Identity = view.GetZDO().m_uid;
         __state.Protected = view.IsOwner() && active.Protects(view.GetZDO().m_uid);
-        try { __state.Observation = active.BeginWear(__instance, view, __state.Protected, time); }
+        try
+        {
+            if (__state.Protected) __state.Prefab = active.PiecePrefab(view.GetZDO());
+            if (__state.Protected) active.WearConditions(__instance, time);
+            __state.Observation = active.BeginWear(__instance, view, __state.Protected, time);
+        }
         catch (Exception error) { active.Fail(error); __state.Protected = false; return; }
         _wearObservation = __state.Observation;
         if (__state.Protected) { _protectedWearDepth++; active.WearPass(); }
@@ -163,7 +222,18 @@ internal sealed class WeatherGuardPatches : IDisposable
     private static Exception? RestoreWear(WearNTear __instance, WearProcessingState __state, Exception? __exception)
     {
         if (__state.Protected) _protectedWearDepth = Math.Max(0, _protectedWearDepth - 1);
+        bool suppressed = _weatherSuppressed;
+        _weatherSuppressed = __state.PreviousSuppression;
         _wearObservation = __state.PreviousObservation;
+        try
+        {
+            if (__state.Protected && suppressed && __exception == null && WeatherGuardController.Active?.Running == true)
+            {
+                if (_wearPass != null) _wearPass.Record(__state.Identity.ToString(), true, true, __state.Prefab);
+                else WeatherGuardController.Active.WeatherDamageSuppressed(1, __state.Identity.ToString(), __state.Prefab);
+            }
+        }
+        catch (Exception error) { WeatherGuardController.Active?.Fail(error); }
         try { WeatherGuardController.Active?.EndWear(__instance, __state.Observation, __exception); }
         catch (Exception error) { WeatherGuardController.Active?.Fail(error); }
         if (__exception != null) WeatherGuardController.Active?.Fail(__exception);
@@ -191,5 +261,10 @@ internal sealed class WeatherGuardPatches : IDisposable
         catch (Exception error) { WeatherGuardController.Active?.Fail(error); }
         return __exception;
     }
-    public void Dispose() { _harmony.UnpatchSelf(); }
+    public void Dispose()
+    {
+        PendingWearSweeps.Clear();
+        _wearPass = null;
+        _harmony.UnpatchSelf();
+    }
 }

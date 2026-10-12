@@ -4,6 +4,7 @@ namespace HeimKit.Shared.Players.Models;
 public sealed class PlayerActivityView
 {
     public long Peer { get; set; }
+    public string Name { get; set; } = "";
     public bool Known { get; set; }
     public bool Alive { get; set; }
     public bool InBed { get; set; }

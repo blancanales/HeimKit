@@ -29,6 +29,9 @@ public sealed class WeatherGuardStatus
     public System.Collections.Generic.Dictionary<string, int> ReleaseReasons { get; set; } = new();
     public long OwnerLosses { get; set; }
     public long WeatherGates { get; set; }
+    public System.Collections.Generic.Dictionary<string, long> Decisions { get; set; } = new();
+    public long WeatherSuppressed { get; set; }
+    public long ConfirmedPreventions { get; set; }
     public long WetOpportunities { get; set; }
     public long NativeCommands { get; set; }
     public long SupportPasses { get; set; }

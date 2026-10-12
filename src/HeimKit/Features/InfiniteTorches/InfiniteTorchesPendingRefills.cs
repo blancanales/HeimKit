@@ -25,9 +25,10 @@ public sealed class InfiniteTorchesPendingRefills
     public void Remove(ZDOID id) => _requests.Remove(id);
 
     // Examine all pending IDs, including those outside current player areas, so stale entries cannot accumulate.
-    public void Reconcile(float now, Func<ZDOID, RefillObservation?> observe, Action<RefillResult>? report)
+    public int Reconcile(float now, Func<ZDOID, RefillObservation?> observe, Action<RefillResult>? report)
     {
         _completed.Clear();
+        int fuelUpdates = 0;
         foreach (var item in _requests)
         {
             var request = item.Value;
@@ -44,12 +45,14 @@ public sealed class InfiniteTorchesPendingRefills
                 reason = "timeout";
             if (reason == null) continue;
             _completed.Add(item.Key);
+            if (reason == "fuel_increase") fuelUpdates++;
             report?.Invoke(new RefillResult { Object = item.Key.ToString(), Outcome = reason,
                 RequestedOwner = request.Owner, ObservedOwner = observation?.Owner, Fuel = observation?.Fuel,
                 Before = request.Before, Target = request.Target, WaitSeconds = now - request.SentAt });
         }
         foreach (var id in _completed) _requests.Remove(id);
         _completed.Clear();
+        return fuelUpdates;
     }
 
     public void Clear() { _requests.Clear(); _completed.Clear(); }

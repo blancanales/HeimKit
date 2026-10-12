@@ -4,6 +4,8 @@ Build HeimKit from the repository root using the supported environment in [serve
 
 ## Building from source
 
+Before invoking a build, complete the required [version and documentation procedure](contributing.md#before-every-build). Updated code needs a new HeimKit version with matching plugin metadata, startup message and documented build version; applicable behavior and configuration documentation must also be current.
+
 Run from the repository root with local Windows server assemblies and a .NET SDK:
 
 ```powershell

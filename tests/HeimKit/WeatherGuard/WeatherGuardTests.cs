@@ -37,7 +37,7 @@ internal static class WeatherGuardTests
             var path = Path.Combine(folder, "heimkit.cfg");
             ConfigurationLoader.Load(folder, configLog, config => new WeatherGuard(config, configLog, PlayerServicesTests.For(config, configLog)));
             var first = File.ReadAllText(path);
-            Check(first.Contains("[WeatherGuard]") && first.Contains("Enabled = false"), "complete first-use config with one feature switch");
+            Check(first.Contains("[WeatherGuard]") && first.Contains("Enabled = true"), "complete first-use config with one feature switch");
             foreach (bool enabled in new[] { false, true })
             {
                 File.WriteAllText(path, "[WeatherGuard]\nEnabled = " + enabled + "\n[Torches]\nEnabled = false\n[Diagnostics]\nDebugMode = true\n");

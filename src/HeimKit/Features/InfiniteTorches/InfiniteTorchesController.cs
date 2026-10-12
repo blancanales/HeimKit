@@ -66,13 +66,14 @@ internal sealed class InfiniteTorchesController : IDisposable
         try
         {
             operation = "checking pending refill results";
-            _pending.Reconcile(now, id =>
+            int fuelUpdates = _pending.Reconcile(now, id =>
             {
                 var objectData = manager.GetZDO(id);
                 return objectData != null && objectData.IsValid()
                     ? new RefillObservation(objectData.GetOwner(), objectData.GetFloat(ZDOVars.s_fuel, -1f))
                     : (RefillObservation?)null;
             }, result => { Count(result.Outcome); _diagnostics.Result(now, result); });
+            _diagnostics.RefillSummary(fuelUpdates);
             operation = "resolving configured torch prefabs";
             if (_scene != scene || _configuredNames != _settings.Prefabs.Value) LoadPrefabs(scene);
             if (_torches.Count == 0)
@@ -169,6 +170,8 @@ internal sealed class InfiniteTorchesController : IDisposable
     private void LoadPrefabs(ZNetScene scene)
     {
         _torches.Clear();
+        var rejected = new Dictionary<string, int>();
+        int rejectionCount = 0;
         foreach (string raw in _settings.Prefabs.Value.Split(','))
         {
             string name = raw.Trim();
@@ -182,20 +185,21 @@ internal sealed class InfiniteTorchesController : IDisposable
                 : fire.m_maxFuel <= 0f || float.IsNaN(fire.m_maxFuel) || float.IsInfinity(fire.m_maxFuel) ? "invalid maximum fuel" : null;
             if (rejection != null)
             {
-                DiagnosticLog.Write(_logger, "Infinite Torches", DiagnosticEvent.Lifecycle, $"Infinite Torches skipped prefab '{name}': {rejection}.", level: LogLevel.Warning);
+                rejected.TryGetValue(rejection, out int count); rejected[rejection] = count + 1; rejectionCount++;
                 continue;
             }
             _torches[scene.GetPrefabHash(go!)] = fire!;
         }
+        _diagnostics.UnsupportedPrefabs(rejectionCount, rejected);
         _scene = scene;
         _configuredNames = _settings.Prefabs.Value;
         if (!_announced)
         {
-            DiagnosticLog.Write(_logger, "Infinite Torches", DiagnosticEvent.Lifecycle,
-                _torches.Count > 0 ? "Ready." : "No supported torch prefabs are available; refilling is unavailable.",
-                level: _torches.Count > 0 ? LogLevel.Info : LogLevel.Warning);
+            if (_torches.Count > 0) _module.ProcessingReady();
+            else DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Lifecycle,
+                "No supported torch prefabs are available; refilling is unavailable.", level: LogLevel.Warning);
             if (_diagnostics.IsDebugEnabled)
-                DiagnosticLog.Write(_logger, "Infinite Torches", DiagnosticEvent.Detail, "Torch prefabs resolved", new (string, object?)[] { ("prefab_types", _torches.Count) }, LogLevel.Debug);
+                DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Detail, "Torch prefabs resolved", new (string, object?)[] { ("prefab_types", _torches.Count) }, LogLevel.Debug);
             _announced = true;
         }
     }

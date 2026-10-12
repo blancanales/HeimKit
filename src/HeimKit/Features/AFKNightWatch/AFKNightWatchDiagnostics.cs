@@ -36,12 +36,22 @@ public sealed class AFKNightWatchDiagnostics
         Write(DiagnosticEvent.Summary, vote.Unknown ? "Unknown actor data; native fallback depends on a living sleeper" : vote.Met ? "Sleep quorum met; native time checks still apply" : "Sleep quorum not met", new (string, object?)[] {
             ("majority_enabled", state.MajorityEnabled), ("afk_sleep_exclusion_enabled", state.ExclusionEnabled),
             ("participants_last_vote", vote.Participants), ("sleepers_last_vote", vote.Sleepers), ("required_last_vote", vote.Required),
-            ("excluded_idle_last_vote", vote.ExcludedIdle), ("quorum_met_last_vote", vote.Met), ("native_vote_fallback", vote.Unknown && vote.Sleepers > 0),
+            ("excluded_idle_last_vote", vote.ExcludedIdle), ("quorum_met_last_vote", vote.Met), ("delay_remaining_s", vote.DelayRemaining), ("allowed_after_delay", vote.AllowedAfterDelay), ("native_vote_fallback", vote.Unknown && vote.Sleepers > 0),
             ("votes_observed_total", state.Votes), ("vote_age_s", state.VoteAge), ("time_skip", outcome?.Outcome ?? state.Sleep?.Outcome ?? "not_observed"),
             ("last_outcome_age_s", outcome == null ? (float?)null : Math.Max(0, now - outcome.ObservedAt)),
             ("native_probe_age_s", state.Sleep == null ? (float?)null : Math.Max(0, now - state.Sleep.ObservedAt)),
             ("unchanged_native_samples_interval", TakeUnchangedNative()), ("omitted_messages_interval", _budget.TakeOmitted()) });
         if (_budget.Reserve(now, "HOOK_DETAIL", 1, false)) Write(DiagnosticEvent.Detail, "Sleep hook evidence", new (string, object?)[] { ("sleep_hook_counts_total", state.Hooks?.Format() ?? "not_observed") });
+    }
+    public void SleepStarted(SleepDecision vote, AFKNightWatchSettings settings)
+    {
+        if (!Enabled) return;
+        Write(DiagnosticEvent.Result, "Configured sleep rules allowed the observed sleep start", new (string, object?)[] {
+            ("majority_enabled", settings.MajoritySleepEnabled.Value), ("required_sleeping_percent", settings.RequiredSleepingPercent.Value),
+            ("require_more_than_percent", settings.RequireMoreThanPercent.Value), ("exclude_afk_from_sleep", settings.ExcludeAFKFromSleep.Value),
+            ("sleep_delay_s", settings.SleepDelaySeconds.Value), ("delay_remaining_s", vote.DelayRemaining),
+            ("joined_players", vote.Participants + vote.ExcludedIdle), ("participants", vote.Participants),
+            ("sleepers", vote.Sleepers), ("required_sleepers", vote.Required), ("excluded_afk", vote.ExcludedIdle), ("quorum_met", vote.Met) });
     }
     public void Warning(float now, Exception error)
     {

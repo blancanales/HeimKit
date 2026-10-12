@@ -139,7 +139,7 @@ internal static class DebugLoggingResolverTests
             var weather = new WeatherGuard(config, logger, PlayerServicesTests.For(config, logger));
             messages.Clear(); torches.Initialize("1.0.17"); weather.Initialize("1.0.17");
             Check(torches.IsActive && weather.IsActive && messages.Count(m => m.Text.EndsWith(": Enabled.")) == 2 &&
-                messages.All(m => m.Level != LogLevel.Debug), "Suppression changed gameplay enablement or hid startup.");
+                messages.Where(m => m.Level == LogLevel.Debug).Count() == 2 && messages.Where(m => m.Level == LogLevel.Debug).All(m => m.Text.Contains("Debug logging suppressed by DisableDebugLogging")), "Suppression changed gameplay enablement or leaked recurring diagnostics.");
             torches.Initialize("unsupported"); weather.Initialize("unsupported");
             Check(messages.Count(m => m.Level == LogLevel.Warning) == 2, "Suppression hid compatibility warnings.");
             torches.Shutdown(); weather.Shutdown();

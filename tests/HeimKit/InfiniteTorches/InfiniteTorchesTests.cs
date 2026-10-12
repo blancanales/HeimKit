@@ -10,10 +10,10 @@ internal static class InfiniteTorchesTests
         // Exercise actual feature configuration and startup logs without a running Unity world.
         var cases = new[]
         {
-            (Enabled: true, Version: "1.0.17", Active: true, Message: "Infinite Torches: Enabled."),
-            (Enabled: false, Version: "1.0.17", Active: false, Message: "Infinite Torches: Disabled."),
+            (Enabled: true, Version: "1.0.17", Active: true, Message: "InfiniteTorches: Enabled."),
+            (Enabled: false, Version: "1.0.17", Active: false, Message: "InfiniteTorches: Disabled."),
             (Enabled: true, Version: "1.0.18", Active: false, Message: "DISABLED (unsupported Valheim version 1.0.18"),
-            (Enabled: false, Version: "1.0.18", Active: false, Message: "Infinite Torches: Disabled.")
+            (Enabled: false, Version: "1.0.18", Active: false, Message: "InfiniteTorches: Disabled.")
         };
         foreach (var test in cases)
         {

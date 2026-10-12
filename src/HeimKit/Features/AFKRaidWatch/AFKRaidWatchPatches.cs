@@ -46,9 +46,22 @@ public sealed class AFKRaidWatchPatches : IDisposable
             if (logger != null) DiagnosticLog.Write(logger, "AFKRaidWatch", DiagnosticEvent.Lifecycle, "Diagnostic hook unavailable; gameplay hooks retained", new (string, object?)[] { ("hook", "RandEventSystem." + method), ("registered", false), ("reason", error.Message) }, level: LogLevel.Warning);
         }
     }
-    private static void Enter(out int __state) { __state = _automaticDepth; _automaticDepth++; Note("automatic_update_invocations"); }
+    private static void Enter(out int __state)
+    {
+        __state = _automaticDepth; _automaticDepth++; Note("automatic_update_invocations");
+        if (__state == 0) AFKRaidWatchController.Active?.BeginSelection();
+    }
     private static Exception? Exit(int __state, Exception? __exception)
-    { if (__exception != null) Note("native_automatic_update_exceptions"); _automaticDepth = __state; return __exception; }
+    {
+        try
+        {
+            if (__exception != null) Note("native_automatic_update_exceptions");
+            if (__state == 0) AFKRaidWatchController.Active?.EndSelection(__exception != null);
+        }
+        catch (Exception error) { AFKRaidWatchController.Active?.ObservationFailed(error); }
+        finally { _automaticDepth = __state; }
+        return __exception;
+    }
     private static void Filter(RandomEvent ev, List<RandEventSystem.PlayerEventData> characters, ref List<Vector3> __result)
     {
         Note("get_valid_event_points_results");

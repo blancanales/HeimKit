@@ -53,10 +53,9 @@ internal static class WeatherGuardControlsTests
         Check(messages[^1].Text.Contains("counts are unknown"), "Unobserved scope falsely reported measured zeros.");
 
         var medium = new WeatherGuardDiagnostics(logger, true, DebugLogLevel.Medium, false);
-        medium.Report(0, () => throw new Exception(), null, () => new[] { new ProtectionObservation
-        { Identity = new() { ["object"] = "partial" }, Protected = true, RainProtection = false, UnderwaterProtection = true, Reason = "eligible" } });
-        Check(messages[^1].Level == LogLevel.Debug && messages[^2].Level == LogLevel.Debug && messages[^1].Text.Contains("protected=true") && messages[^1].Text.Contains("rain_protected=false") && messages[^1].Text.Contains("underwater_protected=true"),
-            "Medium output presented partial protection as both-channel protection.");
+        medium.Report(0, () => new WeatherGuardStatus { RainProtection = false, UnderwaterProtection = true });
+        Check(messages[^1].Level == LogLevel.Debug && !messages[^1].Text.Contains("rain_protection_enabled") && !messages[^1].Text.Contains("underwater_protection_enabled"),
+            "Medium path repeats startup channel settings.");
         var root = Path.Combine(AppContext.BaseDirectory, "weather-controls-" + Guid.NewGuid());
         Directory.CreateDirectory(root);
         var configPath = Path.Combine(root, "heimkit.cfg");
@@ -68,7 +67,7 @@ internal static class WeatherGuardControlsTests
             Check(settings.ProtectRain.Value && settings.ProtectUnderwater.Value && settings.ExcludedPrefabs.Value == "", "Protection defaults changed existing behavior.");
             File.WriteAllText(configPath, "[WeatherGuard]\nDebugLogLevel = 123\n");
             var invalidLevel = new WeatherGuardSettings(new ConfigFile(configPath, false) { SaveOnConfigSet = false }, logger);
-            Check(invalidLevel.DebugLogLevel.Value == DebugLogLevel.Medium, "Undefined numeric diagnostic level must fall back to Medium.");
+            Check(invalidLevel.DebugLogLevel.Value == DebugLogLevel.Detailed, "Undefined numeric diagnostic level must fall back to Detailed.");
             foreach (var level in new[] { DebugLogLevel.Medium, DebugLogLevel.Detailed })
             {
                 File.WriteAllText(configPath, "[WeatherGuard]\nDebugLogLevel = " + level + "\n");
@@ -107,6 +106,7 @@ internal static class WeatherGuardControlsTests
             Check(reports == 3, "Report failure broke later requests.");
             // Disabled module still services explicit reports without initializing Unity gameplay.
             var moduleConfig = new ConfigFile(configPath, false) { SaveOnConfigSet = false };
+            moduleConfig.Bind("WeatherGuard", "Enabled", true).Value = false;
             var module = new WeatherGuard(moduleConfig, logger, PlayerServicesTests.For(moduleConfig, logger));
             module.Initialize("1.0.17");
             File.WriteAllText(requestPath, ""); module.Tick(10);

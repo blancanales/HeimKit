@@ -19,7 +19,7 @@ public sealed class WeatherGuardSettings
 
     public WeatherGuardSettings(ConfigFile config, ManualLogSource? logger = null)
     {
-        Enabled = config.Bind("WeatherGuard", "Enabled", false,
+        Enabled = config.Bind("WeatherGuard", "Enabled", true,
             "Enable automatic rain/water-wear protection for player-built structures using server processing. Preserve creators. World-created repair claims are inactive. Restart after edits.");
         ProtectRain = config.Bind("WeatherGuard", "ProtectRain", true, "Prevent rain wear on eligible structures. Restart after edits.");
         ProtectUnderwater = config.Bind("WeatherGuard", "ProtectUnderwater", true, "Prevent underwater wetness wear on eligible structures. Restart after edits.");
@@ -27,8 +27,8 @@ public sealed class WeatherGuardSettings
         GlobalDebugMode = DiagnosticsSettings.Bind(config);
         DebugMode = config.Bind("WeatherGuard", "DebugMode", false, "Enable diagnostics for this feature even when global DebugMode is off. The hidden suppression override still takes precedence. Restart after edits.");
         DebugLogging = DebugLoggingResolver.Resolve(config, "WeatherGuard", GlobalDebugMode, logger, DebugMode);
-        DebugLogLevel = config.Bind("WeatherGuard", "DebugLogLevel", Models.DebugLogLevel.Medium,
-            new ConfigDescription("DebugMode output: Medium reports qualifying item protection status; Detailed retains wear, health, loading and ownership evidence. Restart after edits.",
+        DebugLogLevel = config.Bind("WeatherGuard", "DebugLogLevel", Models.DebugLogLevel.Detailed,
+            new ConfigDescription("DebugMode output: Medium reports the grouped prevention path; Detailed adds native-condition, health-anomaly, loading, ownership and support evidence. Restart after edits.",
                 new WeatherGuardDebugLogLevelValues()));
         LogWorldCreatedItems = config.Bind("WeatherGuard", "LogWorldCreatedItems", false,
             "Include otherwise qualifying world-created structures in debug logs. Logging only; these structures remain unprotected. Restart after edits.");

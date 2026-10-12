@@ -49,6 +49,6 @@ public sealed class ActivitySamples
     public void IntervalReported() { TransitionsInterval = 0; ReplacedPendingInterval = 0; }
     public void Reset() { _seen.Clear(); _pending.Clear(); _last = float.NegativeInfinity; IntervalReported(); }
     private static PlayerActivityView Copy(PlayerActivityView p) => new()
-    { Peer = p.Peer, Session = p.Session, StateRevision = p.StateRevision, Known = p.Known, Alive = p.Alive, InBed = p.InBed, Idle = p.Idle,
+    { Peer = p.Peer, Name = p.Name, Session = p.Session, StateRevision = p.StateRevision, Known = p.Known, Alive = p.Alive, InBed = p.InBed, Idle = p.Idle,
       ObservedAt = p.ObservedAt, Reason = p.Reason, LastSignal = p.LastSignal, LastActivityAt = p.LastActivityAt, Recovery = p.Recovery, GraceRemaining = p.GraceRemaining, IdleSeconds = p.IdleSeconds };
 }

@@ -12,7 +12,7 @@ internal static class StartupLoggingTests
     {
         var factories = new (string Name, string Section, Func<ConfigFile, ManualLogSource, IServerModule> Create)[]
         {
-            ("Infinite Torches", "Torches", (config, log) => new InfiniteTorches(config, log, PlayerServicesTests.For(config, log))),
+            ("InfiniteTorches", "Torches", (config, log) => new InfiniteTorches(config, log, PlayerServicesTests.For(config, log))),
             ("WeatherGuard", "WeatherGuard", (config, log) => new WeatherGuard(config, log, PlayerServicesTests.For(config, log))),
             ("AFKNightWatch", "AFKNightWatch", (config, log) => new AFKNightWatch(config, log, PlayerServicesTests.For(config, log))),
             ("AFKRaidWatch", "AFKRaidWatch", (config, log) => new AFKRaidWatch(config, log, PlayerServicesTests.For(config, log)))
@@ -36,7 +36,7 @@ internal static class StartupLoggingTests
                 var info = messages.Where(m => m.Level == LogLevel.Info).ToArray();
                 if (info.Length != 1 || info[0].Text != $"{factory.Name}: {(enabled ? "Enabled." : "Disabled.")}")
                     throw new Exception("Configuration status must be concise and emitted once: " + factory.Name);
-                bool expectDebug = enabled && debug && !suppressed;
+                bool expectDebug = debug || suppressed;
                 if (messages.Any(m => m.Level == LogLevel.Debug) != expectDebug ||
                     messages.Any(m => m.Text == factory.Name + ": Ready."))
                     throw new Exception("Waiting must be gated Debug and readiness must require actual initialization: " + factory.Name);
@@ -44,7 +44,7 @@ internal static class StartupLoggingTests
                 messages.Clear();
                 feature.Initialize("unsupported");
                 if (feature.IsActive || messages.Count(m => m.Level == LogLevel.Warning) != (enabled ? 1 : 0) ||
-                    messages.Any(m => m.Text.Contains("elapsed_s") || m.Text.Contains("Ready.")))
+                    messages.Any(m => m.Level != LogLevel.Debug && (m.Text.Contains("elapsed_s") || m.Text.Contains("Ready."))))
                     throw new Exception("Compatibility issue must be concise and visible without false readiness: " + factory.Name);
                 feature.Shutdown();
             }

@@ -18,7 +18,19 @@ public static class ConfigurationLoader
             var config = new ConfigFile(path, false) { SaveOnConfigSet = false };
             T result = bindSettings(config);
             config.Save();
+            ConfigurationLayout.Apply(path);
             config.SaveOnConfigSet = true;
+            // BepInEx saves before raising SettingChanged; retain layout after automatic saves too.
+            config.SettingChanged += (_, __) =>
+            {
+                if (!config.SaveOnConfigSet) return;
+                try { ConfigurationLayout.Apply(path); }
+                catch (Exception error)
+                {
+                    DiagnosticLog.Write(logger, "HeimKit", DiagnosticEvent.Lifecycle,
+                        "Could not organize saved configuration sections: " + error, level: LogLevel.Error);
+                }
+            };
             DiagnosticLog.Write(logger, "HeimKit", DiagnosticEvent.Lifecycle, existed
                 ? $"Loaded configuration: {path}."
                 : $"Created default configuration: {path}.");

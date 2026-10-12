@@ -15,10 +15,12 @@ internal static class WeatherGuardPatchesTests
         var original = Instructions(target);
         var result = ((IEnumerable<CodeInstruction>)transpiler.Invoke(null, new object[] { original })!).ToList();
         var flag = typeof(WearNTear).GetField("m_noRoofWear")!;
-        int gate = original.FindLastIndex(i => i.opcode == OpCodes.Ldfld && Equals(i.operand, flag));
+        var timer = typeof(WearNTear).GetField("m_rainTimer", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        int gate = original.FindIndex(i => i.opcode == OpCodes.Ldc_R4 && Equals(i.operand, 5f) &&
+            original[original.IndexOf(i) - 2].opcode == OpCodes.Stfld && Equals(original[original.IndexOf(i) - 2].operand, timer));
         if (result.Count != original.Count + 2 || result[gate + 1].opcode != OpCodes.Ldarg_0 ||
-            result[gate + 2].operand is not MethodInfo method || method.Name != "AllowWeatherDamage")
-            throw new Exception("Weather suppression was not inserted at the damage gate.");
+            result[gate + 2].operand is not MethodInfo method || method.Name != "WeatherContribution")
+            throw new Exception("Weather suppression was not inserted at the native timed weather addition.");
         result.RemoveRange(gate + 1, 2);
         if (!result.Zip(original).All(pair => pair.First.opcode == pair.Second.opcode && Equals(pair.First.operand, pair.Second.operand)))
             throw new Exception("Weather patch changed native wetness, support, damage or control flow.");
@@ -30,15 +32,31 @@ internal static class WeatherGuardPatchesTests
         try { transpiler.Invoke(null, new object[] { changed }); }
         catch (TargetInvocationException error) when (error.InnerException is MissingMethodException) { rejected = true; }
         if (!rejected) throw new Exception("Changed game IL was silently patched.");
-        var allow = type.GetMethod("AllowWeatherDamage", BindingFlags.Static | BindingFlags.NonPublic)!;
-        foreach (bool value in new[] { false, true })
-            if ((bool)allow.Invoke(null, new object?[] { value, null })! != value)
+        var allow = type.GetMethod("WeatherContribution", BindingFlags.Static | BindingFlags.NonPublic)!;
+        foreach (float value in new[] { 0f, 5f, 100f })
+            if ((float)allow.Invoke(null, new object?[] { value, null })! != value)
                 throw new Exception("Inactive weather hook changes vanilla behavior.");
+        var changedTimer = original.Select(i => new CodeInstruction(i.opcode, i.operand)).ToList();
+        foreach (var i in changedTimer) if (i.opcode == OpCodes.Ldc_R4 && Equals(i.operand, 60f)) i.operand = 61f;
+        rejected = false;
+        try { transpiler.Invoke(null, new object[] { changedTimer }); }
+        catch (TargetInvocationException error) when (error.InnerException is MissingMethodException) { rejected = true; }
+        if (!rejected) throw new Exception("Changed native wet-timer threshold was silently patched.");
+        if (typeof(WearNTearUpdater).GetMethod("UpdateWearNTear", BindingFlags.Instance | BindingFlags.NonPublic, null, new[] { typeof(float), typeof(float) }, null) == null)
+            throw new Exception("Native wear pass boundary is unavailable.");
+        var updater = typeof(WearNTearUpdater).GetMethod("UpdateWearNTear", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var updaterCode = Instructions(updater);
+        var indexField = typeof(WearNTearUpdater).GetField("m_index", BindingFlags.Instance | BindingFlags.NonPublic);
+        int nativeWearCall = updaterCode.FindIndex(i => i.operand is MethodInfo call && call.Name == "UpdateWear");
+        int indexStore = updaterCode.FindIndex(i => i.opcode == OpCodes.Stfld && Equals(i.operand, indexField));
+        if (indexField?.FieldType != typeof(int) || nativeWearCall < 0 || indexStore <= nativeWearCall ||
+            !updaterCode.Skip(indexStore + 1).Any(i => i.opcode == OpCodes.Ldfld && Equals(i.operand, indexField)))
+            throw new Exception("Installed updater no longer exposes the audited post-wear sweep index boundary.");
         foreach (string field in new[] { "m_haveRoof", "m_shieldChangeID", "m_rainTimer", "m_rainWet" })
             if (typeof(WearNTear).GetField(field, BindingFlags.Instance | BindingFlags.NonPublic) == null) throw new Exception("Missing evidence field " + field);
         foreach (string name in new[] { "ShouldUpdate", "IsUnderWater", "CanBeRemoved", "RPC_Damage", "RPC_Repair", "RPC_Remove" })
             if (typeof(WearNTear).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic) == null) throw new Exception("Missing native/evidence method " + name);
-        System.Console.WriteLine("PASS: installed UpdateWear IL accepts damage-only suppression, preserves all original instructions/native calls, rejects changed shape and leaves inactive behavior vanilla. Unity patch execution still requires live testing.");
+        System.Console.WriteLine("PASS: installed UpdateWear IL accepts suppression only at the timed weather addition, preserves all original instructions/native calls, rejects changed shape and leaves inactive behavior vanilla. Unity patch execution still requires live testing.");
     }
     private static List<CodeInstruction> Instructions(MethodInfo method)
     {

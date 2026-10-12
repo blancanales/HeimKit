@@ -59,7 +59,7 @@ public sealed class PlayerActivityTracker
             state.WasReliable = known && current.Alive;
             var view = state.View;
             bool previousKnown = view.Known, previousAlive = view.Alive, previousBed = view.InBed, previousIdle = view.Idle;
-            view.Peer = current.Peer; view.Known = known; view.Alive = current.Alive; view.InBed = known && current.Alive && current.InBed;
+            view.Peer = current.Peer; view.Name = current.Name; view.Known = known; view.Alive = current.Alive; view.InBed = known && current.Alive && current.InBed;
             view.X = current.X; view.Y = current.Y; view.Z = current.Z;
             view.IdleSeconds = Math.Max(0, now - state.LastActivity);
             view.Idle = known && current.Alive && !current.InBed && !current.Busy && now - state.Joined >= _options.Grace && view.IdleSeconds >= _options.Timeout;

@@ -29,7 +29,7 @@ public sealed class InfiniteTorchesDiagnostics
     public bool IsDebugEnabled => _debugEnabled() && DiagnosticLog.ServerActivity.Allowed;
     public string SettingsDescription => $"debug mode {IsDebugEnabled}; automatic diagnostic interval 60s";
     private void Write(DiagnosticEvent category, string message, Dictionary<string, object?> fields)
-        => DiagnosticLog.Write(_logger, "Infinite Torches", category, message, fields.Select(p => (p.Key, p.Value)), LogLevel.Debug);
+        => DiagnosticLog.Write(_logger, "InfiniteTorches", category, message, fields.Select(p => (p.Key, p.Value)), LogLevel.Debug);
     private static (string Message, Dictionary<string, object?> Fields) Payload(string text)
     {
         var segments = text.Split(new[] { "; " }, StringSplitOptions.None);
@@ -55,6 +55,19 @@ public sealed class InfiniteTorchesDiagnostics
         if (!IsDebugEnabled || !_budget.Reserve(now, "ACTION", RefillDetailLimit)) return;
         Write(DiagnosticEvent.Action, "Refill request sent; client application unconfirmed", new()
         { ["object"] = id, ["prefab"] = prefab, ["position"] = position, ["fuel_before"] = before, ["fuel_target"] = target });
+    }
+    public void UnsupportedPrefabs(int count, IReadOnlyDictionary<string, int> reasons)
+    {
+        if (count <= 0) return;
+        string grouped = string.Join(", ", reasons.OrderBy(pair => pair.Key).Select(pair => pair.Key + " (" + pair.Value + ")"));
+        DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Lifecycle,
+            $"Skipped {count} unsupported prefab entries: {grouped}. Review Torches.Prefabs.", level: LogLevel.Warning);
+    }
+    public void RefillSummary(int fuelUpdates)
+    {
+        if (fuelUpdates <= 0) return;
+        DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Result,
+            $"Fuel increase observed for {fuelUpdates} {(fuelUpdates == 1 ? "torch" : "torches")}.");
     }
     public void Result(float now, RefillResult result)
     {

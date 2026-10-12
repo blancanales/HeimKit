@@ -9,4 +9,6 @@ public sealed class SleepDecision
     public int ExcludedIdle { get; set; }
     public bool Unknown { get; set; }
     public bool Met { get; set; }
+    public bool AllowedAfterDelay { get; set; }
+    public float DelayRemaining { get; set; }
 }

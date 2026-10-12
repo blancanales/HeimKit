@@ -25,22 +25,26 @@ public static class AFKNightWatchSleepVoteCoordinator
     private static Action<Exception>? _failure;
     private static bool _installed;
     private static Func<bool>? _debug;
+    private static Action<bool, bool?, SleepDecision?>? _lifecycle;
+    private static readonly AFKNightWatchSleepDelay SleepDelay = new();
+    private static Func<int>? _delaySeconds;
+    private static SleepDecision? _acceptedVote;
     private static Action<string, NativeSleepObservation?>? _hook;
     private static ManualLogSource? _logger;
     private static string _logName = "SleepVote";
     private static float _lastAttemptAt = float.NegativeInfinity;
     private static float _lastWarning = float.NegativeInfinity;
-    public static IDisposable Register(Func<(int, bool)>? options, IPlayerActivityObservations? activity, Action<SleepDecision> result, Action<Exception> failure, Func<bool>? debug = null, Action<string, NativeSleepObservation?>? hook = null, ManualLogSource? logger = null, string logName = "SleepVote", IPlayerPresence? presence = null)
+    public static IDisposable Register(Func<(int, bool)>? options, IPlayerActivityObservations? activity, Action<SleepDecision> result, Action<Exception> failure, Func<bool>? debug = null, Action<string, NativeSleepObservation?>? hook = null, ManualLogSource? logger = null, string logName = "SleepVote", IPlayerPresence? presence = null, Action<bool, bool?, SleepDecision?>? lifecycle = null, Func<int>? delaySeconds = null)
     {
         if (_installed) throw new InvalidOperationException("A sleep-vote owner is already registered.");
         _logger = logger; _logName = logName; _presence = presence ?? throw new ArgumentNullException(nameof(presence));
-        try { Install(); _debug = debug; _hook = hook; _majority = options; _activity = activity; _result = result; _failure = failure; }
+        try { Install(); _debug = debug; _hook = hook; _lifecycle = lifecycle; _delaySeconds = delaySeconds; SleepDelay.Reset(); _acceptedVote = null; _majority = options; _activity = activity; _result = result; _failure = failure; }
         catch
         {
-            _presence = null; _majority = null; _activity = null; _result = null; _failure = null; _debug = null; _hook = null;
+            _presence = null; _majority = null; _activity = null; _result = null; _failure = null; _debug = null; _hook = null; _lifecycle = null; _delaySeconds = null; SleepDelay.Reset(); _acceptedVote = null;
             UninstallUnused(); throw;
         }
-        return new Registration(() => { _lastAttemptAt = float.NegativeInfinity; _presence = null; _debug = null; _hook = null; _majority = null; _activity = null; _result = null; _failure = null; UninstallUnused(); });
+        return new Registration(() => { _lastAttemptAt = float.NegativeInfinity; _presence = null; _debug = null; _hook = null; _lifecycle = null; _delaySeconds = null; SleepDelay.Reset(); _acceptedVote = null; _majority = null; _activity = null; _result = null; _failure = null; UninstallUnused(); });
     }
     private static void Install()
     {
@@ -85,24 +89,29 @@ public static class AFKNightWatchSleepVoteCoordinator
     private static bool Vote(ref bool __result)
     {
         Notify("vote_hook_calls");
-        if (!PlayerServices.Ready || !_installed || _presence?.HasConnectedPlayers != true || EnvMan.instance == null || !(EnvMan.IsAfternoon() || EnvMan.IsNight())) { Notify("vote_not_ready_fallback"); return true; }
+        if (!PlayerServices.Ready || !_installed || _presence?.HasJoinedPlayers != true || EnvMan.instance == null || !(EnvMan.IsAfternoon() || EnvMan.IsNight())) { SleepDelay.Reset(); _acceptedVote = null; Notify("vote_not_ready_fallback"); return true; }
         try
         {
             var players = _activity != null ? _activity.Snapshot(Time.unscaledTime) :
                 PlayerActivityService.ReadActors(_presence!).Select(p => new PlayerActivityView { Peer = p.Peer, Known = p.Known, Alive = p.Alive, InBed = p.InBed }).ToArray();
-            if (_activity != null && !_activity.Reliable) { Notify("vote_not_ready_fallback"); return true; }
-            if (!players.Any(p => p.Known && p.Alive && p.InBed)) { Notify("no_living_sleeper_votes"); __result = false; return false; }
+            if (_activity != null && !_activity.Reliable) { SleepDelay.Reset(); _acceptedVote = null; Notify("vote_not_ready_fallback"); return true; }
+            if (!players.Any(p => p.Known && p.Alive && p.InBed)) { SleepDelay.Reset(); _acceptedVote = null; Notify("no_living_sleeper_votes"); __result = false; return false; }
             _lastAttemptAt = Time.unscaledTime;
             var settings = _majority?.Invoke() ?? (100, false);
             var decision = AFKNightWatchSleepQuorumRules.Evaluate(players, settings.Item1, settings.Item2, _activity != null);
+            decision.AllowedAfterDelay = SleepDelay.Allow(Time.unscaledTime, decision.Met,
+                players.All(p => p.Known && p.InBed), _delaySeconds?.Invoke() ?? 30);
+            decision.DelayRemaining = SleepDelay.Remaining;
+            _acceptedVote = decision.AllowedAfterDelay ? decision : null;
             _result?.Invoke(decision);
             if (decision.Participants == 0) Notify("empty_vote_rosters");
-            if (decision.Sleepers == 0) { Notify("no_living_sleeper_votes"); __result = false; return false; }
+            if (decision.Sleepers == 0) { SleepDelay.Reset(); _acceptedVote = null; Notify("no_living_sleeper_votes"); __result = false; return false; }
             if (decision.Unknown) { Notify("unknown_actor_native_fallbacks"); return true; }
-            __result = decision.Met; return false;
+            __result = decision.AllowedAfterDelay; return false;
         }
         catch (Exception error)
         {
+            SleepDelay.Reset(); _acceptedVote = null;
             Notify("vote_processing_failures");
             _failure?.Invoke(error); return true;
         }
@@ -122,12 +131,26 @@ public static class AFKNightWatchSleepVoteCoordinator
     private static void VoteReturned(bool __result) => Notify(__result ? "vote_returned_true" : "vote_returned_false");
     private static Exception? VoteFinished(Exception? __exception) { if (__exception != null) Notify("native_vote_exceptions"); return __exception; }
     private static void SkipRequested() => Notify("skip_to_morning_invocations");
+    private static void ObserveLifecycle(bool sleeping, bool failed = false, SleepDecision? vote = null)
+    {
+        try
+        {
+            bool? skipping = !failed && _presence?.HasJoinedPlayers == true && ZNet.instance != null && ZNet.instance.IsServer() && EnvMan.instance != null
+                ? EnvMan.instance.IsTimeSkipping() : (bool?)null;
+            _lifecycle?.Invoke(sleeping, skipping, failed ? null : vote);
+        }
+        catch (Exception error) { ObservationWarning(error); }
+    }
     private static void UpdateEntered(bool ___m_sleeping, double ___m_lastSleepTime, out NativeSleepObservation? __state)
     {
         __state = null; Notify("update_sleeping_invocations");
+        _acceptedVote = null;
+        if (___m_sleeping || _presence?.HasJoinedPlayers != true || EnvMan.instance == null ||
+            EnvMan.instance.IsTimeSkipping() || !(EnvMan.IsAfternoon() || EnvMan.IsNight())) SleepDelay.Reset();
+        ObserveLifecycle(___m_sleeping);
         try
         {
-            if (!DebugEnabled || _presence?.HasConnectedPlayers != true) return;
+            if (!DebugEnabled || _presence?.HasJoinedPlayers != true) return;
             if (!___m_sleeping && (EnvMan.instance == null || !(EnvMan.IsAfternoon() || EnvMan.IsNight()))) return;
             __state = new NativeSleepObservation { ObservedAt = Time.unscaledTime, Server = ZNet.instance != null ? ZNet.instance.IsServer() : (bool?)null, Sleeping = ___m_sleeping };
             if (EnvMan.instance != null)
@@ -143,6 +166,9 @@ public static class AFKNightWatchSleepVoteCoordinator
     }
     private static Exception? UpdateFinished(NativeSleepObservation? __state, bool ___m_sleeping, Exception? __exception)
     {
+        if (__exception != null) SleepDelay.Reset();
+        ObserveLifecycle(___m_sleeping, __exception != null, _acceptedVote);
+        _acceptedVote = null;
         if (__exception != null) Notify("native_sleep_update_exceptions");
         if (__state != null)
         {

@@ -2,7 +2,7 @@
 
 HeimKit brings quality-of-life features to Windows Valheim dedicated servers, helping server owners reduce upkeep, coordinate night skipping and limit automatic raids around idle players.
 
-Install HeimKit on the server and choose the features you want independently. It is designed for players using unmodified clients, with configuration managed by the server. Gameplay features pause when nobody is connected and resume when players return; requested administrative reports remain available. The project is under local development; no production release is advertised.
+Install HeimKit on the server and choose the features you want independently. It is designed for players using unmodified clients, with configuration managed by the server. Gameplay features pause when no players have joined the world and resume after players spawn; requested administrative reports remain available. The project is under local development; no production release is advertised.
 
 ## World safety
 
@@ -10,7 +10,7 @@ Install HeimKit on the server and choose the features you want independently. It
 
 ## Features
 
-### Infinite Torches
+### InfiniteTorches
 
 Keeps eligible torches supplied with fuel automatically, reducing manual refilling without spending player inventory materials. Normal water, smoke and obstruction behavior still applies, so fuel alone does not guarantee a lit torch.
 
@@ -24,7 +24,7 @@ Designed to prevent rain and wetness wear on eligible existing and newly player-
 
 ### AFKNightWatch
 
-Coordinates configurable majority sleep and idle-player sleep exclusion, so players can coordinate time skipping without waiting for inferred-idle players. Normal bed requirements and the native afternoon/night allowance remain. Server-observed activity informs idle detection, which cannot observe every local menu action.
+Coordinates configurable majority sleep and idle-player sleep exclusion, so players can coordinate time skipping without waiting for inferred-idle players. A short grace period gives other players time to reach bed once the threshold is met; everyone in bed can start sleep immediately. Normal bed requirements and the native afternoon/night allowance remain. Server-observed activity informs idle detection, which cannot observe every local menu action.
 
 [Usage and scope](docs/features/afk-night-watch.md) · [Technical specification](docs/specs/afk-night-watch.md)
 
