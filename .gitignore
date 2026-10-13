@@ -55,3 +55,35 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Local game/runtime references and machine-specific files
+lib/
+libs/
+references/
+BepInEx/
+valheim_server_Data/
+valheim_Data/
+Environment.props
+*.csproj.user
+.vs/
+
+# Local diagnostic logs and crash dumps
+log.txt
+*.log
+*.dmp
+
+# Local editor and operating-system files
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local environment overrides and server saves
+.env.*
+!.env.example
+worlds/
+worlds_local/
