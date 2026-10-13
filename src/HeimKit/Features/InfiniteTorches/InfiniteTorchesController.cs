@@ -62,7 +62,7 @@ internal sealed class InfiniteTorchesController : IDisposable
             return;
         }
 
-        string operation = "resolving configured torch prefabs";
+        string operation = "resolving configured light-source prefabs";
         try
         {
             operation = "checking pending refill results";
@@ -74,11 +74,11 @@ internal sealed class InfiniteTorchesController : IDisposable
                     : (RefillObservation?)null;
             }, result => { Count(result.Outcome); _diagnostics.Result(now, result); });
             _diagnostics.RefillSummary(fuelUpdates);
-            operation = "resolving configured torch prefabs";
+            operation = "resolving configured light-source prefabs";
             if (_scene != scene || _configuredNames != _settings.Prefabs.Value) LoadPrefabs(scene);
             if (_torches.Count == 0)
             {
-                _diagnostics.Report(now, () => "No supported torch prefabs configured. Check Torches.Prefabs and startup warnings.");
+                _diagnostics.Report(now, () => "No supported light-source prefabs configured. Check Torches.Prefabs and startup warnings.");
                 return;
             }
             _owners.Clear();
@@ -111,7 +111,7 @@ internal sealed class InfiniteTorchesController : IDisposable
             if (_candidates.Count == 0)
             {
                 _cursor = 0;
-                _diagnostics.Report(now, () => $"No eligible client-owned torches in players' nearby areas; ready_players_now={_owners.Count}; prefab_types_now={_torches.Count}; sector_records_pass={sectorRecords}.");
+                _diagnostics.Report(now, () => $"No eligible client-owned light sources in players' nearby areas; ready_players_now={_owners.Count}; prefab_types_now={_torches.Count}; sector_records_pass={sectorRecords}.");
                 return;
             }
 
@@ -150,9 +150,9 @@ internal sealed class InfiniteTorchesController : IDisposable
             _diagnostics.Report(now, () =>
             {
                 string reason = sent > 0 ? "Refill requests sent this pass; client application is unconfirmed."
-                    : sufficientFuel == examined ? "All examined torches have enough fuel (at least 75%)."
+                    : sufficientFuel == examined ? "All examined light sources have enough fuel (at least 75%)."
                     : pendingSkipped > 0 ? "Waiting for previously requested refills; duplicate requests suppressed."
-                    : "No examined torch could be refilled this pass; see skip counts.";
+                    : "No examined light source could be refilled this pass; see skip counts.";
                 return $"{reason}; ready_players_now={_owners.Count}; candidates_now={_candidates.Count}; examined_pass={examined}; requests_sent_pass={sent}; " +
                     $"sufficient_fuel_pass={sufficientFuel}; off_pass={stateOff}; invalid_fuel_pass={invalidFuel}; owner_unavailable_pass={changedOwner}; " +
                     $"pending_now={_pending.Count}; duplicates_suppressed_pass={pendingSkipped}; tracking_capacity_skips_pass={trackingFull}; " +
@@ -179,10 +179,9 @@ internal sealed class InfiniteTorchesController : IDisposable
             var go = scene.GetPrefab(name);
             var fire = go != null ? go.GetComponent<Fireplace>() : null;
             string? rejection = go == null ? "prefab not found" : fire == null ? "no Fireplace component"
-                : !fire.m_canRefill ? "refilling not supported" : fire.m_infiniteFuel ? "already has infinite fuel"
-                : fire.m_canTurnOff ? "toggle-off behavior is outside the supported torch scope"
-                : fire.m_enabledObjectLow != null || fire.m_enabledObjectHigh != null ? "wet-flame behavior is outside the supported torch scope"
-                : fire.m_maxFuel <= 0f || float.IsNaN(fire.m_maxFuel) || float.IsInfinity(fire.m_maxFuel) ? "invalid maximum fuel" : null;
+                : InfiniteTorchesRefillRules.RejectionReason(name, fire.m_canRefill, fire.m_infiniteFuel,
+                    fire.m_canTurnOff, fire.m_enabledObjectLow != null || fire.m_enabledObjectHigh != null,
+                    fire.m_maxFuel);
             if (rejection != null)
             {
                 rejected.TryGetValue(rejection, out int count); rejected[rejection] = count + 1; rejectionCount++;
@@ -197,9 +196,9 @@ internal sealed class InfiniteTorchesController : IDisposable
         {
             if (_torches.Count > 0) _module.ProcessingReady();
             else DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Lifecycle,
-                "No supported torch prefabs are available; refilling is unavailable.", level: LogLevel.Warning);
+                "No supported light-source prefabs are available; refilling is unavailable.", level: LogLevel.Warning);
             if (_diagnostics.IsDebugEnabled)
-                DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Detail, "Torch prefabs resolved", new (string, object?)[] { ("prefab_types", _torches.Count) }, LogLevel.Debug);
+                DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Detail, "Light-source prefabs resolved", new (string, object?)[] { ("prefab_types", _torches.Count) }, LogLevel.Debug);
             _announced = true;
         }
     }

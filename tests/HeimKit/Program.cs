@@ -1,4 +1,5 @@
 InfiniteTorchesTests.Run();
+InfiniteTorchesRefillRulesTests.Run();
 DiagnosticLogTests.Run();
 StartupLoggingTests.Run();
 ServerDebugActivityTests.Run();

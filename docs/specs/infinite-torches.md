@@ -4,7 +4,7 @@
 
 The feature display name and log prefix are exactly `InfiniteTorches`. Its existing configuration section remains `[Torches]`.
 
-InfiniteTorches periodically refills eligible torches to their ordinary maximum fuel on a Windows Valheim dedicated server, without spending player inventory materials. It uses existing vanilla networking and is designed for unmodified clients. Environmental conditions can still extinguish a fueled torch.
+InfiniteTorches periodically refills eligible torches and braziers to their ordinary maximum fuel on a Windows Valheim dedicated server, without spending player inventory materials (including brazier coal). It uses existing vanilla networking and is designed for unmodified clients. Environmental conditions can still extinguish a fueled torch.
 
 Supported game and loader versions are documented in [server setup](../server-setup.md#supported-environment).
 
@@ -23,17 +23,19 @@ The shared [hidden debug suppression contract](../server-setup.md#hidden-per-fea
 | Torches | DebugMode | false | Enable this feature’s diagnostics with global debug off; hidden suppression takes precedence. |
 | Diagnostics | DebugMode | false | Enable diagnostics across features unless suppressed. |
 
-Default prefabs are `piece_groundtorch_wood`, `piece_groundtorch`, `piece_groundtorch_green`, `piece_groundtorch_blue` and `piece_walltorch`.
+Default prefabs are `piece_groundtorch_wood`, `piece_groundtorch`, `piece_groundtorch_green`, `piece_groundtorch_blue`, `piece_walltorch`, `piece_brazierceiling01`, `piece_brazierfloor01` and `piece_brazierfloor02`. The brazier entries cover the hanging brazier and both standing variants. Existing Torches.Prefabs values are preserved; upgrades require adding the three brazier entries to an existing list.
 
 HeimKit creates `heimkit.cfg` in BepInEx's configuration directory, preserving existing values and adding missing defaults. The example config is optional. Retired diagnostic category settings are removed without changing DebugMode.
 
 ## Eligibility and processing
 
-The module waits for dedicated-server networking and world services. Each configured prefab must have a refillable Fireplace, a finite positive maximum fuel, no inherent infinite-fuel flag, no toggle-off behavior and no wet low/high flame objects. Missing or unsupported definitions are warned about and skipped.
+The module waits for dedicated-server networking and world services. Each configured prefab must have a refillable Fireplace, a finite positive maximum fuel, no inherent infinite-fuel flag, no toggle-off behavior and no wet low/high flame objects, except for the three exact default brazier prefabs. Their native wet-flame behavior remains active. Missing or unsupported definitions are warned about and skipped.
 
 Each pass scans ready connected players' nearby processing sectors. Valid candidate records must be owned by the corresponding peer. Duplicate records are suppressed across players. Off-state torches and nonfinite fuel values are skipped.
 
 Below 75% of normal capacity, the server sends vanilla `RPC_SetFuelAmount(float)` to the current network owner, targeting the normal maximum. The module does not claim ownership or directly overwrite remote-owned fuel data. A rotating cursor and per-pass message budget distribute requests across candidates.
+
+The native Fireplace RPC_SetFuelAmount handler changes only fuel, plays the normal fuel-added effects and refreshes native state. It does not change the on/off state, claim ownership, consume inventory or disable environmental checks. Braziers use the same owner-routed request, capacity threshold, pending tracking and player-presence lifecycle as torches. Campfires, hearths and world-prop braziers are not default candidates.
 
 ## Pending requests
 
@@ -51,7 +53,7 @@ The module initializes only when enabled and the audited game-version guard pass
 
 All messages follow the [shared logging contract](../architecture.md#logging). Info uses concise configuration, effective startup state and readiness messages; Warning uses concise problem messages. Settings and prefab-processing details belong in Debug; Error and exception evidence retain structured output. Optional diagnostics use BepInEx Debug severity. The shared [repetition and volume limits](../architecture.md#repetition-and-volume-limits) govern all streams. DebugMode permits at most one changed-state SUMMARY per 60 seconds with explicitly labeled latest-pass/current counts, interval refill-request and reconciliation-outcome counts and omitted-message counts.
 
-Each reconciliation pass with sufficient replicated fuel increases emits one concise Info entry: `InfiniteTorches: Fuel increase observed for N torches.` A single update uses singular wording. All observed updates in that pass share the entry, independently of DebugMode and optional sample limits. The pending tracker returns the observed-update count after clearing completed requests, preventing repeated notices for unchanged fuel. Empty passes, requests merely sent, insufficient increases, timeouts, missing objects and owner changes do not produce a successful-update summary. The count covers pending requests confirmed by the existing sufficient-progress criteria, not all world torches. Responses observed in different passes have separate summaries; this remains evidence of replicated fuel progress rather than delivery acknowledgement or causation. Pause/shutdown clears pending state.
+Each reconciliation pass with sufficient replicated fuel increases emits one concise Info entry: `InfiniteTorches: Fuel increase observed for N light sources.` A single update uses singular wording. All observed updates in that pass share the entry, independently of DebugMode and optional sample limits. The pending tracker returns the observed-update count after clearing completed requests, preventing repeated notices for unchanged fuel. Empty passes, requests merely sent, insufficient increases, timeouts, missing objects and owner changes do not produce a successful-update summary. The count covers pending requests confirmed by the existing sufficient-progress criteria, not all world light sources. Responses observed in different passes have separate summaries; this remains evidence of replicated fuel progress rather than delivery acknowledgement or causation. Pause/shutdown clears pending state.
 
 Refill ACTION records are limited to four per 60 seconds. They identify object, prefab, position, prior fuel and target; they report a request sent without asserting client application. Pending-operation RESULT records are limited to six per 60 seconds. They identify observed fuel increase, timeout, owner change or missing object, with prior/target/observed fuel and elapsed wait. An owner-change result includes the owners needed to explain that transition. Missing observed data is `unknown`.
 
@@ -59,7 +61,7 @@ Every reconciliation outcome is counted by the controller, even when its individ
 
 ## Limits
 
-Unloaded objects and ownership transitions may ignore requests; later passes retry. Newly loaded empty torches may briefly remain dark. Normal refill effects can appear, and a simultaneous manual refill can still consume resin. Smoke, obstruction and water behavior remains vanilla. The message budget limits sends, not sector scanning cost.
+Unloaded objects and ownership transitions may ignore requests; later passes retry. Newly loaded empty torches or braziers may briefly remain dark. Normal refill effects can appear, and a simultaneous manual refill can still consume the normal fuel material. Smoke, obstruction and water behavior remains vanilla. The message budget limits sends, not sector scanning cost.
 
 Removing the plugin leaves ordinary fuel values to burn normally. No custom world objects or client RPC handlers are introduced.
 
@@ -70,6 +72,7 @@ Removing the plugin leaves ordinary fuel values to burn normally. No custom worl
 | InfiniteTorches.cs | Settings construction, compatibility, module lifecycle and failure isolation. |
 | InfiniteTorchesSettings.cs | Feature configuration bindings, defaults and validation ranges. |
 | InfiniteTorchesController.cs | World readiness, scheduling, scanning, selection and native refill requests. |
+| InfiniteTorchesRefillRules.cs | Prefab fuel eligibility and the exact brazier wet-flame exception. |
 | InfiniteTorchesPendingRefills.cs | Duplicate suppression, reconciliation, timeout and capacity control. |
 | InfiniteTorchesDiagnostics.cs | Bounded diagnostic output using the global-or-feature debug policy. |
 | Models/RefillObservation.cs | Observed owner and fuel data for reconciliation. |

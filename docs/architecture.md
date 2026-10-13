@@ -19,6 +19,7 @@ HeimKit/
   README.md
   LICENSE
   build.ps1
+  Publish-Thunderstore.ps1
   config/
     heimkit.cfg
   docs/
@@ -27,6 +28,11 @@ HeimKit/
     server-setup.md
     world-backups.md
     development.md
+    images/
+      icon.png
+      heimkit-banner.png
+      feature-overview.png
+      server-installation.png
     features/
       infinite-torches.md
       weather-guard.md

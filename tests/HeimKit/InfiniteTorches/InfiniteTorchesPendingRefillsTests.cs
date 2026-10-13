@@ -49,7 +49,7 @@ internal static class InfiniteTorchesPendingRefillsTests
             pending.TryTrack(new ZDOID(4L, index), 10L, 0f, 4f, 120f);
         int updated = pending.Reconcile(125f, _ => new RefillObservation(10L, 3.99f), result => diagnostics.Result(125f, result));
         diagnostics.RefillSummary(updated);
-        if (updated != 32 || records.Count != 1 || records[0].Level != LogLevel.Info || records[0].Text != "InfiniteTorches: Fuel increase observed for 32 torches.")
+        if (updated != 32 || records.Count != 1 || records[0].Level != LogLevel.Info || records[0].Text != "InfiniteTorches: Fuel increase observed for 32 light sources.")
             throw new Exception("Multiple confirmed fuel updates were not grouped into one debug-off Info entry.");
         diagnostics.RefillSummary(pending.Reconcile(130f, _ => new RefillObservation(10L, 4f), null));
         if (records.Count != 1) throw new Exception("Already reconciled or empty passes repeated a refill summary.");
@@ -60,7 +60,7 @@ internal static class InfiniteTorchesPendingRefillsTests
         updated = pending.Reconcile(170f, id => id.Equals(torchId) ? new RefillObservation(10L, 3.99f) :
             id.Equals(otherTorchId) ? new RefillObservation(20L, 4f) : id.ID == 3U ? (RefillObservation?)null : new RefillObservation(10L, 0f), null);
         diagnostics.RefillSummary(updated);
-        if (updated != 1 || records.Count != 2 || records[^1].Text != "InfiniteTorches: Fuel increase observed for 1 torch.")
+        if (updated != 1 || records.Count != 2 || records[^1].Text != "InfiniteTorches: Fuel increase observed for 1 light source.")
             throw new Exception("Timeout/missing/owner-change outcomes were counted as updated torches.");
         pending.TryTrack(torchId, 10L, 0f, 4f, 180f);
         diagnostics.RefillSummary(pending.Reconcile(185f, _ => new RefillObservation(10L, 1f), null));

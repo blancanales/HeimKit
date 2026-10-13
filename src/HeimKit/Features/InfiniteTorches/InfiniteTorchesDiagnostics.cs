@@ -67,7 +67,7 @@ public sealed class InfiniteTorchesDiagnostics
     {
         if (fuelUpdates <= 0) return;
         DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Result,
-            $"Fuel increase observed for {fuelUpdates} {(fuelUpdates == 1 ? "torch" : "torches")}.");
+            $"Fuel increase observed for {fuelUpdates} {(fuelUpdates == 1 ? "light source" : "light sources")}.");
     }
     public void Result(float now, RefillResult result)
     {

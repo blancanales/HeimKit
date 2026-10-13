@@ -1,5 +1,7 @@
 # HeimKit
 
+![HeimKit: shield and longhouse emblem beside the HeimKit name](docs/images/heimkit-banner.png)
+
 HeimKit brings quality-of-life features to Windows Valheim dedicated servers, helping server owners reduce upkeep, coordinate night skipping and limit automatic raids around idle players.
 
 Install HeimKit on the server and choose the features you want independently. It is designed for players using unmodified clients, with configuration managed by the server. Gameplay features pause when no players have joined the world and resume after players spawn; requested administrative reports remain available. The project is under local development; no production release is advertised.
@@ -10,11 +12,13 @@ Install HeimKit on the server and choose the features you want independently. It
 
 ## Features
 
+![HeimKit feature overview: torch upkeep, player-built weather protection, majority sleep and idle-only raid protection; each feature can be enabled independently](docs/images/feature-overview.png)
+
 ### InfiniteTorches
 
-Keeps eligible torches supplied with fuel automatically, reducing manual refilling without spending player inventory materials. Normal water, smoke and obstruction behavior still applies, so fuel alone does not guarantee a lit torch.
+Keeps eligible torches and hanging/standing braziers supplied with fuel automatically, reducing manual refilling without spending player inventory materials. Normal water, smoke and obstruction behavior still applies, so fuel alone does not guarantee a lit torch.
 
-[Usage and supported torch types](docs/features/infinite-torches.md) · [Technical specification](docs/specs/infinite-torches.md)
+[Usage and supported light sources](docs/features/infinite-torches.md) · [Technical specification](docs/specs/infinite-torches.md)
 
 ### WeatherGuard
 
@@ -44,13 +48,15 @@ See [server setup](docs/server-setup.md) for installation and configuration.
 
 ## Setup
 
+![Install HeimKit and BepInEx on the Windows dedicated server; player computers use unmodified clients. The DLL belongs in BepInEx/plugins/HeimKit and the generated config in BepInEx/config. Back up your world first.](docs/images/server-installation.png)
+
 Follow the [setup guide](docs/server-setup.md#installation) to install with Thunderstore Mod Manager or manually, including manual installation when the manager is already installed.
 
 ## Documentation
 
 - [Server setup](docs/server-setup.md) — supported environment, installation, configuration and general troubleshooting.
 - [World backups](docs/world-backups.md) — copying world saves and using Valheim's save-management menu.
-- [Development](docs/development.md) — build commands and plugin/Thunderstore references.
+- [Development](docs/development.md) — build commands, Thunderstore packaging and plugin references.
 - [Contributing](docs/contributing.md) — change procedure and documentation placement rules.
 - [Architecture](docs/architecture.md) — code organization and shared design rules.
 - [Contributor instructions](AGENTS.md) — required reading and project scope.

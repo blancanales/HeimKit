@@ -6,7 +6,7 @@ Install HeimKit on a Windows Valheim dedicated server using Thunderstore Mod Man
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit build | 0.1.47 |
+| HeimKit build | 0.1.48 |
 | Valheim Dedicated Server | 1.0.17; enforced by module compatibility guards. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
@@ -78,7 +78,7 @@ DebugMode = false
 Enabled = true
 IntervalSeconds = 5
 MaxMessagesPerPass = 32
-Prefabs = piece_groundtorch_wood,piece_groundtorch,piece_groundtorch_green,piece_groundtorch_blue,piece_walltorch
+Prefabs = piece_groundtorch_wood,piece_groundtorch,piece_groundtorch_green,piece_groundtorch_blue,piece_walltorch,piece_brazierceiling01,piece_brazierfloor01,piece_brazierfloor02
 
 [WeatherGuard]
 DebugMode = false
