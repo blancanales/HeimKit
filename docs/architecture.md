@@ -168,9 +168,11 @@ Startup order:
 
 Existing recognized values must be preserved, and missing settings added with defaults. A load/save error must be reported without claiming successful setup or enabling affected functionality.
 
-`Configuration/ConfigurationLayout` owns the shared-section registry and groups `[Diagnostics]` and `[PlayerActivity]` before all feature sections after the loader saves. BepInEx otherwise sorts sections alphabetically; binding order alone cannot control layout. The same layout is reapplied after its automatic setting-change saves. Preserve complete section blocks, generated descriptions and all bound/unbound values; layout does not rename or migrate settings. Feature sections have no required relative order. Register any new shared configuration section in ConfigurationLayout and put it first in the reference config and documentation examples.
+`Configuration/ConfigurationLayout` owns the shared-section registry and groups `[Compatibility]` (when manually present), `[Diagnostics]` and `[PlayerActivity]` before all feature sections after the loader saves. BepInEx otherwise sorts sections alphabetically; binding order alone cannot control layout. The same layout is reapplied after its automatic setting-change saves. Preserve complete section blocks, generated descriptions and all bound/unbound values; layout does not rename or migrate settings. Feature sections have no required relative order. Register any new shared configuration section in ConfigurationLayout and place it before feature sections in documentation examples and, for generated settings, the reference config. Manual-only sections remain absent from the reference config.
 
 Each module has its own section and `Enabled` setting. Torch settings currently use `[Torches]`. Keep the optional `config/heimkit.cfg` consistent with code defaults, but never require users to manually create or copy it. The built DLL must generate a complete config on first use without the example file.
+
+`Configuration/GameVersionCompatibility` owns the built-in audited game version and the manual-only `[Compatibility] SupportedValheimVersion` override. All four modules resolve the same immutable policy per ConfigFile during construction and compare the observed game version against its exact required version before gameplay activation. Do not substitute the configured value for the observed game version. Absent keys are not bound or generated; existing unbound values are preserved. Invalid/unreadable entries fall back to the built-in requirement with one Warning per loaded configuration. A different valid requirement also warns once, explicitly distinguishing operator authorization from an API/gameplay audit. Restart applies changes. Runtime API/signature, native networking and feature lifecycle checks remain independent. Full operator usage and validation rules belong in [server setup](server-setup.md#hidden-version-override).
 
 ## Logging
 
@@ -337,7 +339,7 @@ AFKNightWatch owns one sleep-vote registration, with a quorum controller only du
 
 Shared world state and network ownership are different concerns. Inspect both client and server behavior before declaring a module server-only. Server-synced settings alone do not establish support for unmodified clients.
 
-Use vanilla-compatible mechanisms and verify ownership transitions. Do not bypass the current game-version guard merely to make a newer build load. Review changed APIs and update the relevant spec before broadening the supported version.
+Use vanilla-compatible mechanisms and verify ownership transitions. Review changed APIs and update the relevant spec before changing the built-in audited version. Operators can explicitly replace the exact version requirement through the [hidden version override](server-setup.md#hidden-version-override); this does not change the documented audited baseline or bypass runtime compatibility checks.
 
 ## Contributor procedures
 

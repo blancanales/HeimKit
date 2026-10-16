@@ -41,7 +41,7 @@ Protects idle-only locations from new normal automatic random raids, independent
 ## Compatibility
 
 - Windows Valheim dedicated servers; Linux is not supported.
-- Requires BepInExPack Valheim and a compatible game version. See the [supported environment](docs/server-setup.md#supported-environment) for version requirements. Unsupported game versions disable the affected features.
+- Requires BepInExPack Valheim and a compatible game version. See the [supported environment](docs/server-setup.md#supported-environment) for version requirements. Versions outside the configured requirement disable the affected features. Operators can authorize one exact version through the [manual compatibility override](docs/server-setup.md#hidden-version-override) after reviewing compatibility.
 - Designed for unmodified clients; HeimKit is installed on the dedicated server.
 
 See [server setup](docs/server-setup.md) for installation and configuration.

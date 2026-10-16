@@ -19,3 +19,5 @@ Normal logs report one confirmed sleep start under the configured rules while so
 A startup Debug policy entry identifies whether global or feature DebugMode enables diagnostics, or the hidden override suppresses them. It requires the [loader Debug filters](../server-setup.md#configuration) even when explaining suppression.
 
 Detected loader Debug filtering is explained by a Warning followed immediately by Info instructions for the affected outputs; see [server configuration](../server-setup.md#configuration).
+
+The shared [hidden version override](../server-setup.md#hidden-version-override) lets an operator authorize one exact game version after reviewing compatibility. It does not validate gameplay or bypass this feature's runtime checks.

@@ -34,3 +34,7 @@ Standard Info output groups all actual candidate exclusions from one outer nativ
 Debug policy startup declarations follow the [shared contract](../architecture.md#debug-policy-startup-declaration), identifying global/feature enablement and hidden suppression independently of gameplay enablement.
 
 Detected loader Debug filtering is explained by a Warning followed immediately by Info instructions for the affected outputs; see [server configuration](../server-setup.md#configuration).
+
+## Game-version compatibility
+
+Before activation, the module uses the shared GameVersionCompatibility policy and compares the observed game version to its exact requirement. The [manual version override](../server-setup.md#hidden-version-override) replaces that requirement without bypassing Enabled, native readiness, API/signature checks or isolated failure handling. Compatibility policy and warning ownership follow [architecture](../architecture.md#configuration).

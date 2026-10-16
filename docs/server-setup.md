@@ -6,8 +6,8 @@ Install HeimKit on a Windows Valheim dedicated server using Thunderstore Mod Man
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit build | 0.1.48 |
-| Valheim Dedicated Server | 1.0.17; enforced by module compatibility guards. |
+| HeimKit build | 0.1.50 |
+| Valheim Dedicated Server | 1.0.20; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
 | Plugin target framework | netstandard2.1 |
@@ -59,6 +59,21 @@ On startup, HeimKit creates `BepInEx/config/heimkit.cfg` under the active loader
 With the server stopped, replace the DLL in the same active location used during installation, preserve `heimkit.cfg`, and start with the same launch route. Stop the server before editing configuration too. A manually added DLL must be replaced manually; installing the manager does not enable automatic updates for that file.
 
 ## Configuration
+
+### Hidden version override
+
+After reviewing compatibility for a game update, an operator can manually add this shared setting to `heimkit.cfg`:
+
+```ini
+[Compatibility]
+SupportedValheimVersion = <exact-game-version>
+```
+
+Replace `<exact-game-version>` with the exact Valheim version being authorized, using the three numeric components described below. The built-in audited baseline is listed only in [Supported environment](#supported-environment). This replaces the built-in version requirement for all four modules; it is not a list or an additional allowed version. Arrays and comma-separated lists are not accepted: a dedicated-server installation runs one game version at a time. Each module still honors its own Enabled setting. The setting and section are absent from generated defaults and the reference config. Existing manual values are preserved on save, and the optional shared section is grouped before feature sections.
+
+The value must contain exactly three nonnegative decimal components in canonical `major.minor.patch` form, without leading zeros, suffixes, wildcards or version ranges. Surrounding whitespace is ignored. Missing values use the built-in audited version; empty, malformed or unreadable values produce one shared startup warning and fall back to it. A different valid requirement produces one shared warning stating the manual requirement and built-in audited version. The override does not establish API or gameplay compatibility, alter Valheim's client/server network checks, or bypass runtime method/signature, prefab, world-readiness or failure checks. Remove the entry to restore the built-in requirement. Stop the server before editing and restart to apply changes; the policy is captured once per loaded configuration.
+
+### Default configuration
 
 Shared settings (`[Diagnostics]` and `[PlayerActivity]`) appear first; feature sections follow, with no required order among features. HeimKit uses the configuration directory supplied by BepInEx. Existing values are preserved, and missing settings are added with defaults. The supplied [config/heimkit.cfg](../config/heimkit.cfg) is an optional reference; do not overwrite an existing server config with it.
 

@@ -10,7 +10,7 @@ namespace HeimKit.Configuration;
 // BepInEx sorts every section alphabetically; group shared sections ahead of feature sections.
 public static class ConfigurationLayout
 {
-    private static readonly HashSet<string> SharedSections = new(StringComparer.Ordinal) { "Diagnostics", "PlayerActivity" };
+    private static readonly HashSet<string> SharedSections = new(StringComparer.Ordinal) { "Compatibility", "Diagnostics", "PlayerActivity" };
     public static void Apply(string path)
     {
         string contents = File.ReadAllText(path);

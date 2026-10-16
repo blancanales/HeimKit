@@ -1,3 +1,5 @@
+GameCompatibilityTests.Run();
+GameVersionCompatibilityTests.Run();
 InfiniteTorchesTests.Run();
 InfiniteTorchesRefillRulesTests.Run();
 DiagnosticLogTests.Run();

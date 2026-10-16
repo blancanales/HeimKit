@@ -1,3 +1,4 @@
+using HeimKit.Configuration;
 using HeimKit.Shared.Players;
 using System;
 using BepInEx.Configuration;
@@ -10,6 +11,7 @@ public sealed class InfiniteTorches : IServerModule
 {
     private readonly InfiniteTorchesSettings _settings;
     private readonly ManualLogSource _logger;
+    private readonly GameVersionCompatibility _compatibility;
     private InfiniteTorchesController? _controller;
     private readonly PlayerServices _players;
     private IDisposable? _presenceRegistration;
@@ -22,7 +24,7 @@ public sealed class InfiniteTorches : IServerModule
 
     public InfiniteTorches(ConfigFile config, ManualLogSource logger, PlayerServices players)
     {
-        _logger = logger;
+        _logger = logger; _compatibility = GameVersionCompatibility.Resolve(config, logger);
         _players = players;
         _settings = new InfiniteTorchesSettings(config, logger);
         _processing = new(logger, Name, () => _settings.DebugLogging.Enabled);
@@ -37,9 +39,9 @@ public sealed class InfiniteTorches : IServerModule
         {
             return;
         }
-        if (gameVersion != "1.0.17")
+        if (!_compatibility.Supports(gameVersion))
         {
-            DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Lifecycle, $"DISABLED (unsupported Valheim version {gameVersion}; audited for 1.0.17). Configuration requests Enabled = true.", level: LogLevel.Warning);
+            DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Lifecycle, $"DISABLED (unsupported Valheim version {gameVersion}; required version {_compatibility.RequiredVersion}; built-in audited version {GameVersionCompatibility.AuditedVersion}). Configuration requests Enabled = true.", level: LogLevel.Warning);
             return;
         }
         IsActive = true;

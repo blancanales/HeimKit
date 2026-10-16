@@ -12,7 +12,7 @@ internal static class WeatherGuardTests
     {
         foreach (bool torchesOn in new[] { false, true })
         foreach (bool weatherOn in new[] { false, true })
-        foreach (string version in new[] { "1.0.17", "1.0.18" })
+        foreach (string version in new[] { "1.0.20", "1.0.18" })
         {
             var config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
             config.Bind("Torches", "Enabled", torchesOn);
@@ -22,8 +22,8 @@ internal static class WeatherGuardTests
             var torches = new InfiniteTorches(config, log, PlayerServicesTests.For(config, log));
             var weather = new WeatherGuard(config, log, PlayerServicesTests.For(config, log));
             torches.Initialize(version); weather.Initialize(version);
-            Check(torches.IsActive == (torchesOn && version == "1.0.17"), "torch isolation");
-            Check(weather.IsActive == (weatherOn && version == "1.0.17"), "weather isolation/version guard");
+            Check(torches.IsActive == (torchesOn && version == "1.0.20"), "torch isolation");
+            Check(weather.IsActive == (weatherOn && version == "1.0.20"), "weather isolation/version guard");
             Check(weather.Name == "WeatherGuard" && messages.Any(m => m == (weatherOn ? "WeatherGuard: Enabled." : "WeatherGuard: Disabled.")), "exact feature name and configuration status");
             Check(messages.All(m => !m.Contains("elapsed_s") && !m.Contains("player-built") && !m.Contains("waiting")), "debug-off startup must be concise");
             weather.Shutdown(); weather.Shutdown(); torches.Shutdown();
