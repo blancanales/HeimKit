@@ -17,6 +17,10 @@ Version and documentation preparation is a required part of building, including 
 3. Update the affected feature specifications and user guides for the behavior and configuration included in that version. Update the architecture, contributor procedures and reference config when their contracts or defaults change. Update README benefits/scope when needed, using links for detailed facts and version values. Documentation must describe the code about to be built, rather than an earlier build.
 4. Build only after the version and applicable documentation are synchronized. When delivering the artifact, state its exact HeimKit version and location in the active chat so the user can distinguish it from previous builds. Build/test results and live-testing instructions stay in chat; do not create release journals, validation records or task checklists in the documentation.
 
+## Thunderstore release notes
+
+For every Thunderstore release, update the root `CHANGELOG.md` before packaging. Put the newest release first under `## Major.Minor.Patch`, matching the project/package version, followed by concise change bullets for users. Preserve earlier release entries. This user-facing release history is permitted; development journals and testing information remain excluded. The packaging script requires the file, a matching current-version heading and nonempty change bullets, then includes it at the ZIP root. Packaging commands belong in [development](development.md#packaging-for-thunderstore).
+
 ## Set up a feature
 
 Add a feature only when requested. Establish its intended behavior and dedicated-server-only feasibility before writing gameplay code. Inspect the actual game APIs and ownership behavior; identify blockers for unmodified clients. Keep the feature specification current as implementation proceeds, without a task diary or completion checklist.

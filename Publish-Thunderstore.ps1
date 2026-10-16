@@ -35,6 +35,19 @@ if ($versionNodes.Count -ne 1) { throw 'Expected exactly one explicit Version in
 $version = $versionNodes[0].InnerText.Trim()
 $versionPattern = '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
 if ($version -cnotmatch "^$versionPattern`$") { throw "Thunderstore requires Major.Minor.Patch; project version is '$version'." }
+$changelogPath = Join-Path $PSScriptRoot 'CHANGELOG.md'
+if (!(Test-Path -LiteralPath $changelogPath -PathType Leaf)) { throw 'Missing CHANGELOG.md. Add release notes before packaging for Thunderstore.' }
+$changelog = Assert-PackageText $changelogPath
+$releases = [regex]::Matches($changelog, "(?m)^## (?<version>$versionPattern)[ \t]*\r?`$")
+if ($releases.Count -eq 0 -or $releases[0].Groups['version'].Value -cne $version -or
+    @($releases | Where-Object { $_.Groups['version'].Value -ceq $version }).Count -ne 1) {
+    throw 'CHANGELOG.md must start with one release heading matching the project version: ## Major.Minor.Patch.'
+}
+$notesStart = $releases[0].Index + $releases[0].Length
+$notesEnd = if ($releases.Count -gt 1) { $releases[1].Index } else { $changelog.Length }
+if ($changelog.Substring($notesStart, $notesEnd - $notesStart) -notmatch '(?m)^-[ \t]+\S') {
+    throw 'The current CHANGELOG.md release must contain at least one nonempty change bullet.'
+}
 $assemblyName = [string]$project.Project.PropertyGroup.AssemblyName
 $framework = [string]$project.Project.PropertyGroup.TargetFramework
 if (!$assemblyName -or !$framework) { throw 'Expected explicit AssemblyName and TargetFramework in HeimKit.csproj.' }
@@ -141,6 +154,7 @@ $manifest = [ordered]@{
 $temporaryZip = Join-Path $outputPath ".$([Guid]::NewGuid().ToString('N')).zip"
 $files = [ordered]@{
     'icon.png' = $iconFile
+    'CHANGELOG.md' = $changelogPath
     "BepInEx/plugins/HeimKit/$assemblyName.dll" = $dllPath
     'LICENSE' = (Join-Path $PSScriptRoot 'LICENSE')
 }

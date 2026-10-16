@@ -34,3 +34,5 @@ Only add another feature when requested. Before implementing it, document its be
 Do not install into or restart a live server, change worlds, remove the game-version guard, or change client installations as an incidental part of a code edit. Follow explicit user authorization for operational work.
 
 Do not commit credentials, world saves, proprietary game assemblies, copied BepInEx runtime files, machine-specific reference paths, or generated build output. Inspect staged files before committing. Commit and push when requested; otherwise leave local edits reviewable.
+
+For every Thunderstore package, update the root CHANGELOG.md with concise user-facing release notes, newest version first. The current heading must match the package version and include meaningful change bullets. Publish-Thunderstore.ps1 must require and include this file at the ZIP root. This release changelog is separate from development journals; keep testing instructions, results and evidence out of it.

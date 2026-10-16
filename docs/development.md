@@ -24,7 +24,7 @@ The DLL is written to the standard Release bin directory; the exact output locat
 
 `Publish-Thunderstore.ps1` builds Release using the existing build script and produces a local, versioned ZIP under `artifacts/thunderstore/`. It requires PowerShell 7 or newer, a .NET SDK, and the same local server and loader references used for building. The script does not upload the package or install it into a server.
 
-Complete the [version and documentation procedure](contributing.md#before-every-build), then run from the repository root:
+Complete the [version and documentation procedure](contributing.md#before-every-build) and update the root CHANGELOG.md with the current release notes, then run from the repository root:
 
 ```powershell
 .\Publish-Thunderstore.ps1 -ServerPath 'C:\path\to\Valheim dedicated server'
@@ -45,9 +45,9 @@ Optional parameters:
 | `-ReadmeBaseUrl` | Published GitHub branch or tag URL for README links and images; defaults to the repository's `blob/main` URL. Set it to the branch or tag containing the release documentation and assets. |
 | `-Force` | Replace an existing ZIP of the same name only after the new archive passes local checks. |
 
-The ZIP name is `<PackageName>-<project-version>.zip`. Its root contains `manifest.json`, `README.md` and `icon.png`; the DLL is under `BepInEx/plugins/HeimKit/`. It also includes the license, guides, README images, contributor guidance and an optional reference config under `config/`. It deliberately excludes game and loader assemblies, build intermediates, symbols and live settings. The reference config is not placed in `BepInEx/config`, allowing HeimKit to generate defaults and preserve existing server values.
+The ZIP name is `<PackageName>-<project-version>.zip`. Its root contains `manifest.json`, `README.md`, `CHANGELOG.md` and `icon.png`; the DLL is under `BepInEx/plugins/HeimKit/`. It also includes the license, guides, README images, contributor guidance and an optional reference config under `config/`. It deliberately excludes game and loader assemblies, build intermediates, symbols and live settings. The reference config is not placed in `BepInEx/config`, allowing HeimKit to generate defaults and preserve existing server values.
 
-The repository README keeps relative links. The packaged README rewrites documentation and image links to `ReadmeBaseUrl` so the Thunderstore page can display them. Those files must be pushed to the selected public branch or tag before uploading; creating a ZIP does not publish GitHub assets. The script checks metadata, icon format/dimensions, dependency string syntax, text encoding, ZIP entries and readability; it does not contact Thunderstore to check dependency availability or guarantee upload acceptance. Review the package presentation using Thunderstore's [Markdown preview](https://thunderstore.io/tools/markdown-preview/) and [manifest validator](https://thunderstore.io/tools/manifest-v1-validator/), then upload the ZIP to the Valheim community under your chosen team when ready.
+The repository README keeps relative links. The packaged README rewrites documentation and image links to `ReadmeBaseUrl` so the Thunderstore page can display them. Those files must be pushed to the selected public branch or tag before uploading; creating a ZIP does not publish GitHub assets. The script requires CHANGELOG.md to start with a release heading matching the project version and contain at least one nonempty change bullet for that release. It preserves earlier release notes and includes the changelog at the ZIP root for Thunderstore display. It checks metadata, icon format/dimensions, dependency string syntax, text encoding, ZIP entries and readability; it does not contact Thunderstore to check dependency availability or guarantee upload acceptance. Review the package presentation using Thunderstore's [Markdown preview](https://thunderstore.io/tools/markdown-preview/) and [manifest validator](https://thunderstore.io/tools/manifest-v1-validator/), then upload the ZIP to the Valheim community under your chosen team when ready.
 
 ## Diagnostic configuration integration
 

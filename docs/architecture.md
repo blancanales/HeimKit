@@ -349,6 +349,8 @@ Build commands and development references are maintained in [development](develo
 
 ## Documentation content
 
+The root `CHANGELOG.md` owns concise user-facing release notes for Thunderstore, newest release first. It is required in every package and maintained by the [release-note procedure](contributing.md#thunderstore-release-notes). Release headings identify historical package versions; current supported environment values remain in server setup. This release history is permitted separately from prohibited development journals and contains no testing instructions or results.
+
 The root README introduces HeimKit's value for users, describes each feature's benefits and high-level expectations, summarizes compatibility and essential limitations, and links to usage guides and specifications under docs. It also contains a documentation index and license information. Detailed operational and technical content stays in its owning document. The canonical content-placement rules are in [contributing](contributing.md#update-documentation).
 
 The [Supported environment section of server setup](server-setup.md#supported-environment) is the sole documentation source for supported version values; all other documents link there, including the README and development references. Server setup also owns shared operational instructions. Development owns build commands and external development references. Each feature guide owns usage and diagnostic interpretation; each feature specification owns implementation behavior and technical contracts. Cross-link these documents rather than copying their detailed content.
