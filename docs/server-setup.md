@@ -6,18 +6,19 @@ Install HeimKit on a Windows Valheim dedicated server using Thunderstore Mod Man
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit build | 0.1.52 |
+| HeimKit release baseline | 0.1.52 |
+| HeimKit development version | 0.1.53-sm.3 (Debug and Release configurations) |
 | Valheim Dedicated Server | 1.0.20; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
 | Plugin target framework | netstandard2.1 |
-| Build output | `src/HeimKit/bin/Release/netstandard2.1/HeimKit.dll` |
+| Build output | `src/HeimKit/bin/<Debug or Release>/netstandard2.1/HeimKit.dll` |
 
 This section is the sole documentation source for HeimKit's supported game, loader, runtime and framework versions. Other documents link here rather than repeating version values. Update this baseline when code guards and dependencies change.
 
 ## SharedMap module
 
-The generated `[SharedMap]` section defaults to `Enabled = false` and `DebugMode = false`. It is a blank module with configuration, compatibility and player-presence lifecycle only; enabling it does not share maps or create pins. See the [SharedMap guide](features/shared-map.md). Mapping behavior is outside this build's implemented feature set.
+The generated `[SharedMap]` section defaults to `Enabled = true` and `DebugMode = false`. SharedMap persists community exploration independently of tables, initializes observed tables and filters accepted table map fields, removing shared death pins. PortalMarkerSync defaults true under the enabled-by-default module and maintains named player-built portal markers; PortalClusterDistanceMeters defaults to 60 metres and groups nearby portals. Other resource/location pins remain outside scope. `TableIntervalSeconds` and `MaxTablesPerPass` bound periodic reconciliation; `SaveIntervalSeconds` controls dirty saves. Include its world-specific files beneath the active configuration directory in [backups](world-backups.md#sharedmap-data). See the [SharedMap guide](features/shared-map.md) for shared-layer behavior, filtering and replication limits. Players must use Read Map to retrieve updates; existing client pins can interfere with marker replacement.
 
 ## Installation
 
@@ -73,7 +74,7 @@ After reviewing compatibility for a game update, an operator can manually add th
 SupportedValheimVersion = <exact-game-version>
 ```
 
-Replace `<exact-game-version>` with the exact Valheim version being authorized, using the three numeric components described below. The built-in audited baseline is listed only in [Supported environment](#supported-environment). This replaces the built-in version requirement for all four modules; it is not a list or an additional allowed version. Arrays and comma-separated lists are not accepted: a dedicated-server installation runs one game version at a time. Each module still honors its own Enabled setting. The setting and section are absent from generated defaults and the reference config. Existing manual values are preserved on save, and the optional shared section is grouped before feature sections.
+Replace `<exact-game-version>` with the exact Valheim version being authorized, using the three numeric components described below. The built-in audited baseline is listed only in [Supported environment](#supported-environment). This replaces the built-in version requirement for all modules; it is not a list or an additional allowed version. Arrays and comma-separated lists are not accepted: a dedicated-server installation runs one game version at a time. Each module still honors its own Enabled setting. The setting and section are absent from generated defaults and the reference config. Existing manual values are preserved on save, and the optional shared section is grouped before feature sections.
 
 The value must contain exactly three nonnegative decimal components in canonical `major.minor.patch` form, without leading zeros, suffixes, wildcards or version ranges. Surrounding whitespace is ignored. Missing values use the built-in audited version; empty, malformed or unreadable values produce one shared startup warning and fall back to it. A different valid requirement produces one shared warning stating the manual requirement and built-in audited version. The override does not establish API or gameplay compatibility, alter Valheim's client/server network checks, or bypass runtime method/signature, prefab, world-readiness or failure checks. Remove the entry to restore the built-in requirement. Stop the server before editing and restart to apply changes; the policy is captured once per loaded configuration.
 
@@ -121,6 +122,15 @@ SleepDelaySeconds = 30
 [AFKRaidWatch]
 Enabled = true
 DebugMode = false
+
+[SharedMap]
+Enabled = true
+PortalMarkerSync = true
+PortalClusterDistanceMeters = 60
+DebugMode = false
+TableIntervalSeconds = 10
+MaxTablesPerPass = 1
+SaveIntervalSeconds = 60
 ```
 
 Each feature has an independent Enabled switch. Stop the server, edit the appropriate value, save and restart. Startup reports each feature's configured Enabled or Disabled state. An enabled feature then reports Ready when initialization succeeds, or a clear issue if it cannot initialize. Normal waiting and technical details appear only at Debug. Unsupported game versions disable the affected module.
@@ -160,7 +170,7 @@ Idle is an estimate based on what the server can see. Some local camera, menu an
 
 This is a fresh configuration layout. HeimKit does not convert legacy sections, read legacy aliases or automatically delete them. Recognized current values are preserved and missing current settings are added. For a clean configuration, with the server stopped the operator can remove the active heimkit.cfg and allow the next startup to generate complete defaults, then reapply desired settings. The plugin does not delete the server configuration. Unbound legacy entries may remain if an old file is retained, but do not control these features.
 
-All four features use shared presence notifications to pause their gameplay controllers when empty or player presence is unavailable, then resume after the first player has spawned in the world, subject to native world readiness. Additional logins do not restart them. WeatherGuard releases retained ownership and protection hooks during the pause; explicitly requested coverage reports remain available separately. See the [required lifecycle hookup and exceptions](architecture.md#required-feature-hookup).
+All five features use shared presence notifications to pause their gameplay controllers when empty or player presence is unavailable, then resume after the first player has spawned in the world, subject to native world readiness. Additional logins do not restart them. WeatherGuard releases retained ownership and protection hooks during the pause; explicitly requested coverage reports remain available separately. See the [required lifecycle hookup and exceptions](architecture.md#required-feature-hookup).
 
 Normal Info logs distinguish transport connections from world entry. PlayerPresence reports all features inactive after confirmed empty-server cleanup, and all enabled features active after the first joined player and successful feature initialization. Delayed readiness defers the active notice. Incoming connections and completed login handshakes alone do not resume gameplay features. Death/respawn keeps the same session joined until disconnect. After every enabled consumer confirms its own cleanup, one shared entry reports `PlayerPresence: No players have joined the world; all features are inactive until a player joins.` A cleanup failure remains visible and suppresses this combined success notice for that empty interval. Each enabled feature reports Ready once when its required dedicated-server services are available, regardless of players. The shared presence status follows those Ready entries. Individual processing transitions, including other pause reasons and later starts, belong only in Debug; warnings/errors remain visible. Additional players and unchanged polls do not repeat these notices. Unavailable presence is not reported as an empty server. See the [presence lifecycle](architecture.md#presence-driven-lifecycle).
 

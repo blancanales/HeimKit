@@ -28,7 +28,11 @@ internal static class SharedMapTests
             using var players = new PlayerServices(config, logger);
             var module = new SharedMap(config, logger, players);
             module.Initialize(GameVersionCompatibility.AuditedVersion);
-            Check(!settings.Enabled.Value && !settings.DebugMode.Value, "Blank module must default disabled with debug off.");
+            Check(settings.Enabled.Value && !settings.DebugMode.Value, "SharedMap must default enabled with debug off.");
+            Check(settings.PortalClusterDistanceMeters.Value == 60 && settings.PortalMarkerSync.Value,
+                "Automatic portals and default grouping were not configured independently.");
+            settings.Enabled.Value = false;
+            module.Initialize(GameVersionCompatibility.AuditedVersion);
             Check(!module.IsActive && players.Events.Subscribers == 0, "Disabled module subscribed to presence.");
             Check(!config.ContainsKey(new ConfigDefinition("SharedMap", "DisableDebugLogging")), "Hidden suppression key was generated.");
 
@@ -36,9 +40,9 @@ internal static class SharedMapTests
             module.Initialize("unsupported");
             Check(!module.IsActive && players.Events.Subscribers == 0, "Version mismatch activated SharedMap.");
             module.Initialize(GameVersionCompatibility.AuditedVersion);
-            Check(module.IsActive && players.Events.Subscribers == 1, "Enabled module missed presence hookup.");
-            Check(players.Activity.Consumers == 0, "Blank module acquired an activity lease.");
-            Check(messages.Any(m => m.Contains("SharedMap: Enabled. Mapping behavior is not implemented.")), "Startup implied mapping was available.");
+            Check(module.IsActive && players.Events.Subscribers == 1, "Enabled module missed presence hookup. " + string.Join(" | ", messages));
+            Check(players.Activity.Consumers == 0, "Exploration module acquired an activity lease.");
+            Check(messages.Any(m => m.Contains("SharedMap: Enabled.")), "Startup omitted module enablement.");
 
             using var other = players.Events.Subscribe(_ => { }, error => throw error);
             module.Initialize(GameVersionCompatibility.AuditedVersion);

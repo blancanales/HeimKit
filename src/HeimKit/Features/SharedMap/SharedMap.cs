@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
@@ -16,6 +17,15 @@ public sealed class SharedMap : IServerModule
     private readonly PlayerProcessingNotices _processing;
     private IDisposable? _presenceRegistration;
     private bool _occupied;
+    private SharedMapController? _controller;
+    private SharedMapExploration? _exploration;
+    private ZDOMan? _world;
+    private long _worldUid;
+    private readonly string _storeDirectory;
+    private readonly SharedMapDiagnostics _diagnostics;
+    private SharedMapStore? _store;
+    private SharedMapBootstrap? _bootstrap;
+    private SharedMapPortalRefresh? _portalRefresh;
 
     public string Name => "SharedMap";
     public bool IsActive { get; private set; }
@@ -26,13 +36,15 @@ public sealed class SharedMap : IServerModule
         _logger = logger;
         _compatibility = GameVersionCompatibility.Resolve(config, logger);
         _players = players;
+        _storeDirectory = Path.Combine(Path.GetDirectoryName(config.ConfigFilePath)!, "HeimKit", "SharedMap");
+        _diagnostics = new SharedMapDiagnostics(logger, _settings.DebugLogging);
         _processing = new PlayerProcessingNotices(logger, Name, () => _settings.DebugLogging.Enabled);
     }
 
     public void Initialize(string gameVersion)
     {
         Shutdown();
-        Log(_settings.Enabled.Value ? "Enabled. Mapping behavior is not implemented." : "Disabled.");
+        Log(_settings.Enabled.Value ? "Enabled." : "Disabled.");
         _settings.DebugLogging.ReportStartup(_logger, Name, _settings.Enabled.Value);
         if (!_settings.Enabled.Value) return;
         if (!_compatibility.Supports(gameVersion))
@@ -44,6 +56,7 @@ public sealed class SharedMap : IServerModule
         IsActive = true;
         try
         {
+            SharedMapPatches.CheckCompatibility();
             _presenceRegistration = _players.Events.Subscribe(PresenceChanged, Fail,
                 () => _processing.IsEmptyPaused, () => _processing.IsRunning, () => _processing.IsServerReady);
         }
@@ -56,12 +69,49 @@ public sealed class SharedMap : IServerModule
         if (!_settings.Enabled.Value) { Shutdown(); return; }
         try
         {
-            bool ready = PlayerServices.Ready;
+            SaveIfDue(now);
+            bool ready = PlayerServices.Ready && ZoneSystem.instance != null && ZRoutedRpc.instance != null && ZNetScene.instance != null && Minimap.instance != null;
             if (ready) _processing.ServerReady();
+            if (!ready) { StopController(); if (_occupied) _processing.Paused("world or minimap services unavailable"); return; }
+            var minimap = Minimap.instance;
+            if (minimap == null) { StopController(); return; }
+            long uid = ZNet.instance.GetWorldUID();
+            if (!ReferenceEquals(_world, ZDOMan.instance) || _worldUid != uid || _exploration == null ||
+                !_exploration.Matches(minimap.m_textureSize, minimap.m_pixelSize, minimap.m_exploreRadius, minimap.m_exploreInterval))
+            {
+                StopController();
+                FlushStore();
+                FlushPortalState();
+                var exploration = new SharedMapExploration(minimap.m_textureSize, minimap.m_pixelSize, minimap.m_exploreRadius, minimap.m_exploreInterval);
+                var store = new SharedMapStore(_storeDirectory, uid, exploration);
+                bool loaded = store.Load();
+                var portalRefresh = new SharedMapPortalRefresh(_storeDirectory, uid, _diagnostics.PortalPublished, _diagnostics.PortalRemoved);
+                bool loadedPortalState = portalRefresh.Load();
+                _exploration = exploration; _store = store;
+                _portalRefresh = portalRefresh;
+                _bootstrap = loaded ? null : new SharedMapBootstrap(ZDOMan.instance, exploration);
+                _world = ZDOMan.instance; _worldUid = uid;
+                _diagnostics.StoreOpened(loaded, uid, store.FilePath, exploration.ExploredPixels);
+                _diagnostics.PortalStateOpened(loadedPortalState, portalRefresh.FilePath, portalRefresh.Count);
+            }
+            if (_bootstrap != null)
+            {
+                if (!_bootstrap.Tick(_settings.MaxTablesPerPass.Value)) return;
+                // Commit even an empty import. Until this succeeds, lifecycle flushes must not save partial work.
+                _store!.Save(initialize: true);
+                var completed = _bootstrap;
+                _bootstrap = null;
+                _diagnostics.Bootstrapped(completed.Tables, completed.Imported, completed.Invalid, _exploration!.ExploredPixels);
+            }
             if (!_occupied) return;
-            if (!ready) { _processing.Paused("world services unavailable"); return; }
-            // Only lifecycle acknowledgement: no controller or mapping operations exist yet.
+            if (_controller == null)
+            {
+                _controller = new SharedMapController(this, _settings, _players.Presence, _exploration, _portalRefresh!, _logger);
+                _controller.Install();
+            }
             _processing.Ready();
+            _controller.Tick(now);
+            SaveIfDue(now);
         }
         catch (Exception error) { Fail(error); }
     }
@@ -70,12 +120,14 @@ public sealed class SharedMap : IServerModule
     {
         _occupied = occupied == true;
         if (!IsActive || _occupied) return;
-        // There are no gameplay resources to release in the blank module.
+        StopController();
+        FlushStore();
+        FlushPortalState();
         if (occupied.HasValue) _processing.EmptyPaused();
         else _processing.Unavailable("player presence unavailable");
     }
 
-    private void Fail(Exception error)
+    internal void Fail(Exception error)
     {
         if (!IsActive) return;
         Log("DISABLED after runtime failure: " + error, LogLevel.Error);
@@ -85,6 +137,30 @@ public sealed class SharedMap : IServerModule
     private void Log(string message, LogLevel level = LogLevel.Info) =>
         DiagnosticLog.Write(_logger, Name, DiagnosticEvent.Lifecycle, message, level: level);
 
+    private void StopController()
+    {
+        var controller = _controller; _controller = null;
+        controller?.Dispose();
+    }
+
+    private void FlushStore()
+    {
+        if (_bootstrap == null && _store?.Save() == true) _diagnostics.Saved(UnityEngine.Time.unscaledTime, _exploration!.ExploredPixels);
+    }
+
+    private void SaveIfDue(float now)
+    {
+        if (_bootstrap == null && _store?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true) _diagnostics.Saved(now, _exploration!.ExploredPixels);
+        if (_bootstrap == null && _portalRefresh?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true)
+            _diagnostics.PortalStateSaved(now, _portalRefresh.Count);
+    }
+
+    private void FlushPortalState()
+    {
+        if (_bootstrap == null && _portalRefresh?.Save() == true)
+            _diagnostics.PortalStateSaved(UnityEngine.Time.unscaledTime, _portalRefresh.Count);
+    }
+
     public void Shutdown()
     {
         IsActive = false;
@@ -92,6 +168,7 @@ public sealed class SharedMap : IServerModule
         _processing.Reset();
         var registration = _presenceRegistration;
         _presenceRegistration = null;
-        ModuleCleanup.Run(_logger, Name, () => registration?.Dispose());
+        ModuleCleanup.Run(_logger, Name, () => registration?.Dispose(), StopController, FlushStore, FlushPortalState);
+        _exploration = null; _store = null; _bootstrap = null; _portalRefresh = null; _world = null; _worldUid = 0;
     }
 }

@@ -17,6 +17,12 @@ Make an independent copy of the world before installing or enabling HeimKit, and
 5. If copying only one world, preserve its complete save format: copy the entire world-named folder and all its contents for folder-based saves, or copy both matching `<world>.db` and `<world>.fwl` files for paired-file saves. Keep related backup files/folders too. Do not copy just one file from a folder-based save, mix files from different save times, or rename their contents.
 6. Open the destination folder and confirm the copied files and subfolders are present before installing HeimKit. Keep the pre-installation copy separate from later backups so it cannot be replaced by a save made after enabling the mod.
 
+## SharedMap data
+
+SharedMap's community terrain is stored separately from Valheim's world save. If using SharedMap, stop the server and also copy the entire `HeimKit/SharedMap` directory from the active BepInEx configuration directory into the same dated backup. Manager profiles and manual installations can have different active configuration locations; see [server setup](server-setup.md#shared-configuration-and-maintenance).
+
+Keep each `world-<world UID in hexadecimal>.map`, its matching `.portal-pins` publication-state file and their `.bak` files with the corresponding world backup. In-game Manage Saves and native world backup retention do not manage these plugin files. Restore the world and community files together from the same backup point; restoring an older world while keeping a later community map can reveal terrain from later progress. SharedMap rejects corrupt or incompatible community files rather than silently erasing them. See the [SharedMap guide](features/shared-map.md#storage-and-recovery).
+
 ## Valheim's in-game save management
 
 The in-game menu manages worlds available to that game installation. It does not back up a remote dedicated server's world; use the host-side File Explorer instructions above for that world.

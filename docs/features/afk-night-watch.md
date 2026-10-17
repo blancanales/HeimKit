@@ -2,6 +2,8 @@
 
 Coordinates majority sleep and prevents inferred-idle players from blocking sleep. Clients need no mod. AFKRaidWatch controls raid protection independently.
 
+![AFKNightWatch: infer activity, count sleepers and begin sleep after the configured grace; defaults require more than half of non-idle players, with normal bed and time-of-day rules](../images/afk-night-watch-workflow.png)
+
 Health changes never count as player activity. Food-related health loss, regeneration and incoming damage neither postpone AFK nor end an existing AFK state. Other activity signals still apply; death and unavailable player data retain their existing eligibility rules. See the [shared observation contract](../architecture.md#player-activity).
 
 Defaults require strictly more than half of non-idle participants: one of two is insufficient, two of three is enough. A known living player must actually be in bed. Once the threshold is met while some players remain outside bed, sleep waits 30 real seconds by default so others can reach bed. If everyone gets into bed, sleep can start immediately. Losing the threshold or reliable tracking restarts the wait. SleepDelaySeconds accepts 0–300; zero removes the wait. Native bed requirements, afternoon/night allowance, cooldown and broadcasts remain. Inferred idle defaults to five minutes without observed activity; some local camera/menu/inventory actions are invisible.

@@ -4,7 +4,7 @@ Build HeimKit from the repository root using the supported environment in [serve
 
 ## Building from source
 
-Before invoking a build, complete the required [version and documentation procedure](contributing.md#before-every-build). Updated code needs a new HeimKit version with matching plugin metadata, startup message and documented build version; applicable behavior and configuration documentation must also be current.
+Before invoking a build, complete the required [version and documentation procedure](contributing.md#before-every-build). Updated code needs a distinct build identity with matching plugin metadata, startup message and documented build version; applicable behavior and configuration documentation must also be current. Development builds use a prerelease suffix and counter rather than advancing the published release version. AI agents follow the [AI versioning policy](ai/versioning.md), including explicit build authorization.
 
 Run from the repository root with local Windows server assemblies and a .NET SDK:
 
@@ -18,13 +18,45 @@ If the BepInEx development references are elsewhere:
 .\build.ps1 -ServerPath 'C:\path\to\Valheim dedicated server' -BepInExCore 'C:\path\to\BepInEx\core'
 ```
 
-The DLL is written to the standard Release bin directory; the exact output location and framework are listed in [Supported environment](server-setup.md#supported-environment). Install only `HeimKit.dll`; the adjacent example config is optional. Game and BepInEx assemblies are not distributed. WeatherGuard uses the Harmony library supplied with BepInEx; Jotunn is not required.
+The script accepts `-Configuration Debug` or `-Configuration Release`, defaulting to Release. To create a Debug DLL:
+
+```powershell
+.\build.ps1 -ServerPath 'C:\path\to\Valheim dedicated server' -Configuration Debug
+```
+
+Supply `-BepInExCore` as above when needed. Each configuration has its own output directory; the exact locations and framework are listed in [Supported environment](server-setup.md#supported-environment). Debug includes debugging symbols and disables normal release optimization; Release uses optimized code. Both configurations retain the development version until a release is deliberately prepared. Startup output identifies the version and build configuration. The configuration does not turn feature diagnostics on automatically; use the existing DebugMode settings in either build.
+
+Install only one `HeimKit.dll` at a time; the adjacent example config is optional. Game and BepInEx assemblies are not distributed. WeatherGuard uses the Harmony library supplied with BepInEx; Jotunn is not required.
+
+## Development build command
+
+Use one invocation for a complete development build after preparing its version and documentation:
+
+```powershell
+.\Build-Test.ps1 -ServerPath 'C:\path\to\Valheim dedicated server' -BepInExCore 'C:\path\to\BepInEx\core'
+```
+
+The script builds the Debug plugin and automated checks together, runs the checks, builds the matching Release plugin, verifies version metadata and configuration, then copies the DLLs and symbols into `artifacts/builds/HeimKit-<development-version>/Debug/` and `Release/`. Omit BepInExCore when using the server's default core directory. It stops on failure and refuses to overwrite different versioned artifacts under the same development identity. It does not assign versions, package a release, install, restart, commit, push or publish.
+
+## Packaging for Thunderstore
+
+## Release build command
+
+After integrating the intended source into main, preparing a plain release version and committing the reviewed release metadata, use:
+
+```powershell
+.\Build-Release.ps1 -ServerPath 'C:\path\to\Valheim dedicated server' -BepInExCore 'C:\path\to\BepInEx\core'
+```
+
+The command requires a clean main checkout and a plain release version. It runs the automated checks, builds the optimized plugin through the existing packager, validates the ZIP and checks DLL version metadata. The resulting ZIP is suitable for the GitHub release asset and Trevor's manual Thunderstore upload. It defaults packaged README links to the matching immutable version tag. Optional IconPath, OutputDirectory, PackageName, ReadmeBaseUrl and Force settings are passed to the packager. Omit BepInExCore when the server has its core references in the default location.
+
+This command does not perform Git merges, commits, pushes, branch deletion or GitHub publication. AI agents performing a requested release follow the separate [AI release workflow](ai/releases.md) for those operations. A Release-configuration DLL created by build.ps1 or Build-Test.ps1 is not itself a published release.
 
 ## Packaging for Thunderstore
 
 `Publish-Thunderstore.ps1` builds Release using the existing build script and produces a local, versioned ZIP under `artifacts/thunderstore/`. It requires PowerShell 7 or newer, a .NET SDK, and the same local server and loader references used for building. The script does not upload the package or install it into a server.
 
-Complete the [version and documentation procedure](contributing.md#before-every-build) and update the root CHANGELOG.md with the current release notes, then run from the repository root:
+For the complete local release build, use Build-Release.ps1 above. For explicitly requested standalone local packaging, complete the [version and documentation procedure](contributing.md#before-every-build), update the root CHANGELOG.md with the current release notes, then run from the repository root:
 
 ```powershell
 .\Publish-Thunderstore.ps1 -ServerPath 'C:\path\to\Valheim dedicated server'

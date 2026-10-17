@@ -2,7 +2,7 @@
 
 ## Scope and current status
 
-HeimKit is a C# BepInEx plugin for Windows Valheim dedicated servers. Supported game, loader and framework versions are documented in [server setup](server-setup.md#supported-environment). The source contains InfiniteTorches, WeatherGuard, AFKNightWatch and AFKRaidWatch, plus the blank SharedMap module described in [its specification](specs/shared-map.md). SharedMap defaults disabled and contains only configuration, compatibility and presence lifecycle; it has no mapping behavior.
+HeimKit is a C# BepInEx plugin for Windows Valheim dedicated servers. Supported game, loader and framework versions are documented in [server setup](server-setup.md#supported-environment). Its independently configurable modules are InfiniteTorches, WeatherGuard, AFKNightWatch, AFKRaidWatch and SharedMap. SharedMap defaults enabled and owns persistent community exploration and table map-data filtering described in [its specification](specs/shared-map.md). Its optional PortalMarkerSync subfeature also defaults enabled and maintains player-built portal markers; other location/resource pins remain outside scope.
 
 The current distribution is one plugin DLL with independently controlled modules. Shared code is allowed. Each module must work without another module being enabled. Windows-only support is an explicit product constraint until Linux support is explicitly added.
 
@@ -325,7 +325,7 @@ Current hookups:
 | AFKRaidWatch | Automatic raid candidate hooks | While its ready controller runs | None |
 | InfiniteTorches | Refill controller and pending requests | None | None |
 | WeatherGuard | Protection controller, gameplay hooks and retained ownership | None | Explicit coverage requests (administration/status) |
-| SharedMap | Blank module lifecycle; no gameplay controller | None | None |
+| SharedMap | Position sampling, portal catalog/grouping/publication selection, table initialization and map-field filtering; world map and publication state retained across pauses | None | Dirty terrain/publication-state saves and lifecycle flushes (save management); absent-file first-run read-only table import (intentional offline world processing) |
 
 ### Integrating a consumer
 
