@@ -6,7 +6,7 @@ Install HeimKit on a Windows Valheim dedicated server using Thunderstore Mod Man
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit build | 0.1.51 |
+| HeimKit build | 0.1.52 |
 | Valheim Dedicated Server | 1.0.20; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
@@ -14,6 +14,10 @@ Install HeimKit on a Windows Valheim dedicated server using Thunderstore Mod Man
 | Build output | `src/HeimKit/bin/Release/netstandard2.1/HeimKit.dll` |
 
 This section is the sole documentation source for HeimKit's supported game, loader, runtime and framework versions. Other documents link here rather than repeating version values. Update this baseline when code guards and dependencies change.
+
+## SharedMap module
+
+The generated `[SharedMap]` section defaults to `Enabled = false` and `DebugMode = false`. It is a blank module with configuration, compatibility and player-presence lifecycle only; enabling it does not share maps or create pins. See the [SharedMap guide](features/shared-map.md). Mapping behavior is outside this build's implemented feature set.
 
 ## Installation
 

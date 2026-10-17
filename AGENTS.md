@@ -15,7 +15,7 @@ Keep shared documentation independent of any particular assistant, vendor or too
 
 ## Current scope
 
-Work locally on the checked-out working branch. HeimKit targets Windows dedicated servers only. The source contains InfiniteTorches, WeatherGuard, AFKNightWatch and AFKRaidWatch. Do not infer gameplay guarantees from compilation.
+Work locally on the checked-out working branch. HeimKit targets Windows dedicated servers only. The source contains InfiniteTorches, WeatherGuard, AFKNightWatch and AFKRaidWatch, plus the blank SharedMap module (configuration and lifecycle only). Do not infer gameplay guarantees from compilation.
 
 WeatherGuard priority: automatic weather protection for player-created structures first, preserving their existing creator. Claiming/protecting individual repaired world pieces is secondary. A nonzero creator makes a player-built piece eligible for protection; it must not be used as a protection exclusion. Require seamless activation during play, one normal Enabled switch, and unchanged combat/support behavior. Do not require logout-based activation. World-created claiming is not part of the current implementation.
 

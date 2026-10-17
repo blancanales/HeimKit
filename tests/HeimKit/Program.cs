@@ -1,5 +1,6 @@
 GameCompatibilityTests.Run();
 GameVersionCompatibilityTests.Run();
+SharedMapTests.Run();
 InfiniteTorchesTests.Run();
 InfiniteTorchesRefillRulesTests.Run();
 DiagnosticLogTests.Run();

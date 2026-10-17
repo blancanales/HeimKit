@@ -2,7 +2,7 @@
 
 ## Scope and current status
 
-HeimKit is a C# BepInEx plugin for Windows Valheim dedicated servers. Supported game, loader and framework versions are documented in [server setup](server-setup.md#supported-environment). The source contains InfiniteTorches, WeatherGuard, AFKNightWatch and AFKRaidWatch.
+HeimKit is a C# BepInEx plugin for Windows Valheim dedicated servers. Supported game, loader and framework versions are documented in [server setup](server-setup.md#supported-environment). The source contains InfiniteTorches, WeatherGuard, AFKNightWatch and AFKRaidWatch, plus the blank SharedMap module described in [its specification](specs/shared-map.md). SharedMap defaults disabled and contains only configuration, compatibility and presence lifecycle; it has no mapping behavior.
 
 The current distribution is one plugin DLL with independently controlled modules. Shared code is allowed. Each module must work without another module being enabled. Windows-only support is an explicit product constraint until Linux support is explicitly added.
 
@@ -172,7 +172,7 @@ Existing recognized values must be preserved, and missing settings added with de
 
 Each module has its own section and `Enabled` setting. Torch settings currently use `[Torches]`. Keep the optional `config/heimkit.cfg` consistent with code defaults, but never require users to manually create or copy it. The built DLL must generate a complete config on first use without the example file.
 
-`Configuration/GameVersionCompatibility` owns the built-in audited game version and the manual-only `[Compatibility] SupportedValheimVersion` override. All four modules resolve the same immutable policy per ConfigFile during construction and compare the observed game version against its exact required version before gameplay activation. Do not substitute the configured value for the observed game version. Absent keys are not bound or generated; existing unbound values are preserved. Invalid/unreadable entries fall back to the built-in requirement with one Warning per loaded configuration. A different valid requirement also warns once, explicitly distinguishing operator authorization from an API/gameplay audit. Restart applies changes. Runtime API/signature, native networking and feature lifecycle checks remain independent. Full operator usage and validation rules belong in [server setup](server-setup.md#hidden-version-override).
+`Configuration/GameVersionCompatibility` owns the built-in audited game version and the manual-only `[Compatibility] SupportedValheimVersion` override. All modules resolve the same immutable policy per ConfigFile during construction and compare the observed game version against its exact required version before gameplay activation. Do not substitute the configured value for the observed game version. Absent keys are not bound or generated; existing unbound values are preserved. Invalid/unreadable entries fall back to the built-in requirement with one Warning per loaded configuration. A different valid requirement also warns once, explicitly distinguishing operator authorization from an API/gameplay audit. Restart applies changes. Runtime API/signature, native networking and feature lifecycle checks remain independent. Full operator usage and validation rules belong in [server setup](server-setup.md#hidden-version-override).
 
 ## Logging
 
@@ -323,6 +323,7 @@ Current hookups:
 | AFKRaidWatch | Automatic raid candidate hooks | While its ready controller runs | None |
 | InfiniteTorches | Refill controller and pending requests | None | None |
 | WeatherGuard | Protection controller, gameplay hooks and retained ownership | None | Explicit coverage requests (administration/status) |
+| SharedMap | Blank module lifecycle; no gameplay controller | None | None |
 
 ### Integrating a consumer
 
