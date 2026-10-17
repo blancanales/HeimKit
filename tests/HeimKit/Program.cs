@@ -25,6 +25,8 @@ DiagnosticsEvidenceTests.Run();
 PlayerServicesTests.Run();
 
 PlayerActivityTests.Run();
+PlayerActivityHealthTests.Run();
+PlayerActivityDebugTests.Run();
 RaidRulesTests.Run();
 
 PlayerPresenceDiagnosticsTests.Run();

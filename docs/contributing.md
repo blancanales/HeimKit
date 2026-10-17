@@ -48,7 +48,7 @@ Acquire one activity lease only when an enabled behavior needs AFK inference. Ke
 
 Ordinary AFK entry/exit notices belong to PlayerActivityService and follow the [shared AFK notice contract](architecture.md#ordinary-afk-notices). Do not gate them on debugging or duplicate them in consuming features. Preserve player identity, current counts and explicit tracking-loss reasons.
 
-Supply a live effective debug-policy callback with the lease. Shared PlayerActivity diagnostics owns actor transitions once; each feature owns only its decision/outcome evidence. A consumer can permit shared activity diagnostics without enabling another feature's output. Hidden suppression, empty-server pause and sampling budgets govern diagnostic collection, never gameplay. Shared detection binding belongs under Configuration, and feature settings contain only their own behavior. Add no legacy aliases or converters when extending this fresh layout.
+Supply a live effective debug-policy callback with the lease. Shared PlayerActivity diagnostics owns actor transitions once; each feature owns only its decision/outcome evidence. A consumer can permit shared activity diagnostics without enabling another feature's output. PlayerActivity.DebugMode and global debug can also permit the shared stream, while the manual PlayerActivity.DisableDebugLogging override suppresses the whole stream. Debug settings must not acquire activity leases or change Info AFK notices. Hidden suppression, empty-server pause and sampling budgets govern diagnostic collection, never gameplay. Shared detection binding belongs under Configuration, and feature settings contain only their own behavior. Add no legacy aliases or converters when extending this fresh layout.
 
 ## Update documentation
 

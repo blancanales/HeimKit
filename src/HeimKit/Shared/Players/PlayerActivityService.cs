@@ -1,5 +1,6 @@
 using HeimKit.Shared.Players.Models;
 using HeimKit.Shared;
+using HeimKit.Configuration;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -67,12 +68,14 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
         return lease;
     }
     public PlayerActivityService(PlayerActivityOptions options, ManualLogSource logger, IPlayerPresence presence,
-        Func<bool>? ready = null, Func<List<PlayerActivityObservation>>? readActors = null, Action<bool>? observer = null)
+        Func<bool>? ready = null, Func<List<PlayerActivityObservation>>? readActors = null, Action<bool>? observer = null, DebugLoggingPolicy? debugPolicy = null)
     {
         _logName = "PlayerActivity"; _options = options; _tracker = new(options); _logger = logger;
         _presence = presence; _ready = ready ?? (() => Ready); _readActors = readActors ?? (() => ReadActors(_presence, _craftingKey));
         _notices = new(logger);
-        _observer = observer ?? SetObserver; _diagnostics = new(logger, () => _consumers.Values.Any(enabled => enabled()));
+        _observer = observer ?? SetObserver;
+        _diagnostics = new(logger, () => debugPolicy?.Suppressed != true &&
+            (debugPolicy?.Enabled == true || _consumers.Values.Any(enabled => enabled())));
         Hooks.Add("routed_hook_calls", 0); Hooks.Add("routed_not_ready", 0); Hooks.Add("authenticated_activity_signals", 0);
     }
     private void SetObserver(bool install)
