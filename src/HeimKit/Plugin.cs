@@ -14,7 +14,7 @@ using UnityEngine;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.1.53-sm.3")]
+[BepInPlugin("heimkit", "HeimKit", "0.1.53")]
 [BepInProcess("valheim_server.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -26,9 +26,9 @@ public sealed class Plugin : BaseUnityPlugin
     {
         DiagnosticLog.StartSession();
 #if DEBUG
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.53-sm.3. Build configuration: Debug.");
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.53. Build configuration: Debug.");
 #else
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.53-sm.3. Build configuration: Release.");
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.53. Build configuration: Release.");
 #endif
         try
         {

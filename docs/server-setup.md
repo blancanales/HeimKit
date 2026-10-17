@@ -6,8 +6,7 @@ Install HeimKit on a Windows Valheim dedicated server using Thunderstore Mod Man
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit release baseline | 0.1.52 |
-| HeimKit development version | 0.1.53-sm.3 (Debug and Release configurations) |
+| HeimKit release baseline | 0.1.53 |
 | Valheim Dedicated Server | 1.0.20; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
