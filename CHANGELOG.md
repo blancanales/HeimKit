@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.53
+
+- Added SharedMap: persistent community exploration collected around players, available through vanilla cartography tables without requiring players to write first or install a client mod.
+- Added first-run import of exploration from existing cartography tables and filtering of shared death markers while preserving accepted terrain.
+- Added optional PortalMarkerSync with named portal markers, NoName for blank tags, and Multi Portals groups using a configurable 60-metre default distance.
+- Added portal rename, deletion and stale-marker reconciliation, including cleanup of matching nearby legacy pins. Players receive changes by reading a table; existing client pins may still require local duplicate removal and another read.
+- SharedMap and PortalMarkerSync default enabled and can be controlled independently. Back up SharedMap's separate terrain and marker-state files with the world.
+- Added illustrated feature guides and documented configuration, backup requirements and vanilla map limitations.
+
 ## 0.1.52
 
 - Fixed stationary players failing to become AFK while health declines. Health loss, including incoming damage and food decay, no longer resets the AFK timer or ends AFK status.
