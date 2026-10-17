@@ -25,7 +25,7 @@ internal static class DiagnosticsEvidenceTests
         tracker.Signal(1, 5.2f, "RPC_Repair");
         Check(!first.Idle && first.StateRevision > revision && first.LastSignal == "RPC_Repair", "Routed signal wakes idle actor with exact method name");
         Step(6); Check(first.LastSignal == "RPC_Repair", "Last activity signal survives a quiet sample");
-        Step(7, Actor(health: 90)); Check(first.LastSignal == "health_decrease", "Damage signal evidence");
+        Step(7, Actor(health: 90)); Check(first.LastSignal == "RPC_Repair" && first.LastActivityAt == 5.2f, "Health loss must not replace player activity evidence or reset its time");
         Step(8, Actor(known: false)); Step(9);
         Check(first.Recovery == "unreliable_actor_recovery" && first.GraceRemaining == 2, "Unknown recovery evidence");
         Step(15); Check(first.Recovery == "observation_gap", "Observation gap evidence");

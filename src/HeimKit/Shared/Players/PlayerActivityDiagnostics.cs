@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using BepInEx.Logging;
 using HeimKit.Shared.Players.Models;
 namespace HeimKit.Shared.Players;
-// One shared stream is enabled only by a registered consumer's effective policy.
+// One bounded shared stream; its caller combines shared and consumer debug policies.
 public sealed class PlayerActivityDiagnostics
 {
     private readonly ManualLogSource _log;

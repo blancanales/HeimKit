@@ -35,7 +35,7 @@ internal static class DebugLoggingResolverTests
                 throw new Exception("Setting missing from saved config: " + section + "." + key);
             }
             BindModules();
-            foreach (string section in new[] { "Diagnostics", "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" })
+            foreach (string section in new[] { "Diagnostics", "PlayerActivity", "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" })
                 Check(SavedValue(section, "DebugMode") == "false", "First-use debug defaults missing");
             File.WriteAllText(path, "[Diagnostics]\nDebugMode = true\n[Torches]\nEnabled = false\n[WeatherGuard]\nEnabled = false\n[AFKNightWatch]\nEnabled = false\n[AFKRaidWatch]\nEnabled = false\n");
             BindModules();

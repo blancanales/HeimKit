@@ -8,9 +8,11 @@ Only normal random events inside the native automatic update are filtered. Exist
 
 ## Configuration and ownership
 
-[AFKRaidWatch] Enabled defaults true and DebugMode defaults false. Enabled alone controls protection. Shared inference thresholds belong to [PlayerActivity]. Settings are restart-required; no migration, legacy aliases or converters are provided. Global/feature debug and the manual-only suppression override follow [server setup](../server-setup.md#hidden-per-feature-debug-suppression).
+[AFKRaidWatch] Enabled defaults true and DebugMode defaults false. Enabled alone controls protection. Shared inference thresholds belong to [PlayerActivity]. Settings are restart-required; no migration, legacy aliases or converters are provided. Global/feature debug and the manual-only suppression override follow [server setup](../server-setup.md#hidden-per-feature-debug-suppression). Shared PlayerActivity observations also have their own DebugMode setting and manual suppression override; see [shared services](../architecture.md#integrating-a-consumer).
 
 The feature owns compatibility, controller, raid rules, scoped gameplay hooks, read-only outcome observers and diagnostics. It acquires one shared activity lease when initialized, releases it on shutdown or failure, and works independently of AFKNightWatch. Shared inference continues during daylight. Unavailable shared observations retain native behavior; recovery resets idle history and grace. See [shared services](../architecture.md#player-activity) for the lifecycle and integration contract.
+
+The shared detector ignores all health changes as activity, including passive food-related decline, regeneration and incoming damage. Health remains relevant to actor reliability and living/dead eligibility. Other activity signals and recovery rules follow the [shared observation contract](../architecture.md#player-activity), independently of diagnostic switches and without client modification.
 
 ## Diagnostics and limitations
 

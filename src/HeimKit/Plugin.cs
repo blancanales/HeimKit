@@ -25,7 +25,11 @@ public sealed class Plugin : BaseUnityPlugin
     private void Awake()
     {
         DiagnosticLog.StartSession();
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.52.");
+#if DEBUG
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.52. Build configuration: Debug.");
+#else
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.52. Build configuration: Release.");
+#endif
         try
         {
             ConfigurationLoader.Load(Paths.ConfigPath, Logger, config =>

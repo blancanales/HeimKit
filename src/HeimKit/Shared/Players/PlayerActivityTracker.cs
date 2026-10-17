@@ -48,10 +48,11 @@ public sealed class PlayerActivityTracker
                 double dx = current.X - state.Anchor.X, dy = current.Y - state.Anchor.Y, dz = current.Z - state.Anchor.Z;
                 double angle = Math.Abs(current.Heading - state.Anchor.Heading) % 360;
                 if (angle > 180) angle = 360 - angle;
+                // Health changes, including incoming damage, do not demonstrate player input.
                 if (dx * dx + dy * dy + dz * dz >= _options.Movement * _options.Movement || angle >= _options.Look ||
-                    current.Health < state.Previous.Health || current.Equipment != state.Previous.Equipment || current.Emote != state.Previous.Emote || state.Previous.InBed)
-                { state.LastActivity = now; state.Anchor = current; reason = "movement_rotation_damage_equipment_or_emote";
-                    state.View.LastSignal = current.Health < state.Previous.Health ? "health_decrease" : current.Equipment != state.Previous.Equipment ? "equipment_changed" :
+                    current.Equipment != state.Previous.Equipment || current.Emote != state.Previous.Emote || state.Previous.InBed)
+                { state.LastActivity = now; state.Anchor = current; reason = "movement_rotation_equipment_or_emote";
+                    state.View.LastSignal = current.Equipment != state.Previous.Equipment ? "equipment_changed" :
                         current.Emote != state.Previous.Emote ? "emote_changed" : state.Previous.InBed ? "left_bed" : angle >= _options.Look ? "body_rotation" : "movement"; }
             }
             if (current.Busy || current.InBed || !known || !current.Alive) state.Anchor = current;
