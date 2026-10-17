@@ -14,7 +14,7 @@ param(
     [string]$PackageName = 'HeimKit',
     [string]$WebsiteUrl = 'https://github.com/blancanales/HeimKit',
     [string]$ReadmeBaseUrl = 'https://github.com/blancanales/HeimKit/blob/main',
-    [string]$Description = 'Server-side quality-of-life features for Windows Valheim dedicated servers: torch upkeep, weather protection, sleep coordination and idle-player raid protection.',
+    [string]$Description = 'Server-side quality-of-life features for Windows Valheim dedicated servers: shared exploration and portal markers, torch upkeep, weather protection, sleep coordination and idle-player raid protection.',
     [string[]]$AdditionalDependencies = @(),
     [switch]$Force
 )
@@ -58,8 +58,8 @@ if ($pluginAttributes.Count -ne 1 -or $pluginAttributes[0].Groups[1].Value -cne 
 }
 if (!$pluginSource.Contains("Starting version $version.")) { throw 'Plugin startup version must match the project version.' }
 $setup = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'docs/server-setup.md') -Raw
-if ($setup -notmatch ('(?m)^\| HeimKit build \| ' + [regex]::Escape($version) + ' \|\s*$')) {
-    throw 'Synchronize the HeimKit build row in docs/server-setup.md before packaging.'
+if ($setup -notmatch ('(?m)^\| HeimKit (?:release baseline|build) \| ' + [regex]::Escape($version) + ' \|\s*$')) {
+    throw 'Synchronize the HeimKit release baseline row in docs/server-setup.md before packaging.'
 }
 # The supported loader documentation is the single source for the dependency pin.
 $loaderMatch = [regex]::Match($setup, "(?m)^\| BepInExPack Valheim \| ($versionPattern) \|\s*`$")

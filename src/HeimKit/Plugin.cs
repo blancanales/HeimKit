@@ -9,11 +9,12 @@ using HeimKit.Features.AFKNightWatch;
 using HeimKit.Shared;
 using HeimKit.Shared.Players;
 using HeimKit.Features.AFKRaidWatch;
+using HeimKit.Features.SharedMap;
 using UnityEngine;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.1.52")]
+[BepInPlugin("heimkit", "HeimKit", "0.1.53-sm.3")]
 [BepInProcess("valheim_server.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -25,9 +26,9 @@ public sealed class Plugin : BaseUnityPlugin
     {
         DiagnosticLog.StartSession();
 #if DEBUG
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.52. Build configuration: Debug.");
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.53-sm.3. Build configuration: Debug.");
 #else
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.52. Build configuration: Release.");
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.53-sm.3. Build configuration: Release.");
 #endif
         try
         {
@@ -38,6 +39,7 @@ public sealed class Plugin : BaseUnityPlugin
                 Register(() => new WeatherGuard(config, Logger, _players), "WeatherGuard");
                 Register(() => new AFKNightWatch(config, Logger, _players), "AFKNightWatch");
                 Register(() => new AFKRaidWatch(config, Logger, _players), "AFKRaidWatch");
+                Register(() => new SharedMap(config, Logger, _players), "SharedMap");
                 return config;
             });
         }

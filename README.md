@@ -2,9 +2,9 @@
 
 ![HeimKit: shield and longhouse emblem beside the HeimKit name](docs/images/heimkit-banner.png)
 
-HeimKit brings quality-of-life features to Windows Valheim dedicated servers, helping server owners reduce upkeep, coordinate night skipping and limit automatic raids around idle players.
+HeimKit brings quality-of-life features to Windows Valheim dedicated servers: shared exploration and portal markers, automatic torch upkeep, protection from weather wear, coordinated night skipping and raid protection for idle players.
 
-Install HeimKit on the server and choose the features you want independently. It is designed for players using unmodified clients, with configuration managed by the server. Gameplay features pause when no players have joined the world and resume after players spawn; requested administrative reports remain available. The project is under local development; no production release is advertised.
+Install HeimKit on the server and choose each feature independently through the server configuration. Players use unmodified Valheim clients with no additional downloads. Gameplay features pause when no players have joined the world and resume after players spawn.
 
 ## World safety
 
@@ -12,7 +12,7 @@ Install HeimKit on the server and choose the features you want independently. It
 
 ## Features
 
-![HeimKit feature overview: torch upkeep, player-built weather protection, majority sleep and idle-only raid protection; each feature can be enabled independently](docs/images/feature-overview.png)
+![HeimKit features: torch upkeep, weather protection, majority sleep, idle-only raid protection and SharedMap community exploration with optional PortalMarkerSync; players read map updates at a cartography table](docs/images/feature-overview.png)
 
 ### InfiniteTorches
 
@@ -38,6 +38,14 @@ Protects idle-only locations from new normal automatic random raids, independent
 
 [Usage and scope](docs/features/afk-raid-watch.md) · [Technical specification](docs/specs/afk-raid-watch.md)
 
+### SharedMap
+
+Share exploration with the whole server through vanilla cartography tables. SharedMap collects terrain around players as they travel, preserves the community map across restarts and prepares table data without requiring someone to write first. Players choose **Read Map** at a table to receive the latest shared exploration and markers; updates do not appear automatically on an open player map. Shared death markers are excluded.
+
+Its optional **PortalMarkerSync** subfeature maintains player-built portal markers in community-explored terrain, using current portal names, `NoName` for blank tags and grouped markers for nearby portals. SharedMap and PortalMarkerSync default enabled; portal sync can be disabled while exploration sharing continues. Existing personal or shared pins can interfere with vanilla marker replacement, so some players may need to remove an old duplicate locally and read the table again. Other automatic resource and location markers are outside scope.
+
+[Usage, configuration and marker limitations](docs/features/shared-map.md) · [Technical specification](docs/specs/shared-map.md)
+
 ## Compatibility
 
 - Windows Valheim dedicated servers; Linux is not supported.
@@ -56,6 +64,7 @@ Follow the [setup guide](docs/server-setup.md#installation) to install with Thun
 
 - [Server setup](docs/server-setup.md) — supported environment, installation, configuration and general troubleshooting.
 - [World backups](docs/world-backups.md) — copying world saves and using Valheim's save-management menu.
+- [SharedMap](docs/features/shared-map.md) — community exploration, PortalMarkerSync, cartography table reads and separate map backups.
 - [Development](docs/development.md) — build commands, Thunderstore packaging and plugin references.
 - [Contributing](docs/contributing.md) — change procedure and documentation placement rules.
 - [Architecture](docs/architecture.md) — code organization and shared design rules.

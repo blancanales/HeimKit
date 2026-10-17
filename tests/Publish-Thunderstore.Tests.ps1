@@ -35,7 +35,16 @@ try {
     $pluginText = Get-Content -LiteralPath $plugin -Raw
     $setupText = Get-Content -LiteralPath $setup -Raw
     [xml]$xml = $projectText
-    $version = [string]$xml.Project.PropertyGroup.Version
+    $sourceVersion = [string]$xml.Project.PropertyGroup.Version
+    # The guard fixtures must work when the checkout itself has a prerelease identity.
+    $version = '1.2.3'
+    $projectText = $projectText.Replace("<Version>$sourceVersion</Version>", "<Version>$version</Version>")
+    $pluginText = $pluginText.Replace($sourceVersion, $version)
+    $setupText = [regex]::Replace($setupText, '(?m)^\| HeimKit (?:release baseline|build) \|[^\r\n]*', "| HeimKit release baseline | $version |")
+    Write-Text $project $projectText
+    Write-Text $plugin $pluginText
+    Write-Text $setup $setupText
+    Write-Text (Join-Path $sandbox 'CHANGELOG.md') "# Changelog`n`n## $version`n`n- Local package guard fixture.`n"
 
     Expect-Failure 'Invalid package name' { & $publish @options -PackageName '../escape' } 'PackageName'
     Expect-Failure 'Overlong description' { & $publish @options -Description ('x' * 251) } 'Description'
@@ -49,8 +58,8 @@ try {
     Write-Text $plugin ($pluginText.Replace('"' + $version + '"', '"9.9.9"'))
     Expect-Failure 'Plugin source mismatch' { & $publish @options } 'BepInPlugin version'
     Write-Text $plugin $pluginText
-    Write-Text $setup ($setupText.Replace("| HeimKit build | $version |", '| HeimKit build | 9.9.9 |'))
-    Expect-Failure 'Documented build mismatch' { & $publish @options } 'Synchronize the HeimKit build'
+    Write-Text $setup ($setupText.Replace("| HeimKit release baseline | $version |", '| HeimKit release baseline | 9.9.9 |'))
+    Expect-Failure 'Documented build mismatch' { & $publish @options } 'Synchronize the HeimKit release baseline'
     Write-Text $setup $setupText
 
     Add-Type -AssemblyName System.Drawing

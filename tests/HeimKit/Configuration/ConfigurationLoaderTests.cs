@@ -1,4 +1,5 @@
 using HeimKit.Features.AFKRaidWatch;
+using HeimKit.Features.SharedMap;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Features.InfiniteTorches;
@@ -12,7 +13,7 @@ internal static class ConfigurationLoaderTests
     {
         int diagnostics = contents.IndexOf("[Diagnostics]", StringComparison.Ordinal);
         int activity = contents.IndexOf("[PlayerActivity]", StringComparison.Ordinal);
-        foreach (string feature in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" })
+        foreach (string feature in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch", "SharedMap" })
         {
             int at = contents.IndexOf("[" + feature + "]", StringComparison.Ordinal);
             if (diagnostics < 0 || activity < 0 || at < 0 || diagnostics > at || activity > at)
@@ -55,12 +56,13 @@ internal static class ConfigurationLoaderTests
                 _ = new WeatherGuard(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new AFKNightWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new AFKRaidWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new SharedMap(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 return config;
             });
             if (complete.Count != reference.Count || complete.Any(entry =>
                 !reference.TryGetValue(entry.Key, out var value) || value != entry.Value.GetSerializedValue()))
                 throw new Exception("Reference configuration differs from the complete generated defaults.");
-            System.Console.WriteLine("PASS: every reference setting matches generated defaults across all four features, with no hidden or retired keys.");
+            System.Console.WriteLine("PASS: every reference setting matches generated defaults across all registered modules, with no hidden or retired keys.");
             AssertSharedFirst(File.ReadAllText(complete.ConfigFilePath));
             AssertSharedFirst(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "heimkit.cfg")));
             // Setting changes trigger BepInEx's native alphabetical save before the layout handler.
@@ -74,6 +76,7 @@ internal static class ConfigurationLoaderTests
                 _ = new WeatherGuard(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new AFKNightWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new AFKRaidWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new SharedMap(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 return config;
             });
             var reordered = File.ReadAllText(complete.ConfigFilePath);

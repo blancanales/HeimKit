@@ -2,6 +2,8 @@
 
 Automatic weather protection for existing and newly player-built structures, preserving their creators. Activation does not require repair, logout or rejoin. World-created claiming is inactive. Repairing an existing world-created piece does not change this scope; player-built replacements and additions are evaluated as separate pieces.
 
+![WeatherGuard: protect existing and newly player-built structures from configured rain and underwater wear while preserving combat damage and structural support; world-created structures excluded](../images/weather-guard-workflow.png)
+
 ## Usage and scope
 
 Automatic Debug output follows the shared [five-minute empty-server pause](../architecture.md#empty-server-debug-pause). Reconnection resumes eligible diagnostics without restarting the feature; warnings, errors, requested reports and gameplay remain available.
