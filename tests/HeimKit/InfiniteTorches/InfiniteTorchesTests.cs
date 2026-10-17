@@ -10,8 +10,8 @@ internal static class InfiniteTorchesTests
         // Exercise actual feature configuration and startup logs without a running Unity world.
         var cases = new[]
         {
-            (Enabled: true, Version: "1.0.17", Active: true, Message: "InfiniteTorches: Enabled."),
-            (Enabled: false, Version: "1.0.17", Active: false, Message: "InfiniteTorches: Disabled."),
+            (Enabled: true, Version: "1.0.20", Active: true, Message: "InfiniteTorches: Enabled."),
+            (Enabled: false, Version: "1.0.20", Active: false, Message: "InfiniteTorches: Disabled."),
             (Enabled: true, Version: "1.0.18", Active: false, Message: "DISABLED (unsupported Valheim version 1.0.18"),
             (Enabled: false, Version: "1.0.18", Active: false, Message: "InfiniteTorches: Disabled.")
         };
@@ -47,7 +47,7 @@ internal static class InfiniteTorchesTests
         if (!suppliedConfig.TryGetEntry<bool>("Diagnostics", "DebugMode", out var diagnostics) || diagnostics.Value)
             throw new Exception("Supplied configuration must default DebugMode off.");
         suppliedConfig.Bind("Torches", "Enabled", true).Value = false;
-        suppliedFeature.Initialize("1.0.17");
+        suppliedFeature.Initialize("1.0.20");
         if (suppliedFeature.IsActive) throw new Exception("Existing disabled setting was overridden.");
         System.Console.WriteLine("PASS: supplied heimkit.cfg defaults debug mode off and respects an existing disabled setting.");
 

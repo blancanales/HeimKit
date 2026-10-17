@@ -4,7 +4,8 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AssemblyName>HeimKit</AssemblyName>
-    <Version>0.1.48</Version>
+    <Version>0.1.52</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <GameManaged>$(ServerPath)\valheim_server_Data\Managed</GameManaged>
     <BepInExCore Condition="'$(BepInExCore)' == ''">$(ServerPath)\BepInEx\core</BepInExCore>
   </PropertyGroup>

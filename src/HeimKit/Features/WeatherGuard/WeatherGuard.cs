@@ -1,3 +1,4 @@
+using HeimKit.Configuration;
 using System;
 using System.IO;
 using HeimKit.Features.WeatherGuard.Models;
@@ -12,6 +13,7 @@ public sealed class WeatherGuard : IServerModule
 {
     private readonly WeatherGuardSettings _settings;
     private readonly ManualLogSource _logger;
+    private readonly GameVersionCompatibility _compatibility;
     private readonly string _configPath;
     private readonly WeatherGuardCoverageRequests _coverageRequests;
     private readonly WeatherGuardDiagnostics _adminDiagnostics;
@@ -26,7 +28,7 @@ public sealed class WeatherGuard : IServerModule
 
     public WeatherGuard(ConfigFile config, ManualLogSource logger, PlayerServices players)
     {
-        _logger = logger;
+        _logger = logger; _compatibility = GameVersionCompatibility.Resolve(config, logger);
         _players = players;
         _settings = new WeatherGuardSettings(config, logger);
         _processing = new(logger, Name, () => _settings.DebugLogging.Enabled);
@@ -42,8 +44,8 @@ public sealed class WeatherGuard : IServerModule
         WeatherGuardDiagnostics.StartupSettings(_logger, _settings);
         if (!_settings.Enabled.Value)
         { return; }
-        if (gameVersion != "1.0.17")
-        { DiagnosticLog.Write(_logger, "WeatherGuard", DiagnosticEvent.Lifecycle, $"DISABLED (unsupported Valheim version {gameVersion}; audited for 1.0.17).", level: LogLevel.Warning); return; }
+        if (!_compatibility.Supports(gameVersion))
+        { DiagnosticLog.Write(_logger, "WeatherGuard", DiagnosticEvent.Lifecycle, $"DISABLED (unsupported Valheim version {gameVersion}; required version {_compatibility.RequiredVersion}; built-in audited version {GameVersionCompatibility.AuditedVersion}).", level: LogLevel.Warning); return; }
         IsActive = true;
         if (_settings.DebugLogging.Enabled)
             DiagnosticLog.Write(_logger, Name, DiagnosticEvent.Lifecycle,

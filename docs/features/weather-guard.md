@@ -46,3 +46,5 @@ Detailed Debug prints the feature settings and fixed processing limits once at s
 
 
 Current management is refreshed on each scan, including reacquisition, independently of the age of a roof observation. Detailed Debug groups successful acquisitions and releases into interval counts with release reasons, rather than listing the same operation for each piece. Lifetime totals remain available to diagnose repeated ownership churn. Eligible-piece and wear-call interval counts appear once in their applicable summary; companion counter details do not repeat them.
+
+The shared [hidden version override](../server-setup.md#hidden-version-override) lets an operator authorize one exact game version after reviewing compatibility. It does not validate gameplay or bypass this feature's runtime checks.

@@ -6,8 +6,8 @@ Install HeimKit on a Windows Valheim dedicated server using Thunderstore Mod Man
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit build | 0.1.48 |
-| Valheim Dedicated Server | 1.0.17; enforced by module compatibility guards. |
+| HeimKit build | 0.1.52 |
+| Valheim Dedicated Server | 1.0.20; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
 | Plugin target framework | netstandard2.1 |
@@ -60,10 +60,26 @@ With the server stopped, replace the DLL in the same active location used during
 
 ## Configuration
 
+### Hidden version override
+
+After reviewing compatibility for a game update, an operator can manually add this shared setting to `heimkit.cfg`:
+
+```ini
+[Compatibility]
+SupportedValheimVersion = <exact-game-version>
+```
+
+Replace `<exact-game-version>` with the exact Valheim version being authorized, using the three numeric components described below. The built-in audited baseline is listed only in [Supported environment](#supported-environment). This replaces the built-in version requirement for all four modules; it is not a list or an additional allowed version. Arrays and comma-separated lists are not accepted: a dedicated-server installation runs one game version at a time. Each module still honors its own Enabled setting. The setting and section are absent from generated defaults and the reference config. Existing manual values are preserved on save, and the optional shared section is grouped before feature sections.
+
+The value must contain exactly three nonnegative decimal components in canonical `major.minor.patch` form, without leading zeros, suffixes, wildcards or version ranges. Surrounding whitespace is ignored. Missing values use the built-in audited version; empty, malformed or unreadable values produce one shared startup warning and fall back to it. A different valid requirement produces one shared warning stating the manual requirement and built-in audited version. The override does not establish API or gameplay compatibility, alter Valheim's client/server network checks, or bypass runtime method/signature, prefab, world-readiness or failure checks. Remove the entry to restore the built-in requirement. Stop the server before editing and restart to apply changes; the policy is captured once per loaded configuration.
+
+### Default configuration
+
 Shared settings (`[Diagnostics]` and `[PlayerActivity]`) appear first; feature sections follow, with no required order among features. HeimKit uses the configuration directory supplied by BepInEx. Existing values are preserved, and missing settings are added with defaults. The supplied [config/heimkit.cfg](../config/heimkit.cfg) is an optional reference; do not overwrite an existing server config with it.
 
 ```ini
 [PlayerActivity]
+DebugMode = false
 IdleTimeoutSeconds = 300
 JoinGraceSeconds = 60
 MovementThresholdMeters = 0.5
@@ -123,10 +139,11 @@ AFKRaidWatch's independent Enabled switch protects idle-only local areas from ne
 
 ### PlayerActivity
 
-These settings control how HeimKit decides whether a player appears idle. AFK sleep exclusion and raid protection share the same detection. They do not kick players or announce an AFK status. Stop the server before changing them and restart to apply the changes.
+These settings control how HeimKit decides whether a player appears idle. AFK sleep exclusion and raid protection share the same detection. They do not kick players. Ordinary AFK entry/exit notices appear at Info independently of debugging. Stop the server before changing them and restart to apply the changes.
 
 | Setting | Default | What it does and how to adjust it | Allowed values |
 | --- | --- | --- | --- |
+| `DebugMode` | false | Enable shared PlayerActivity diagnostics independently of sleep/raid debug. Global debug and effective consumer debug also permit output; the manual PlayerActivity suppression override has final precedence. Does not enable tracking or change Info notices. | true/false |
 | `IdleTimeoutSeconds` | 300 seconds (5 minutes) | How long a player must go without activity the server can detect before being considered idle. Lower values mark players idle sooner; higher values wait longer. | 30–3600 seconds |
 | `JoinGraceSeconds` | 60 seconds (1 minute) | Minimum time a player is kept active after joining or recovering from loading, death or unreliable player information. Increase it to allow more settling-in time; decrease it to shorten that minimum. The grace and idle timeout must both have passed; they are not added together. | 0–600 seconds |
 | `MovementThresholdMeters` | 0.5 meters | How far the player's position must change from the last activity position to count as movement. Small position changes can build up to the threshold. Lower values pick up smaller movements; higher values ignore more small movements. Being carried or moved by the world also counts. | 0.1–5 meters |
@@ -143,11 +160,11 @@ All four features use shared presence notifications to pause their gameplay cont
 
 Normal Info logs distinguish transport connections from world entry. PlayerPresence reports all features inactive after confirmed empty-server cleanup, and all enabled features active after the first joined player and successful feature initialization. Delayed readiness defers the active notice. Incoming connections and completed login handshakes alone do not resume gameplay features. Death/respawn keeps the same session joined until disconnect. After every enabled consumer confirms its own cleanup, one shared entry reports `PlayerPresence: No players have joined the world; all features are inactive until a player joins.` A cleanup failure remains visible and suppresses this combined success notice for that empty interval. Each enabled feature reports Ready once when its required dedicated-server services are available, regardless of players. The shared presence status follows those Ready entries. Individual processing transitions, including other pause reasons and later starts, belong only in Debug; warnings/errors remain visible. Additional players and unchanged polls do not repeat these notices. Unavailable presence is not reported as an empty server. See the [presence lifecycle](architecture.md#presence-driven-lifecycle).
 
-Shared PlayerActivity debug output has no additional switch. It uses one transition stream permitted by any registered consumer's effective global/feature/hidden policy. This does not enable the other consumer's feature-specific output. Required gameplay inference is independent of diagnostics.
+Set `[PlayerActivity] DebugMode = true` for shared activity observations without enabling sleep or raid diagnostics. It defaults false and inherits global debug; existing registered consumers can also permit the shared stream through their effective debug policies. A manual `[PlayerActivity] DisableDebugLogging = true` suppresses this stream regardless of those sources. Debugging requires an existing AFK tracking consumer and never starts tracking itself. Required gameplay inference and ordinary Info AFK entry/exit notices are independent of all debug settings.
 
 ### Hidden per-feature debug suppression
 
-Global debug and a feature’s own DebugMode enable diagnostics together; hidden suppression has final precedence. An optional `DisableDebugLogging` key can be added manually to an existing feature section (`[Torches]`, `[WeatherGuard]`, `[AFKNightWatch]`, `[AFKRaidWatch]`). The plugin does not generate this key or include it in the reference config. It preserves manually supplied values when adding defaults or saving configuration.
+Global debug and a feature’s own DebugMode enable diagnostics together; hidden suppression has final precedence. An optional `DisableDebugLogging` key can be added manually to an existing feature section (`[Torches]`, `[WeatherGuard]`, `[AFKNightWatch]`, `[AFKRaidWatch]`, or the shared `[PlayerActivity]` section). The plugin does not generate this key or include it in the reference config. It preserves manually supplied values when adding defaults or saving configuration.
 
 | Global DebugMode | Feature DebugMode | Hidden DisableDebugLogging | Feature diagnostics |
 | --- | --- | --- | --- |

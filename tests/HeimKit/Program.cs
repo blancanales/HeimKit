@@ -1,3 +1,5 @@
+GameCompatibilityTests.Run();
+GameVersionCompatibilityTests.Run();
 InfiniteTorchesTests.Run();
 InfiniteTorchesRefillRulesTests.Run();
 DiagnosticLogTests.Run();
@@ -23,6 +25,8 @@ DiagnosticsEvidenceTests.Run();
 PlayerServicesTests.Run();
 
 PlayerActivityTests.Run();
+PlayerActivityHealthTests.Run();
+PlayerActivityDebugTests.Run();
 RaidRulesTests.Run();
 
 PlayerPresenceDiagnosticsTests.Run();

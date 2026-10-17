@@ -37,10 +37,10 @@ internal static class PlayerActivityTests
         for (int t = 1; t <= 10; t++) Step(t, Actor(heading: 1));
         Check(Step(11, Actor(heading: 1)).Idle, "Heading wrap must not invent activity");
         Check(!Step(12, Actor(heading: 20)).Idle, "Observed look rotation wakes idle player");
-        foreach (var action in new[] { Actor(health: 90), Actor(equipment: "axe"), Actor(emote: 1) })
+        foreach (var action in new[] { Actor(equipment: "axe"), Actor(emote: 1) })
         {
             tracker.Clear(); Step(0); for (int t = 1; t <= 10; t++) Step(t);
-            Check(!Step(11, action).Idle, "Damage/equipment/emote activity wakes idle player");
+            Check(!Step(11, action).Idle, "Equipment/emote activity wakes idle player");
         }
         tracker.Clear(); Step(0);
         for (int t = 1; t <= 10; t++) Step(t, Actor(health: 100 + t));
@@ -59,6 +59,6 @@ internal static class PlayerActivityTests
         Check(!RoutedActivityReader.TryRead(malformed, 12, out _, out _) && malformed.GetPos() == 0, "Malformed header is unchanged");
         Check(!RoutedActivityReader.IsActivity("RPC_Pong".GetStableHashCode()), "Housekeeping is not activity");
 
-        System.Console.WriteLine("PASS: shared activity movement/body rotation/damage/equipment/emote/station/bed inference, grace/recovery/bounds and authenticated byte-preserving routed observation.");
+        System.Console.WriteLine("PASS: shared activity movement/body rotation/equipment/emote/station/bed inference, grace/recovery/bounds and authenticated byte-preserving routed observation.");
     }
 }

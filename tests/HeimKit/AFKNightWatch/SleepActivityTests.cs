@@ -41,14 +41,14 @@ internal static class SleepActivityTests
         string folder = Path.Combine(AppContext.BaseDirectory, "sleep-activity-" + Guid.NewGuid());
         // Native patches are deliberately installed only in a running dedicated Unity world.
         AFKNightWatch Load() => ConfigurationLoader.Load(folder, log, config => new AFKNightWatch(config, log, PlayerServicesTests.For(config, log)));
-        var module = Load(); module.Initialize("1.0.17"); Check(module.IsActive && module.Name == "AFKNightWatch", "Sleep defaults enabled");
+        var module = Load(); module.Initialize("1.0.20"); Check(module.IsActive && module.Name == "AFKNightWatch", "Sleep defaults enabled");
         module.Shutdown(); module.Shutdown(); module.Initialize("unsupported"); Check(!module.IsActive, "Version guard");
         string configPath = Path.Combine(folder, "heimkit.cfg"); var text = File.ReadAllText(configPath);
         Check(text.Contains("RequiredSleepingPercent = 50") && text.Contains("IdleTimeoutSeconds = 300") && !text.Contains("DisableDebugLogging") && !text.Contains("[MajoritySleep]"), "Fresh defaults without hidden/retired keys");
         foreach (bool enabled in new[] { false, true }) foreach (bool majority in new[] { false, true }) foreach (bool exclusion in new[] { false, true })
         {
             File.WriteAllText(configPath, $"[AFKNightWatch]\nEnabled = {enabled}\nMajoritySleepEnabled = {majority}\nExcludeAFKFromSleep = {exclusion}\n");
-            module = Load(); module.Initialize("1.0.17"); Check(module.IsActive == (enabled && (majority || exclusion)), "Independent sleep behavior matrix"); module.Shutdown(); module.Shutdown();
+            module = Load(); module.Initialize("1.0.20"); Check(module.IsActive == (enabled && (majority || exclusion)), "Independent sleep behavior matrix"); module.Shutdown(); module.Shutdown();
         }
         File.WriteAllText(configPath, "[AFKNightWatch]\nRequiredSleepingPercent = 70\nIdleTimeoutSeconds = 900\nProtectAFKFromRaids = false\n[PlayerActivity]\nIdleTimeoutSeconds = 600\n");
         var file = ConfigurationLoader.Load(folder, log, config => { _ = new AFKNightWatch(config, log, PlayerServicesTests.For(config, log)); _ = new AFKRaidWatch(config, log, PlayerServicesTests.For(config, log)); return config; });

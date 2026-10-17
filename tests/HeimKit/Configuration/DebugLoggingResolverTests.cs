@@ -35,7 +35,7 @@ internal static class DebugLoggingResolverTests
                 throw new Exception("Setting missing from saved config: " + section + "." + key);
             }
             BindModules();
-            foreach (string section in new[] { "Diagnostics", "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" })
+            foreach (string section in new[] { "Diagnostics", "PlayerActivity", "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" })
                 Check(SavedValue(section, "DebugMode") == "false", "First-use debug defaults missing");
             File.WriteAllText(path, "[Diagnostics]\nDebugMode = true\n[Torches]\nEnabled = false\n[WeatherGuard]\nEnabled = false\n[AFKNightWatch]\nEnabled = false\n[AFKRaidWatch]\nEnabled = false\n");
             BindModules();
@@ -137,7 +137,7 @@ internal static class DebugLoggingResolverTests
             var config = new ConfigFile(path, false) { SaveOnConfigSet = false };
             var torches = new InfiniteTorches(config, logger, PlayerServicesTests.For(config, logger));
             var weather = new WeatherGuard(config, logger, PlayerServicesTests.For(config, logger));
-            messages.Clear(); torches.Initialize("1.0.17"); weather.Initialize("1.0.17");
+            messages.Clear(); torches.Initialize("1.0.20"); weather.Initialize("1.0.20");
             Check(torches.IsActive && weather.IsActive && messages.Count(m => m.Text.EndsWith(": Enabled.")) == 2 &&
                 messages.Where(m => m.Level == LogLevel.Debug).Count() == 2 && messages.Where(m => m.Level == LogLevel.Debug).All(m => m.Text.Contains("Debug logging suppressed by DisableDebugLogging")), "Suppression changed gameplay enablement or leaked recurring diagnostics.");
             torches.Initialize("unsupported"); weather.Initialize("unsupported");

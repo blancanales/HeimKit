@@ -1,3 +1,4 @@
+using HeimKit.Configuration;
 using HeimKit.Shared.Players;
 using HeimKit.Shared.Players.Models;
 using HeimKit.Features.AFKNightWatch.Models;
@@ -10,6 +11,7 @@ public sealed class AFKNightWatch : IServerModule
 {
     private readonly AFKNightWatchSettings _settings;
     private readonly ManualLogSource _logger;
+    private readonly GameVersionCompatibility _compatibility;
     private readonly PlayerServices _players;
     private AFKNightWatchController? _controller;
     private IDisposable? _presenceRegistration;
@@ -17,7 +19,7 @@ public sealed class AFKNightWatch : IServerModule
     private readonly PlayerProcessingNotices _processing;
     public string Name => "AFKNightWatch";
     public bool IsActive { get; private set; }
-    public AFKNightWatch(ConfigFile config, ManualLogSource logger, PlayerServices players) { _logger = logger; _settings = new(config, logger); _players = players; _processing = new(logger, Name, () => _settings.DebugLogging.Enabled); }
+    public AFKNightWatch(ConfigFile config, ManualLogSource logger, PlayerServices players) { _logger = logger; _compatibility = GameVersionCompatibility.Resolve(config, logger); _settings = new(config, logger); _players = players; _processing = new(logger, Name, () => _settings.DebugLogging.Enabled); }
     public void Initialize(string gameVersion)
     {
         Shutdown();
@@ -25,7 +27,7 @@ public sealed class AFKNightWatch : IServerModule
         _settings.DebugLogging.ReportStartup(_logger, Name, _settings.Enabled.Value);
         if (!_settings.Enabled.Value) return;
         if (!_settings.MajoritySleepEnabled.Value && !_settings.ExcludeAFKFromSleep.Value) { Log("No behaviors are selected; feature will remain inactive.", LogLevel.Warning); return; }
-        if (gameVersion != "1.0.17") { Log("DISABLED: unsupported game version " + gameVersion, LogLevel.Warning); return; }
+        if (!_compatibility.Supports(gameVersion)) { Log("DISABLED: unsupported game version " + gameVersion + "; required version " + _compatibility.RequiredVersion, LogLevel.Warning); return; }
         IsActive = true;
         if (_settings.DebugLogging.Enabled) Log("Waiting for joined players and dedicated-server world", LogLevel.Debug);
         _presenceRegistration = _players.Events.Subscribe(PresenceChanged, Fail, () => _processing.IsEmptyPaused, () => _processing.IsRunning, () => _processing.IsServerReady);

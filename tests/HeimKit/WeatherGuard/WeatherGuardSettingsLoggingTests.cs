@@ -28,7 +28,7 @@ internal static class WeatherGuardSettingsLoggingTests
             try
             {
                 records.Clear();
-                module.Initialize("1.0.17");
+                module.Initialize("1.0.20");
                 for (int i = 0; i < 4; i++) module.Tick(i);
                 var entries = records.Where(record => record.Text.Contains("Settings and processing limits")).ToArray();
                 if (entries.Length != (scenario.Expect ? 1 : 0))

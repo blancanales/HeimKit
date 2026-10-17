@@ -8,7 +8,7 @@ AFKNightWatch owns configurable majority sleep and inferred-AFK exclusion from s
 
 AFKNightWatchSettings binds `[AFKNightWatch]`: Enabled true, MajoritySleepEnabled true, ExcludeAFKFromSleep true, RequiredSleepingPercent 50 (range 1–100), RequireMoreThanPercent true, SleepDelaySeconds 30 (range 0–300 real seconds) and DebugMode false. Both sleep behaviors are independently selectable under Enabled. With both off no sleep hook is installed. Shared detection settings are bound by Configuration/PlayerActivitySettings under `[PlayerActivity]`: IdleTimeoutSeconds 300 (30–3600), JoinGraceSeconds 60 (0–600), MovementThresholdMeters 0.5 (0.1–5), LookThresholdDegrees 10 (1–90), SampleIntervalSeconds 1 (0.2–5). Changes require restart. The fresh layout has no migration, legacy alias or automatic legacy cleanup. Ordinary loader behavior preserves recognized values and adds missing settings; unbound values are not interpreted.
 
-Global/feature debugging and the manual-only suppression override follow [server setup](../server-setup.md#hidden-per-feature-debug-suppression). Debugging cannot enable or disable gameplay inference.
+Global/feature debugging and the manual-only suppression override follow [server setup](../server-setup.md#hidden-per-feature-debug-suppression). Debugging cannot enable or disable gameplay inference. Shared PlayerActivity observations also have their own DebugMode setting and manual suppression override; see [shared services](../architecture.md#integrating-a-consumer).
 
 ## Sleep decisions
 
@@ -19,6 +19,8 @@ Disabling majority while retaining exclusion requires every non-idle participant
 ## Shared observations and lifecycle
 
 Plugin owns one [PlayerServices hub](../architecture.md#player-activity). AFKNightWatch leases its activity service only when Enabled and ExcludeAFKFromSleep require inference. Majority sleep alone reads the shared presence character roster without idle tracking. The same observations can serve AFKRaidWatch during daylight; no consumer depends on another feature being enabled. Empty servers skip sampling and custom sleep evaluation while native processing continues. Missing readiness, unreliable inference or shared failure retains native behavior; recovery restarts grace.
+
+The shared detector ignores all health changes as activity, including passive food-related decline, regeneration and incoming damage. Health remains relevant to actor reliability and living/dead eligibility. Other activity signals and recovery rules follow the [shared observation contract](../architecture.md#player-activity), independently of diagnostic switches and without client modification.
 
 AFKNightWatch owns compatibility, startup and isolated module failure. Its controller owns one activity lease and one sleep-vote registration. AFKNightWatchSleepVoteCoordinator installs one native vote prefix and separate read-only diagnostic observers; AFKNightWatchSleepQuorumRules owns quorum calculation. Models owns SleepDecision, NativeSleepObservation and NightWatchStatus. Shutdown and initialization rollback release every registration safely and repeatedly. Failed optional observations do not remove gameplay hooks.
 
@@ -52,3 +54,7 @@ Standard Info reports one confirmed sleep start under the configured rules while
 Debug policy startup declarations follow the [shared contract](../architecture.md#debug-policy-startup-declaration), identifying global/feature enablement and hidden suppression independently of gameplay enablement.
 
 Detected loader Debug filtering is explained by a Warning followed immediately by Info instructions for the affected outputs; see [server configuration](../server-setup.md#configuration).
+
+## Game-version compatibility
+
+Before activation, the module uses the shared GameVersionCompatibility policy and compares the observed game version to its exact requirement. The [manual version override](../server-setup.md#hidden-version-override) replaces that requirement without bypassing Enabled, native readiness, API/signature checks or isolated failure handling. Compatibility policy and warning ownership follow [architecture](../architecture.md#configuration).

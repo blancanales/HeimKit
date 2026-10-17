@@ -6,6 +6,9 @@ namespace HeimKit.Shared.Players;
 // Plugin owns this hub; features own only idempotent leases.
 public sealed class PlayerServices : IDisposable
 {
+    private readonly DebugLoggingPolicy _debug;
+    private readonly ManualLogSource _logger;
+    private bool _debugReported;
     public IPlayerPresence Presence { get; }
     public PlayerPresenceEvents Events { get; }
     public PlayerActivityService Activity { get; }
@@ -14,10 +17,13 @@ public sealed class PlayerServices : IDisposable
     {
         Presence = new PlayerPresence();
         Events = new(logger);
-        Activity = new PlayerActivityService(new PlayerActivitySettings(config).Options(), logger, Presence);
+        var settings = new PlayerActivitySettings(config, logger);
+        _debug = settings.DebugLogging; _logger = logger;
+        Activity = new PlayerActivityService(settings.Options(), logger, Presence, debugPolicy: _debug);
     }
     public void Tick(float now)
     {
+        if (!_debugReported) { _debugReported = true; _debug.ReportStartup(_logger, "PlayerActivity", Activity.Consumers > 0); }
         Presence.Refresh();
         DiagnosticLog.ObservePlayers(Presence.HasConnectedPlayers);
         Events.Observe(Presence.HasJoinedPlayers);

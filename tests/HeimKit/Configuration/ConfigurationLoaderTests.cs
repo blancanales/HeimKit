@@ -91,7 +91,7 @@ internal static class ConfigurationLoaderTests
             File.WriteAllText(path, "[Torches]\nEnabled = false\nIntervalSeconds = 12\n\n[Diagnostics]\nDebugMode = true\nLogStatus = false\nLogRefillRequests = false\nLogRefillDetails = false\nStatusIntervalSeconds = 120\n");
             setupMessages.Clear();
             var reloaded = ConfigurationLoader.Load(directory, setupLogger, config => new InfiniteTorches(config, setupLogger, PlayerServicesTests.For(config, setupLogger)));
-            reloaded.Initialize("1.0.17");
+            reloaded.Initialize("1.0.20");
             text = File.ReadAllText(path);
             foreach (string retired in new[] { "LogStatus", "LogRefillRequests", "LogRefillDetails", "StatusIntervalSeconds" })
                 if (text.Contains(retired)) throw new Exception("Retired diagnostic setting remains: " + retired);

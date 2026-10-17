@@ -52,7 +52,7 @@ internal static class PlayerPresenceEventsTests
         using var hub = new PlayerServices(config, log);
         var torch = new InfiniteTorches(config, log, hub);
         var controller = typeof(InfiniteTorches).GetField("_controller", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        torch.Initialize("1.0.17");
+        torch.Initialize("1.0.20");
         Check(hub.Events.Subscribers == 1 && controller.GetValue(torch) == null, "Torch initialized player work on an unavailable server");
         hub.Events.Observe(false); hub.Events.Observe(true); var running = controller.GetValue(torch);
         Check(running != null && hub.Activity.Consumers == 0, "Torch presence failed to create a controller or acquired unnecessary AFK tracking");

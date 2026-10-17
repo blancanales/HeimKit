@@ -31,7 +31,7 @@ internal static class StartupLoggingTests
                 var messages = new List<(LogLevel Level, string Text)>();
                 logger.LogEvent += (_, args) => messages.Add((args.Level, args.Data.ToString()!));
                 var feature = factory.Create(config, logger);
-                feature.Initialize("1.0.17");
+                feature.Initialize("1.0.20");
                 if (!enabled) { feature.Tick(0); feature.Tick(60); }
                 var info = messages.Where(m => m.Level == LogLevel.Info).ToArray();
                 if (info.Length != 1 || info[0].Text != $"{factory.Name}: {(enabled ? "Enabled." : "Disabled.")}")
