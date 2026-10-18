@@ -25,8 +25,11 @@ public sealed class SharedMap : IServerModule
     private readonly SharedMapDiagnostics _diagnostics;
     private SharedMapStore? _store;
     private SharedMapBootstrap? _bootstrap;
-    private SharedMapPortalRefresh? _portalRefresh;
+    private SharedMapMarkerRefresh? _portalRefresh;
+    private SharedMapResourceStore? _resources;
+    private SharedMapMarkerRefresh? _resourceRefresh;
 
+    internal string StoreDirectory => _storeDirectory;
     public string Name => "SharedMap";
     public bool IsActive { get; private set; }
 
@@ -57,6 +60,7 @@ public sealed class SharedMap : IServerModule
         try
         {
             SharedMapPatches.CheckCompatibility();
+            if (_settings.ResourceMarkerSync.Value) SharedMapResources.CheckCompatibility();
             _presenceRegistration = _players.Events.Subscribe(PresenceChanged, Fail,
                 () => _processing.IsEmptyPaused, () => _processing.IsRunning, () => _processing.IsServerReady);
         }
@@ -82,11 +86,24 @@ public sealed class SharedMap : IServerModule
                 StopController();
                 FlushStore();
                 FlushPortalState();
+                FlushResourceState();
                 var exploration = new SharedMapExploration(minimap.m_textureSize, minimap.m_pixelSize, minimap.m_exploreRadius, minimap.m_exploreInterval);
                 var store = new SharedMapStore(_storeDirectory, uid, exploration);
                 bool loaded = store.Load();
-                var portalRefresh = new SharedMapPortalRefresh(_storeDirectory, uid, _diagnostics.PortalPublished, _diagnostics.PortalRemoved);
+                var portalRefresh = new SharedMapMarkerRefresh(_storeDirectory, uid, _diagnostics.PortalPublished, _diagnostics.PortalRemoved);
                 bool loadedPortalState = portalRefresh.Load();
+                SharedMapResourceStore? resources = null;
+                SharedMapMarkerRefresh? resourceRefresh = null;
+                if (_settings.ResourceMarkerSync.Value)
+                {
+                    resources = new SharedMapResourceStore(_storeDirectory, uid);
+                    bool loadedResources = resources.Load();
+                    resourceRefresh = new SharedMapMarkerRefresh(_storeDirectory, uid,
+                        _diagnostics.ResourcePublished, resourcePins: true);
+                    bool loadedResourcePins = resourceRefresh.Load();
+                    _diagnostics.ResourceStateOpened(loadedResources, loadedResourcePins, resources.Deposits.Count);
+                }
+                _resources = resources; _resourceRefresh = resourceRefresh;
                 _exploration = exploration; _store = store;
                 _portalRefresh = portalRefresh;
                 _bootstrap = loaded ? null : new SharedMapBootstrap(ZDOMan.instance, exploration);
@@ -106,7 +123,7 @@ public sealed class SharedMap : IServerModule
             if (!_occupied) return;
             if (_controller == null)
             {
-                _controller = new SharedMapController(this, _settings, _players.Presence, _exploration, _portalRefresh!, _logger);
+                _controller = new SharedMapController(this, _settings, _players.Presence, _exploration, _portalRefresh!, _logger, _resources, _resourceRefresh, _players.RoutedMessages);
                 _controller.Install();
             }
             _processing.Ready();
@@ -123,6 +140,7 @@ public sealed class SharedMap : IServerModule
         StopController();
         FlushStore();
         FlushPortalState();
+        FlushResourceState();
         if (occupied.HasValue) _processing.EmptyPaused();
         else _processing.Unavailable("player presence unavailable");
     }
@@ -153,12 +171,22 @@ public sealed class SharedMap : IServerModule
         if (_bootstrap == null && _store?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true) _diagnostics.Saved(now, _exploration!.ExploredPixels);
         if (_bootstrap == null && _portalRefresh?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true)
             _diagnostics.PortalStateSaved(now, _portalRefresh.Count);
+        bool resourcesSaved = _resources?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true;
+        bool publicationsSaved = _resourceRefresh?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true;
+        if (resourcesSaved || publicationsSaved) _diagnostics.ResourceStateSaved(now, _resources?.Deposits.Count ?? 0);
     }
 
     private void FlushPortalState()
     {
         if (_bootstrap == null && _portalRefresh?.Save() == true)
             _diagnostics.PortalStateSaved(UnityEngine.Time.unscaledTime, _portalRefresh.Count);
+    }
+
+    private void FlushResourceState()
+    {
+        // Cleanup attempts both stores even if one fails.
+        if (!ModuleCleanup.Run(_logger, Name, () => _resources?.Save(), () => _resourceRefresh?.Save()))
+            throw new IOException("Resource state could not be flushed; prior files were retained.");
     }
 
     public void Shutdown()
@@ -168,7 +196,7 @@ public sealed class SharedMap : IServerModule
         _processing.Reset();
         var registration = _presenceRegistration;
         _presenceRegistration = null;
-        ModuleCleanup.Run(_logger, Name, () => registration?.Dispose(), StopController, FlushStore, FlushPortalState);
-        _exploration = null; _store = null; _bootstrap = null; _portalRefresh = null; _world = null; _worldUid = 0;
+        ModuleCleanup.Run(_logger, Name, () => registration?.Dispose(), StopController, FlushStore, FlushPortalState, FlushResourceState);
+        _exploration = null; _store = null; _bootstrap = null; _portalRefresh = null; _world = null; _worldUid = 0; _resources = null; _resourceRefresh = null;
     }
 }

@@ -8,7 +8,7 @@ An actual request such as "create a release for me" authorizes completing the cu
 
 Trevor uploads the ZIP to Thunderstore himself. Never upload to Thunderstore, install into a server, restart a server, change worlds, alter clients, bypass compatibility checks or include unrelated work as part of this workflow.
 
-"Create a test build" only requests local development DLLs through Build-Test.ps1. "Build Release configuration" or "create an optimized DLL" is a local build request, not authorization for Git integration, branch deletion or GitHub publication. If the request actually leaves publication scope ambiguous, establish that scope before performing external writes.
+"Create a test build" only requests one local development DLL through build.ps1, using the standard source bin output directory. "Build Release configuration" or "create an optimized DLL" is a local build request, not authorization for Git integration, branch deletion or GitHub publication. If the request actually leaves publication scope ambiguous, establish that scope before performing external writes.
 
 ## Integrate the intended source
 

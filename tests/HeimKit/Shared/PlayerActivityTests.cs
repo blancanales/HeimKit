@@ -55,6 +55,19 @@ internal static class PlayerActivityTests
         Check(RoutedActivityReader.TryRead(packet, 12, out var parsed, out int method) && parsed == target && RoutedActivityReader.IsActivity(method), "Read authenticated native activity header");
         Check(packet.GetPos() == 0 && bytes.SequenceEqual(packet.GetArray()), "Observer preserves cursor and every byte");
         Check(!RoutedActivityReader.TryRead(packet, 99, out _, out _) && packet.GetPos() == 0, "Forged sender not activity");
+        var body = new ZPackage(); body.Write("pickaxe_swing");
+        var routed = new ZPackage(); routed.Write((byte)42);
+        routed.Write(1L); routed.Write(12L); routed.Write(13L); routed.Write(target);
+        routed.Write("SetTrigger".GetStableHashCode()); routed.Write(body); routed.SetPos(1);
+        byte[] routedBytes = routed.GetArray();
+        Check(RoutedActivityReader.TryReadParameters(routed, 12, out var routedTarget, out _, out var parameters) &&
+            routedTarget == target && parameters?.ReadString() == "pickaxe_swing", "Read authenticated bounded native parameters");
+        Check(routed.GetPos() == 1 && routed.GetArray().SequenceEqual(routedBytes), "Parameter reader changed traffic/cursor");
+        Check(!RoutedActivityReader.TryReadParameters(routed, 99, out _, out _, out _) && routed.GetPos() == 1,
+            "Parameter reader accepted a forged sender or changed cursor");
+        var truncatedBody = new ZPackage(routedBytes.Take(routedBytes.Length - 1).ToArray()); truncatedBody.SetPos(1);
+        Check(!RoutedActivityReader.TryReadParameters(truncatedBody, 12, out _, out _, out _) && truncatedBody.GetPos() == 1,
+            "Truncated parameter envelope supplied evidence");
         var malformed = new ZPackage(new byte[] { 1, 2 });
         Check(!RoutedActivityReader.TryRead(malformed, 12, out _, out _) && malformed.GetPos() == 0, "Malformed header is unchanged");
         Check(!RoutedActivityReader.IsActivity("RPC_Pong".GetStableHashCode()), "Housekeeping is not activity");

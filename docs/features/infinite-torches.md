@@ -2,7 +2,7 @@
 
 Automatically refills eligible torches and braziers using native fuel requests.
 
-![InfiniteTorches: detect eligible lights below 75 percent fuel, refill automatically without inventory fuel, and retain native water, smoke and obstruction behavior; campfires and hearths excluded by default](../images/infinite-torches-workflow.png)
+![InfiniteTorches: detect eligible lights below 75 percent fuel, refill automatically without inventory fuel, and retain native water, smoke and obstruction behavior; campfires and hearths excluded by default](../images/infinite-torches-workflow.jpg)
 
 See [server setup](../server-setup.md) for installation/configuration and the [specification](../specs/infinite-torches.md) for eligibility, processing and limits.
 

@@ -21,7 +21,7 @@ Make an independent copy of the world before installing or enabling HeimKit, and
 
 SharedMap's community terrain is stored separately from Valheim's world save. If using SharedMap, stop the server and also copy the entire `HeimKit/SharedMap` directory from the active BepInEx configuration directory into the same dated backup. Manager profiles and manual installations can have different active configuration locations; see [server setup](server-setup.md#shared-configuration-and-maintenance).
 
-Keep each `world-<world UID in hexadecimal>.map`, its matching `.portal-pins` publication-state file and their `.bak` files with the corresponding world backup. In-game Manage Saves and native world backup retention do not manage these plugin files. Restore the world and community files together from the same backup point; restoring an older world while keeping a later community map can reveal terrain from later progress. SharedMap rejects corrupt or incompatible community files rather than silently erasing them. See the [SharedMap guide](features/shared-map.md#storage-and-recovery).
+Keep each `world-<world UID in hexadecimal>.map`, its matching `.portal-pins`, `.resources`, `.resource-pins` and `.pin-removals` files and their `.bak` files with the corresponding world backup. In-game Manage Saves and native world backup retention do not manage these plugin files. Restore the world and community files together from the same backup point; restoring an older world while keeping a later community map can reveal terrain from later progress. SharedMap rejects corrupt or incompatible community files rather than silently erasing them. See the [SharedMap guide](features/shared-map.md#storage-and-recovery).
 
 ## Valheim's in-game save management
 

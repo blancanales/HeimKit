@@ -43,16 +43,16 @@ internal static class SharedMapPortalTests
     public static void Run()
     {
         var map = new SharedMapExploration(64, 12, 100, 2); map.Reveal(0, 0);
-        var portals = new[] { new PortalMarker("Home", 0, 0, 0), new PortalMarker("Home", 240, 0, 0) };
+        var portals = new[] { new MapMarker("Home", 0, 0, 0), new MapMarker("Home", 240, 0, 0) };
         byte[] first = SharedMapTableData.Merge(map, null, out _, portals, true)!;
         Check(Pins(first).Count == 2 && Pins(first).All(p => p.Owner == SharedMapTableData.PortalOwner), "Same-tag distant endpoints were lost or given a player owner.");
         Check(Pins(first).All(p => p.Name == "Home" && p.Type == 6), "Generated portals used a text prefix or the wrong native icon.");
         Check(SharedMapTableData.Merge(map, first, out _, portals, true) == null, "Unchanged portal data was rewritten.");
-        byte[] renamed = SharedMapTableData.Merge(map, first, out _, new[] { new PortalMarker("Farm", 12, 0, 0) }, true)!;
+        byte[] renamed = SharedMapTableData.Merge(map, first, out _, new[] { new MapMarker("Farm", 12, 0, 0) }, true)!;
         Check(Pins(renamed).Single().Name == "Farm" && Pins(renamed).Single().X == 12, "Rename/movement retained old markers.");
-        byte[] disabled = SharedMapTableData.Merge(map, renamed, out _, Array.Empty<PortalMarker>())!;
+        byte[] disabled = SharedMapTableData.Merge(map, renamed, out _, Array.Empty<MapMarker>())!;
         Check(Pins(disabled).Count == 0 && BitConverter.ToInt32(Raw(disabled), 0) >= 2, "Removed portals did not produce a native pin-clear payload.");
-        Check(SharedMapTableData.Merge(map, disabled, out _, Array.Empty<PortalMarker>()) == null, "Disabled portal cleanup was not idempotent.");
+        Check(SharedMapTableData.Merge(map, disabled, out _, Array.Empty<MapMarker>()) == null, "Disabled portal cleanup was not idempotent.");
 
         foreach (int version in new[] { 2, 3 })
         {
@@ -75,7 +75,7 @@ internal static class SharedMapPortalTests
             Check(Raw(output).Skip(4108).Take(kept.Length).SequenceEqual(kept), "Unrelated personal pin bytes changed.");
             Check(BitConverter.ToInt32(Raw(output), 0) == version, "Existing native pin version was unnecessarily upgraded.");
             Check(SharedMapTableData.Merge(map, output, out _, portals, true) == null, "Stale-upload normalization was not idempotent.");
-            var off = SharedMapTableData.Merge(map, Compress(source.ToArray()), out _, Array.Empty<PortalMarker>())!;
+            var off = SharedMapTableData.Merge(map, Compress(source.ToArray()), out _, Array.Empty<MapMarker>())!;
             Check(Pins(off).Any(p => p.Name == "Wrong portal name" && p.Type == 6) && Pins(off).All(p => p.Owner != SharedMapTableData.PortalOwner),
                 "Disabled automatic portals erased player-owned portal icons or retained generated pins.");
         }
@@ -101,12 +101,12 @@ internal static class SharedMapPortalTests
             Check(Pins(off).Any(p => p.Name == "home"), "Disabled portal management removed a legacy dot.");
         }
 
-        var near = new[] { new PortalMarker("A", 0, 0, 0), new PortalMarker("B", 20, 2, 0), new PortalMarker("C", 40, 0, 0) };
+        var near = new[] { new MapMarker("A", 0, 0, 0), new MapMarker("B", 20, 2, 0), new MapMarker("C", 40, 0, 0) };
         var grouped = SharedMapPortalClusters.Group(near, 20);
         Check(grouped.Count == 2 && grouped[0].Name == "Multi Portals (2)" && grouped[0].X == 10 && grouped[0].Y == 1,
             "Boundary/centroid grouping failed or a transitive chain joined distant portals.");
         Check(grouped[1].Name == "C" && SharedMapPortalClusters.Group(near, 0).Count == 3, "Single portal names or disabled grouping changed.");
-        Check(SharedMapPortalClusters.Group(Array.Empty<PortalMarker>(), 20).Count == 0, "Empty portal catalog generated a marker.");
+        Check(SharedMapPortalClusters.Group(Array.Empty<MapMarker>(), 20).Count == 0, "Empty portal catalog generated a marker.");
         byte[] clustered = SharedMapTableData.Merge(map, first, out _, grouped, true)!;
         Check(Pins(clustered).Any(p => p.Name == "Multi Portals (2)" && p.Type == 6), "Group label or native portal icon was incorrect.");
         System.Console.WriteLine("PASS: managed portal add/rename/move/removal, portal-icon cleanup, duplicate/death filtering, other-icon pin preservation, native formats, idempotence and bounded-anchor grouping.");

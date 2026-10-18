@@ -31,6 +31,12 @@ internal static class SharedMapTests
             Check(settings.Enabled.Value && !settings.DebugMode.Value, "SharedMap must default enabled with debug off.");
             Check(settings.PortalClusterDistanceMeters.Value == 60 && settings.PortalMarkerSync.Value,
                 "Automatic portals and default grouping were not configured independently.");
+            Check(settings.ResourceMarkerSync.Value && !settings.ResourceDiscoverPreviouslyExplored.Value,
+                "Resource sync must default on while retrospective discovery defaults off independently.");
+            Check(settings.PinDebugNameFilter.Value == "", "Pin debug filter must default to all labels.");
+            Check(settings.SilverDiscoveryRadiusMeters.Value == 10, "Silver discovery must default to 10 metres.");
+            Check(settings.ResourceClusterDistanceMeters.Value == 30 && settings.ResourceRemoveDepleted.Value,
+                "Resource grouping/removal defaults did not match the reference configuration.");
             settings.Enabled.Value = false;
             module.Initialize(GameVersionCompatibility.AuditedVersion);
             Check(!module.IsActive && players.Events.Subscribers == 0, "Disabled module subscribed to presence.");

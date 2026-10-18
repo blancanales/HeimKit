@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using BepInEx.Logging;
 using HeimKit.Configuration;
@@ -13,7 +14,9 @@ internal sealed class SharedMapDiagnostics
     private readonly DebugLoggingPolicy _policy;
     private readonly DiagnosticBudget _budget = new();
     private int _portalSampleCursor;
-    public SharedMapDiagnostics(ManualLogSource logger, DebugLoggingPolicy policy) { _logger = logger; _policy = policy; }
+    private readonly Func<string> _pinNameFilter;
+    public SharedMapDiagnostics(ManualLogSource logger, DebugLoggingPolicy policy, Func<string>? pinNameFilter = null)
+    { _logger = logger; _policy = policy; _pinNameFilter = pinNameFilter ?? (() => ""); }
 
     public void StoreOpened(bool loaded, long world, string path, int pixels)
     {
@@ -73,7 +76,7 @@ internal sealed class SharedMapDiagnostics
             new (string, object?)[] { ("explored_pixels_now", pixels) }, LogLevel.Debug);
     }
 
-    public void PortalCatalog(int registered, int eligible, IReadOnlyList<PortalMarker> markers, float clusterDistance)
+    public void PortalCatalog(int registered, int eligible, IReadOnlyList<MapMarker> markers, float clusterDistance)
     {
         if (!_policy.Enabled || !_budget.Reserve(UnityEngine.Time.unscaledTime, "portal_catalog", 1, false)) return;
         DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Summary, "Portal catalog reconciliation scope",
@@ -110,7 +113,7 @@ internal sealed class SharedMapDiagnostics
                 ("removed_from_table", removed), ("client_read_confirmed", false) }, LogLevel.Debug);
     }
 
-    public void PortalPublished(PortalMarker? previous, PortalMarker actual, PortalMarker published, int slot)
+    public void PortalPublished(MapMarker? previous, MapMarker actual, MapMarker published, int slot)
     {
         if (!_policy.Enabled) return;
         float now = UnityEngine.Time.unscaledTime;
@@ -126,6 +129,59 @@ internal sealed class SharedMapDiagnostics
                 ("previous_distance_m", previous == null ? (double?)null : Math.Sqrt(dx * dx + dz * dz)),
                 ("client_read_confirmed", false)
             }, LogLevel.Debug);
+    }
+
+    public void PinChanges(int size, ZDOID table, uint revision, byte[]? before, byte[]? after,
+        string stage, long? sender = null, string senderName = "")
+    {
+        if (!_policy.Enabled || SharedMapController.Equal(before, after)) return;
+        float now = UnityEngine.Time.unscaledTime;
+        try
+        {
+            if (!_budget.Reserve(now, "pin_comparisons", 60)) return;
+            var changes = SharedMapPinChanges.Compare(SharedMapTableData.ReadPins(size, before, true), SharedMapTableData.ReadPins(size, after, true));
+            if (!changes.Any) return;
+            if (_budget.Reserve(now, "pin_summary_" + stage, 6))
+                DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Summary, "Table pin list changed",
+                    new (string, object?)[] { ("table_id", table), ("data_revision", revision), ("stage", stage),
+                        ("added_pins", changes.Added.Count), ("removed_pins", changes.Removed.Count), ("updated_pins", changes.Updated.Count),
+                        ("sender_peer_id", sender), ("sender_character_name", CleanPinText(senderName)),
+                        ("sender_role", sender.HasValue ? "replication_peer" : "unknown"), ("writer_confirmed", false),
+                        ("omitted_debug_interval", _budget.TakeOmitted()), ("client_read_confirmed", false) }, LogLevel.Debug);
+            string filter = _pinNameFilter();
+            foreach (var pin in changes.Removed) PinDetail(now, table, revision, stage, "removed", pin, null, sender, senderName, filter);
+            foreach (var pin in changes.Added) PinDetail(now, table, revision, stage, "added", pin, null, sender, senderName, filter);
+            foreach (var pair in changes.Updated) PinDetail(now, table, revision, stage, "updated", pair.After, pair.Before, sender, senderName, filter);
+        }
+        catch (Exception error)
+        {
+            // Optional evidence must never disable processing, alter an accepted field or interrupt native traffic.
+            try
+            {
+                if (_budget.Reserve(now, "pin_comparison_unavailable", 1))
+                    DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Detail, "Table pin comparison unavailable",
+                        new (string, object?)[] { ("table_id", table), ("stage", stage), ("exception_type", error.GetType().FullName),
+                            ("removal_inferred", false) }, LogLevel.Debug);
+            }
+            catch { }
+        }
+    }
+
+    private static string CleanPinText(string value) => new string(value.Take(128).Select(c => char.IsControl(c) ? ' ' : c).ToArray());
+    private void PinDetail(float now, ZDOID table, uint revision, string stage, string action, MapPin pin, MapPin? previous,
+        long? sender, string senderName, string filter)
+    {
+        if (filter.Length > 0 && !string.Equals(pin.Name, filter, StringComparison.Ordinal)) return;
+        bool generated = pin.Owner == SharedMapTableData.PortalOwner || pin.Owner == SharedMapTableData.ResourceOwner;
+        if (!_budget.Reserve(now, "pin_" + stage + "_" + action + (generated ? "_generated" : "_player"), 6)) return;
+        DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Detail, "Table pin " + action,
+            new (string, object?)[] { ("table_id", table), ("data_revision", revision), ("stage", stage),
+                ("pin_name", CleanPinText(pin.Name)), ("pin_owner_id", pin.Owner), ("pin_type", pin.Icon),
+                ("x_m", pin.X), ("y_m", pin.Y), ("z_m", pin.Z), ("checked", pin.Checked), ("author", CleanPinText(pin.Author)),
+                ("previous_checked", previous?.Checked), ("previous_author", previous == null ? null : CleanPinText(previous.Author)),
+                ("sender_peer_id", sender), ("sender_character_name", CleanPinText(senderName)),
+                ("sender_role", sender.HasValue ? "replication_peer" : "unknown"), ("writer_confirmed", false),
+                ("pin_source", generated ? "generated" : "player"), ("client_read_confirmed", false) }, LogLevel.Debug);
     }
 
     public void TableChanged(float now, ZDOID table, uint? revision, string reason)
@@ -148,5 +204,52 @@ internal sealed class SharedMapDiagnostics
         if (!_policy.Enabled || !_budget.Reserve(now, "portal_state_saved", 1, false)) return;
         DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Result, "Portal publication state save completed",
             new (string, object?)[] { ("marker_states_now", count) }, LogLevel.Debug);
+    }
+
+    public void UnsupportedResources(IReadOnlyList<string> names)
+    {
+        if (names.Count == 0) return;
+        DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Lifecycle,
+            $"Excluded {names.Count} unavailable or incompatible resource prefabs ({string.Join(", ", names)}); other resources remain eligible. Review the supported environment.", level: LogLevel.Warning);
+    }
+
+    public void ResourceResults(int added, int retired)
+    {
+        if (added == 0 && retired == 0) return;
+        DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Result,
+            $"Recorded {added} resource discoveries and {retired} confirmed resource removals.");
+    }
+
+    public void ResourceCatalog(float now, int deposits, int markers, bool retrospective)
+    {
+        if (!_policy.Enabled || !_budget.Reserve(now, "resource_catalog", 1, false)) return;
+        DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Summary, "Resource discovery and publication scope",
+            new (string, object?)[] { ("discovery_records_now", deposits), ("resource_markers_last_preparation", markers),
+                ("discover_previously_explored", retrospective), ("pin_type", (int)Minimap.PinType.Icon3),
+                ("client_read_confirmed", false) }, LogLevel.Debug);
+    }
+
+    public void ResourcePublished(MapMarker? previous, MapMarker actual, MapMarker published, int slot)
+    {
+        if (!_policy.Enabled || !_budget.Reserve(UnityEngine.Time.unscaledTime, "resource_publications", 6)) return;
+        DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Detail, "Resource marker publication selected",
+            new (string, object?)[] { ("marker_id", actual.Identity), ("old_name", previous?.Name),
+                ("new_name", published.Name), ("slot", slot), ("actual_x_m", actual.X), ("actual_z_m", actual.Z),
+                ("published_x_m", published.X), ("published_z_m", published.Z), ("client_read_confirmed", false) }, LogLevel.Debug);
+    }
+
+    public void ResourceStateOpened(bool discoveriesLoaded, bool publicationsLoaded, int count)
+    {
+        if (!_policy.Enabled) return;
+        DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Detail, "Resource storage selected",
+            new (string, object?)[] { ("loaded_discoveries", discoveriesLoaded),
+                ("loaded_publications", publicationsLoaded), ("discovery_records_now", count) }, LogLevel.Debug);
+    }
+
+    public void ResourceStateSaved(float now, int count)
+    {
+        if (!_policy.Enabled || !_budget.Reserve(now, "resource_state_saved", 1, false)) return;
+        DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Result, "Resource state save completed",
+            new (string, object?)[] { ("discovery_records_now", count) }, LogLevel.Debug);
     }
 }

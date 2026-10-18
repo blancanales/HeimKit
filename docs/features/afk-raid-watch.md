@@ -2,7 +2,7 @@
 
 Helps protect idle-only locations from new normal automatic random raids. It is an independent Windows dedicated-server feature; clients need no mod. AFKNightWatch separately controls sleep.
 
-![AFKRaidWatch: check nearby players in native raid range, exclude qualifying idle-only locations and retain eligibility for active or uncertain players; existing raids and ordinary enemies remain](../images/afk-raid-watch-workflow.png)
+![AFKRaidWatch: check nearby players in native raid range, exclude qualifying idle-only locations and retain eligibility for active or uncertain players; existing raids and ordinary enemies remain](../images/afk-raid-watch-workflow.jpg)
 
 Health changes never count as player activity. Food-related health loss, regeneration and incoming damage neither postpone AFK nor end an existing AFK state. Other activity signals still apply; death and unavailable player data retain their existing eligibility rules. See the [shared observation contract](../architecture.md#player-activity).
 

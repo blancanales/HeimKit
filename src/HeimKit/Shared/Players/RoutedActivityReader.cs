@@ -21,6 +21,22 @@ public static class RoutedActivityReader
         method == "SetTrigger".GetStableHashCode() || method == "RPC_Damage".GetStableHashCode() || method == "RPC_Repair".GetStableHashCode() ||
         method == "RPC_Remove".GetStableHashCode() || method == "RPC_RequestOpen".GetStableHashCode() || method == "RPC_RequestStack".GetStableHashCode() ||
         method == "RPC_RequestTakeAll".GetStableHashCode();
+    public static bool TryReadParameters(ZPackage packet, long authenticatedPeer, out ZDOID target,
+        out int method, out ZPackage? parameters)
+    {
+        parameters = null;
+        if (!TryRead(packet, authenticatedPeer, out target, out method)) return false;
+        int cursor = packet.GetPos();
+        try
+        {
+            packet.ReadLong(); packet.ReadLong(); packet.ReadLong(); packet.ReadZDOID(); packet.ReadInt();
+            int start = packet.GetPos(), length = packet.ReadInt();
+            if (length < 0 || length > 8192 || packet.Size() - packet.GetPos() != length) return false;
+            packet.SetPos(start); parameters = packet.ReadPackage(); return true;
+        }
+        catch (Exception) { parameters = null; return false; }
+        finally { packet.SetPos(cursor); }
+    }
     public static string ActivityName(int method)
     {
         foreach (string name in Names) if (method == name.GetStableHashCode()) return name;
