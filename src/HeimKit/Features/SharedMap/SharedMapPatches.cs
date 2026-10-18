@@ -10,6 +10,7 @@ internal sealed class SharedMapPatches : IDisposable
     private readonly Harmony _harmony = new("heimkit.sharedmap");
     [ThreadStatic] private static SharedMapController? _receiving;
     [ThreadStatic] private static int _internalWrite;
+    [ThreadStatic] private static ZNetPeer? _receivingPeer;
 
     private static MethodInfo Target(Type type, string name, params Type[] parameters) =>
         type.GetMethod(name, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
@@ -44,22 +45,24 @@ internal sealed class SharedMapPatches : IDisposable
 
     private static void BeginPacket(ZRpc rpc, out MapPacketScope? __state)
     {
-        __state = new MapPacketScope(_receiving); _receiving = null;
+        __state = new MapPacketScope(_receiving, _receivingPeer); _receiving = null; _receivingPeer = null;
         var active = SharedMapController.Active;
-        if (active == null || !active.Running || !active.IsReadyPeer(rpc)) return;
-        _receiving = active; __state.Current = active; active.BeginBatch();
+        if (active == null || !active.Running) return;
+        var peer = active.ReadyPeer(rpc);
+        if (peer == null) return;
+        _receivingPeer = peer; _receiving = active; __state.Current = active; active.BeginBatch();
     }
 
     private static Exception? EndPacket(Exception? __exception, MapPacketScope? __state)
     {
         if (__state == null) return __exception; // Another prefix may have skipped ours.
-        var controller = __state.Current; _receiving = __state.Previous;
+        var controller = __state.Current; _receiving = __state.Previous; _receivingPeer = __state.PreviousPeer;
         try { controller?.EndBatch(); }
         catch (Exception error) { controller?.Fail(error); }
         return __exception; // Preserve native exceptions and nested packet context.
     }
 
-    private static void BeforeDeserialize(ZDO __instance, ZPackage pkg, out TableMapSnapshot? __state)
+    private static void BeforeDeserialize(ZDO __instance, ZPackage pkg, out MapReplicationSnapshot? __state)
     {
         __state = null;
         var controller = _receiving;
@@ -69,16 +72,26 @@ internal sealed class SharedMapPatches : IDisposable
         {
             if (pkg.Size() - cursor < 6) return;
             pkg.ReadUShort();
-            if (pkg.ReadInt() == SharedMapController.TablePrefab)
-                __state = new TableMapSnapshot(controller, __instance.GetByteArray(ZDOVars.s_data));
+            int prefab = pkg.ReadInt();
+            if (prefab == SharedMapController.TablePrefab)
+                __state = new MapReplicationSnapshot(controller) { Table = new TableMapSnapshot(controller, __instance.GetByteArray(ZDOVars.s_data)) { SenderPeer = _receivingPeer?.m_uid, SenderName = _receivingPeer?.m_playerName ?? "" } };
+            else if (controller.ObservesResourceRecord(prefab))
+                __state = new MapReplicationSnapshot(controller) {
+                    PreviousPrefab = __instance.GetPrefab(), Terrain = __instance.GetByteArray(ZDOVars.s_TCData),
+                    MiningString = __instance.GetString(ZDOVars.s_health), MiningHealth = controller.ResourceHealthBaseline(__instance)
+                };
         }
         finally { pkg.SetPos(cursor); }
     }
 
-    private static void AfterDeserialize(ZDO __instance, TableMapSnapshot? __state)
+    private static void AfterDeserialize(ZDO __instance, MapReplicationSnapshot? __state)
     {
         if (__state == null || !__state.Controller.Running) return;
-        try { __state.Controller.Incoming(__instance, __state.Previous); }
+        try
+        {
+            if (__state.Table != null) __state.Controller.Incoming(__instance, __state.Table);
+            else __state.Controller.AcceptedResourceRecord(__instance, __state);
+        }
         catch (Exception error) { __state.Controller.Fail(error); }
     }
 
@@ -93,8 +106,9 @@ internal sealed class SharedMapPatches : IDisposable
             var previous = __instance.GetByteArray(hash);
             var normalized = controller.Normalize(bytes, previous, out int removed);
             if (normalized == null) return false;
-            if (!SharedMapController.Equal(bytes, normalized))
-                __state = new TableMapSnapshot(controller, previous) { RemovedDeaths = removed, Expected = normalized };
+            if (!SharedMapController.Equal(previous, normalized) || !SharedMapController.Equal(bytes, normalized))
+                __state = new TableMapSnapshot(controller, previous) { RemovedDeaths = removed, Received = bytes, Expected = normalized,
+                    SenderPeer = _receivingPeer?.m_uid, SenderName = _receivingPeer?.m_playerName ?? "" };
             bytes = normalized;
             return true;
         }
@@ -105,8 +119,8 @@ internal sealed class SharedMapPatches : IDisposable
     {
         if (__state == null || !__state.Controller.Running) return;
         var actual = __instance.GetByteArray(ZDOVars.s_data);
-        if (SharedMapController.Equal(__state.Previous, actual) || !SharedMapController.Equal(__state.Expected, actual)) return;
-        try { __state.Controller.RecordChange(__instance.m_uid, __state.RemovedDeaths, "server_map_field_write", __instance.DataRevision); }
+        if (!SharedMapController.Equal(__state.Expected, actual)) return;
+        try { __state.Controller.AcceptedServerWrite(__instance, __state); }
         catch (Exception error) { __state.Controller.Fail(error); }
     }
 

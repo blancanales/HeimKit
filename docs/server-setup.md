@@ -1,12 +1,13 @@
 # Server setup
 
-Install HeimKit on a Windows Valheim dedicated server using Thunderstore Mod Manager or a manual installation. Both routes use the same plugin and feature configuration. See the [InfiniteTorches guide](features/infinite-torches.md) and [WeatherGuard guide](features/weather-guard.md) and [AFKNightWatch guide](features/afk-night-watch.md) and [AFKRaidWatch guide](features/afk-raid-watch.md) for feature-specific usage.
+Install HeimKit on a Windows Valheim dedicated server using Thunderstore Mod Manager or a manual installation. Both routes use the same plugin and feature configuration. See the [InfiniteTorches guide](features/infinite-torches.md) and [WeatherGuard guide](features/weather-guard.md) and [AFKNightWatch guide](features/afk-night-watch.md) and [AFKRaidWatch guide](features/afk-raid-watch.md), plus the [SharedMap guide](features/shared-map.md) for feature-specific usage.
 
 ## Supported environment
 
 | Item | Current baseline |
 | --- | --- |
 | HeimKit release baseline | 0.1.53 |
+| HeimKit development version | 0.1.54-stone.2 (Release configuration) |
 | Valheim Dedicated Server | 1.0.20; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
@@ -17,7 +18,7 @@ This section is the sole documentation source for HeimKit's supported game, load
 
 ## SharedMap module
 
-The generated `[SharedMap]` section defaults to `Enabled = true` and `DebugMode = false`. SharedMap persists community exploration independently of tables, initializes observed tables and filters accepted table map fields, removing shared death pins. PortalMarkerSync defaults true under the enabled-by-default module and maintains named player-built portal markers; PortalClusterDistanceMeters defaults to 60 metres and groups nearby portals. Other resource/location pins remain outside scope. `TableIntervalSeconds` and `MaxTablesPerPass` bound periodic reconciliation; `SaveIntervalSeconds` controls dirty saves. Include its world-specific files beneath the active configuration directory in [backups](world-backups.md#sharedmap-data). See the [SharedMap guide](features/shared-map.md) for shared-layer behavior, filtering and replication limits. Players must use Read Map to retrieve updates; existing client pins can interfere with marker replacement.
+The generated `[SharedMap]` section defaults to `Enabled = true` and `DebugMode = false`. SharedMap persists community exploration independently of tables, initializes observed tables and filters accepted table map fields, removing shared death pins. PortalMarkerSync defaults true under the enabled-by-default module and maintains named player-built portal markers; PortalClusterDistanceMeters defaults to 60 metres and groups nearby portals. ResourceMarkerSync defaults true and optionally records outdoor metal/Obsidian deposits with dot markers independently of portal sync. ResourceDiscoverPreviouslyExplored defaults false; ResourceClusterDistanceMeters defaults to 30; ResourceRemoveDepleted defaults true. Silver requires a direct pickaxe hit or a qualifying nearby pickaxe impact; SilverDiscoveryRadiusMeters defaults to 10 metres. Copper and discovered Silver use remaining-section percentages. Other resource/location families remain outside scope. `TableIntervalSeconds` and `MaxTablesPerPass` bound periodic reconciliation; `SaveIntervalSeconds` controls dirty saves. Include its world-specific files beneath the active configuration directory in [backups](world-backups.md#sharedmap-data). See the [SharedMap guide](features/shared-map.md) for shared-layer behavior, filtering and replication limits. Players must use Read Map to retrieve updates; existing client pins can interfere with marker replacement.
 
 ## Installation
 
@@ -124,8 +125,14 @@ DebugMode = false
 
 [SharedMap]
 Enabled = true
+PinDebugNameFilter =
 PortalMarkerSync = true
 PortalClusterDistanceMeters = 60
+ResourceMarkerSync = true
+ResourceDiscoverPreviouslyExplored = false
+ResourceClusterDistanceMeters = 30
+SilverDiscoveryRadiusMeters = 10
+ResourceRemoveDepleted = true
 DebugMode = false
 TableIntervalSeconds = 10
 MaxTablesPerPass = 1
@@ -170,6 +177,8 @@ Idle is an estimate based on what the server can see. Some local camera, menu an
 This is a fresh configuration layout. HeimKit does not convert legacy sections, read legacy aliases or automatically delete them. Recognized current values are preserved and missing current settings are added. For a clean configuration, with the server stopped the operator can remove the active heimkit.cfg and allow the next startup to generate complete defaults, then reapply desired settings. The plugin does not delete the server configuration. Unbound legacy entries may remain if an old file is retained, but do not control these features.
 
 All five features use shared presence notifications to pause their gameplay controllers when empty or player presence is unavailable, then resume after the first player has spawned in the world, subject to native world readiness. Additional logins do not restart them. WeatherGuard releases retained ownership and protection hooks during the pause; explicitly requested coverage reports remain available separately. See the [required lifecycle hookup and exceptions](architecture.md#required-feature-hookup).
+
+PlayerPresence logs each character connection and disconnection at Info, including the character name and peer ID. Connection means the character has entered the world. The last known name is retained for departure. These entries require neither DebugMode nor AFK tracking; respawns and temporarily unavailable observations do not create extra connections or disconnections.
 
 Normal Info logs distinguish transport connections from world entry. PlayerPresence reports all features inactive after confirmed empty-server cleanup, and all enabled features active after the first joined player and successful feature initialization. Delayed readiness defers the active notice. Incoming connections and completed login handshakes alone do not resume gameplay features. Death/respawn keeps the same session joined until disconnect. After every enabled consumer confirms its own cleanup, one shared entry reports `PlayerPresence: No players have joined the world; all features are inactive until a player joins.` A cleanup failure remains visible and suppresses this combined success notice for that empty interval. Each enabled feature reports Ready once when its required dedicated-server services are available, regardless of players. The shared presence status follows those Ready entries. Individual processing transitions, including other pause reasons and later starts, belong only in Debug; warnings/errors remain visible. Additional players and unchanged polls do not repeat these notices. Unavailable presence is not reported as an empty server. See the [presence lifecycle](architecture.md#presence-driven-lifecycle).
 

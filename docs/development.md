@@ -28,17 +28,7 @@ Supply `-BepInExCore` as above when needed. Each configuration has its own outpu
 
 Install only one `HeimKit.dll` at a time; the adjacent example config is optional. Game and BepInEx assemblies are not distributed. WeatherGuard uses the Harmony library supplied with BepInEx; Jotunn is not required.
 
-## Development build command
-
-Use one invocation for a complete development build after preparing its version and documentation:
-
-```powershell
-.\Build-Test.ps1 -ServerPath 'C:\path\to\Valheim dedicated server' -BepInExCore 'C:\path\to\BepInEx\core'
-```
-
-The script builds the Debug plugin and automated checks together, runs the checks, builds the matching Release plugin, verifies version metadata and configuration, then copies the DLLs and symbols into `artifacts/builds/HeimKit-<development-version>/Debug/` and `Release/`. Omit BepInExCore when using the server's default core directory. It stops on failure and refuses to overwrite different versioned artifacts under the same development identity. It does not assign versions, package a release, install, restart, commit, push or publish.
-
-## Packaging for Thunderstore
+Local development builds use the same build.ps1 command above and keep their DLL in the standard source bin output directory. Use Release unless Debug is requested. Identify the build with its development version metadata; no separate versioned artifact directory or additional test-build wrapper is required.
 
 ## Release build command
 
@@ -50,7 +40,7 @@ After integrating the intended source into main, preparing a plain release versi
 
 The command requires a clean main checkout and a plain release version. It runs the automated checks, builds the optimized plugin through the existing packager, validates the ZIP and checks DLL version metadata. The resulting ZIP is suitable for the GitHub release asset and Trevor's manual Thunderstore upload. It defaults packaged README links to the matching immutable version tag. Optional IconPath, OutputDirectory, PackageName, ReadmeBaseUrl and Force settings are passed to the packager. Omit BepInExCore when the server has its core references in the default location.
 
-This command does not perform Git merges, commits, pushes, branch deletion or GitHub publication. AI agents performing a requested release follow the separate [AI release workflow](ai/releases.md) for those operations. A Release-configuration DLL created by build.ps1 or Build-Test.ps1 is not itself a published release.
+This command does not perform Git merges, commits, pushes, branch deletion or GitHub publication. AI agents performing a requested release follow the separate [AI release workflow](ai/releases.md) for those operations. A Release-configuration DLL created by build.ps1 is not itself a published release.
 
 ## Packaging for Thunderstore
 

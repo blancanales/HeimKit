@@ -12,14 +12,15 @@ public sealed class PlayerServices : IDisposable
     public IPlayerPresence Presence { get; }
     public PlayerPresenceEvents Events { get; }
     public PlayerActivityService Activity { get; }
+    public PlayerRoutedMessages RoutedMessages { get; } = new();
     public static bool Ready => PlayerActivityService.Ready;
     public PlayerServices(ConfigFile config, ManualLogSource logger)
     {
-        Presence = new PlayerPresence();
+        Presence = new PlayerPresence(connections: new PlayerConnectionNotices(logger));
         Events = new(logger);
         var settings = new PlayerActivitySettings(config, logger);
         _debug = settings.DebugLogging; _logger = logger;
-        Activity = new PlayerActivityService(settings.Options(), logger, Presence, debugPolicy: _debug);
+        Activity = new PlayerActivityService(settings.Options(), logger, Presence, debugPolicy: _debug, routedMessages: RoutedMessages);
     }
     public void Tick(float now)
     {
@@ -29,5 +30,5 @@ public sealed class PlayerServices : IDisposable
         Events.Observe(Presence.HasJoinedPlayers);
         Activity.Tick(now);
     }
-    public void Dispose() { try { Events.Dispose(); } finally { try { Activity.Dispose(); } finally { Presence.Clear(); } } }
+    public void Dispose() { try { Events.Dispose(); } finally { try { Activity.Dispose(); } finally { try { RoutedMessages.Dispose(); } finally { Presence.Clear(); } } } }
 }

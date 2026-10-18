@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.54
+
+- Added SharedMap resource markers for outdoor Copper, Tin, Silver, Obsidian and supported static Flametal deposits, with independent controls enabled by default and no client mod required.
+- Group nearby same-type discoveries, show remaining Tin node counts, and display remaining-section percentages for Copper and Silver. Silver stays hidden until qualifying pickaxe discovery.
+- Persist resource discoveries before any cartography table exists and share them through Read Map. Previously explored discovery remains separately optional and off by default; missing or unloaded deposits are not treated as depleted.
+- Added selected shared-pin lookup and persistent removal by name/location identity, preventing later uploads of the selected record while preserving other pins and exploration.
+- Added detailed shared-pin change diagnostics and named player connection/disconnection notices.
+- Fixed portal marker history being associated with different portals after world-object IDs change on restart.
+- Updated SharedMap and feature-overview illustrations and reduced documentation image sizes.
+
 ## 0.1.53
 
 - Added SharedMap: persistent community exploration collected around players, available through vanilla cartography tables without requiring players to write first or install a client mod.

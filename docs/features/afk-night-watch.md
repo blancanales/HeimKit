@@ -2,7 +2,7 @@
 
 Coordinates majority sleep and prevents inferred-idle players from blocking sleep. Clients need no mod. AFKRaidWatch controls raid protection independently.
 
-![AFKNightWatch: infer activity, count sleepers and begin sleep after the configured grace; defaults require more than half of non-idle players, with normal bed and time-of-day rules](../images/afk-night-watch-workflow.png)
+![AFKNightWatch: infer activity, count sleepers and begin sleep after the configured grace; defaults require more than half of non-idle players, with normal bed and time-of-day rules](../images/afk-night-watch-workflow.jpg)
 
 Health changes never count as player activity. Food-related health loss, regeneration and incoming damage neither postpone AFK nor end an existing AFK state. Other activity signals still apply; death and unavailable player data retain their existing eligibility rules. See the [shared observation contract](../architecture.md#player-activity).
 

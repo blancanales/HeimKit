@@ -25,6 +25,8 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
     private readonly PlayerActivityTracker _tracker;
     private readonly PlayerActivityOptions _options;
     private readonly Harmony _harmony = new("heimkit.player_activity");
+    private readonly PlayerRoutedMessages? _routedMessages;
+    private IDisposable? _routedSubscription;
     private readonly Dictionary<long, (ZDOID Target, float Requested)> _containers = new();
     private int _craftingKey;
     private readonly Dictionary<Lease, Func<bool>> _consumers = new();
@@ -68,18 +70,33 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
         return lease;
     }
     public PlayerActivityService(PlayerActivityOptions options, ManualLogSource logger, IPlayerPresence presence,
-        Func<bool>? ready = null, Func<List<PlayerActivityObservation>>? readActors = null, Action<bool>? observer = null, DebugLoggingPolicy? debugPolicy = null)
+        Func<bool>? ready = null, Func<List<PlayerActivityObservation>>? readActors = null, Action<bool>? observer = null, DebugLoggingPolicy? debugPolicy = null,
+        PlayerRoutedMessages? routedMessages = null)
     {
         _logName = "PlayerActivity"; _options = options; _tracker = new(options); _logger = logger;
         _presence = presence; _ready = ready ?? (() => Ready); _readActors = readActors ?? (() => ReadActors(_presence, _craftingKey));
         _notices = new(logger);
         _observer = observer ?? SetObserver;
+        _routedMessages = routedMessages;
         _diagnostics = new(logger, () => debugPolicy?.Suppressed != true &&
             (debugPolicy?.Enabled == true || _consumers.Values.Any(enabled => enabled())));
         Hooks.Add("routed_hook_calls", 0); Hooks.Add("routed_not_ready", 0); Hooks.Add("authenticated_activity_signals", 0);
     }
     private void SetObserver(bool install)
     {
+        if (_routedMessages != null)
+        {
+            if (!install)
+            {
+                try { _routedSubscription?.Dispose(); }
+                finally { _routedSubscription = null; if (ReferenceEquals(_current, this)) _current = null; }
+                return;
+            }
+            if (_current != null && !ReferenceEquals(_current, this)) throw new InvalidOperationException("An activity observer is already registered.");
+            _craftingKey = 438569 + ZSyncAnimation.GetHash("crafting"); _current = this;
+            _routedSubscription = _routedMessages.Subscribe(Observe, error => { Reset("routed observation unavailable"); Incident(Time.unscaledTime, "routed_observation", error); });
+            return;
+        }
         if (!install) { if (_current != null && !ReferenceEquals(_current, this)) return; try { _harmony.UnpatchSelf(); } finally { if (ReferenceEquals(_current, this)) _current = null; } return; }
         if (_current != null && !ReferenceEquals(_current, this)) throw new InvalidOperationException("An activity observer is already registered.");
         _craftingKey = 438569 + ZSyncAnimation.GetHash("crafting");

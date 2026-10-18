@@ -18,9 +18,9 @@ internal sealed class SharedMapPortals
     public void Refresh() => _portals = _world.GetPortalList().Where(zdo => zdo.IsValid())
         .Select(zdo => zdo.m_uid).Distinct().OrderBy(id => id.ToString(), StringComparer.Ordinal).ToArray();
 
-    public IReadOnlyList<PortalMarker> Read(float clusterDistance)
+    public IReadOnlyList<MapMarker> Read(float clusterDistance)
     {
-        var markers = new List<PortalMarker>();
+        var markers = new List<MapMarker>();
         foreach (var id in _portals)
         {
             var portal = _world.GetZDO(id);
@@ -30,10 +30,13 @@ internal sealed class SharedMapPortals
             if (!SharedMapExploration.Finite(position.x) || !SharedMapExploration.Finite(position.y) ||
                 !SharedMapExploration.Finite(position.z) || Character.InInterior(position) || !_map.IsExplored(position.x, position.z)) continue;
             string tag = portal.GetString(ZDOVars.s_tag);
-            markers.Add(new PortalMarker(string.IsNullOrWhiteSpace(tag) ? "NoName" : tag, position.x, position.y, position.z, id.ToString()));
+            markers.Add(new MapMarker(string.IsNullOrWhiteSpace(tag) ? "NoName" : tag, position.x, position.y, position.z, SharedMapPortalIdentity.Create(portal.GetPrefab(), position.x, position.y, position.z)));
             if (markers.Count > 4096) throw new InvalidOperationException("Community portal marker limit exceeded; table data was not replaced.");
         }
-        EligibleCount = markers.Count;
-        return SharedMapPortalClusters.Group(markers, clusterDistance);
+        // Ambiguous overlapping records do not acquire an arbitrary persistent identity.
+        var unique = markers.GroupBy(p => p.Identity).Where(g => g.Count() == 1).Select(g => g.Single())
+            .OrderBy(p => p.Identity, StringComparer.Ordinal).ToArray();
+        EligibleCount = unique.Length;
+        return SharedMapPortalClusters.Group(unique, clusterDistance);
     }
 }

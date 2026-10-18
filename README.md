@@ -1,8 +1,8 @@
 # HeimKit
 
-![HeimKit: shield and longhouse emblem beside the HeimKit name](docs/images/heimkit-banner.png)
+![HeimKit: shield and longhouse emblem beside the HeimKit name](docs/images/heimkit-banner.jpg)
 
-HeimKit brings quality-of-life features to Windows Valheim dedicated servers: shared exploration and portal markers, automatic torch upkeep, protection from weather wear, coordinated night skipping and raid protection for idle players.
+HeimKit brings quality-of-life features to Windows Valheim dedicated servers: shared exploration, portal and resource markers, automatic torch upkeep, protection from weather wear, coordinated night skipping and raid protection for idle players.
 
 Install HeimKit on the server and choose each feature independently through the server configuration. Players use unmodified Valheim clients with no additional downloads. Gameplay features pause when no players have joined the world and resume after players spawn.
 
@@ -12,7 +12,7 @@ Install HeimKit on the server and choose each feature independently through the 
 
 ## Features
 
-![HeimKit features: torch upkeep, weather protection, majority sleep, idle-only raid protection and SharedMap community exploration with optional PortalMarkerSync; players read map updates at a cartography table](docs/images/feature-overview.png)
+![HeimKit features: torch upkeep, weather protection, majority sleep, idle-only raid protection and SharedMap community exploration with independent portal and resource markers; players read map updates at a cartography table](docs/images/feature-overview.jpg)
 
 ### InfiniteTorches
 
@@ -42,7 +42,7 @@ Protects idle-only locations from new normal automatic random raids, independent
 
 Share exploration with the whole server through vanilla cartography tables. SharedMap collects terrain around players as they travel, preserves the community map across restarts and prepares table data without requiring someone to write first. Players choose **Read Map** at a table to receive the latest shared exploration and markers; updates do not appear automatically on an open player map. Shared death markers are excluded.
 
-Its optional **PortalMarkerSync** subfeature maintains player-built portal markers in community-explored terrain, using current portal names, `NoName` for blank tags and grouped markers for nearby portals. SharedMap and PortalMarkerSync default enabled; portal sync can be disabled while exploration sharing continues. Existing personal or shared pins can interfere with vanilla marker replacement, so some players may need to remove an old duplicate locally and read the table again. Other automatic resource and location markers are outside scope.
+Its optional **PortalMarkerSync** subfeature maintains player-built portal markers in community-explored terrain, using current portal names, `NoName` for blank tags and grouped markers for nearby portals. SharedMap and PortalMarkerSync default enabled; portal sync can be disabled while exploration sharing continues. Existing personal or shared pins can interfere with vanilla marker replacement, so some players may need to remove an old duplicate locally and read the table again. Optional **ResourceMarkerSync**, enabled by default, records outdoor metal and Obsidian deposits as players travel and shares labeled dots through Read Map. Nearby Tin nodes are grouped with remaining discovered-node counts. Retrospective discovery in old explored terrain is separately optional and defaults off; scraps, dungeon resources and creature sources are excluded. Server owners can remove a selected unwanted shared pin while preserving other pins and exploration. Other automatic location markers are outside scope.
 
 [Usage, configuration and marker limitations](docs/features/shared-map.md) · [Technical specification](docs/specs/shared-map.md)
 
@@ -56,7 +56,7 @@ See [server setup](docs/server-setup.md) for installation and configuration.
 
 ## Setup
 
-![Install HeimKit and BepInEx on the Windows dedicated server; player computers use unmodified clients. The DLL belongs in BepInEx/plugins/HeimKit and the generated config in BepInEx/config. Back up your world first.](docs/images/server-installation.png)
+![Install HeimKit and BepInEx on the Windows dedicated server; player computers use unmodified clients. The DLL belongs in BepInEx/plugins/HeimKit and the generated config in BepInEx/config. Back up your world first.](docs/images/server-installation.jpg)
 
 Follow the [setup guide](docs/server-setup.md#installation) to install with Thunderstore Mod Manager or manually, including manual installation when the manager is already installed.
 

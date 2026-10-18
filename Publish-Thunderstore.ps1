@@ -14,7 +14,7 @@ param(
     [string]$PackageName = 'HeimKit',
     [string]$WebsiteUrl = 'https://github.com/blancanales/HeimKit',
     [string]$ReadmeBaseUrl = 'https://github.com/blancanales/HeimKit/blob/main',
-    [string]$Description = 'Server-side quality-of-life features for Windows Valheim dedicated servers: shared exploration and portal markers, torch upkeep, weather protection, sleep coordination and idle-player raid protection.',
+    [string]$Description = 'Server-side quality-of-life features for Windows Valheim dedicated servers: shared exploration, portal and resource markers, torch upkeep, weather protection, sleep coordination and idle-player raid protection.',
     [string[]]$AdditionalDependencies = @(),
     [switch]$Force
 )
@@ -163,10 +163,10 @@ $repoReadme = $readme
 $readme = [regex]::Replace($repoReadme, '\]\((docs/[^)]+|AGENTS\.md|LICENSE)\)', {
     param($match)
     $target = $ReadmeBaseUrl.TrimEnd('/') + '/' + $match.Groups[1].Value
-    if ($match.Groups[1].Value -match '\.png$') { $target += '?raw=true' }
+    if ($match.Groups[1].Value -match '\.(png|jpe?g)$') { $target += '?raw=true' }
     return '](' + $target + ')'
 })
-foreach ($file in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'docs') -Recurse -File | Where-Object { $_.Extension -in @('.md', '.png') }) {
+foreach ($file in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'docs') -Recurse -File | Where-Object { $_.Extension -in @('.md', '.png', '.jpg', '.jpeg') }) {
     if ($file.Extension -eq '.md') { $null = Assert-PackageText $file.FullName }
     $relative = [IO.Path]::GetRelativePath($PSScriptRoot, $file.FullName).Replace('\', '/')
     $files[$relative] = $file.FullName

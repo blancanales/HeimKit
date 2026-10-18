@@ -4,7 +4,12 @@ SharedMapTests.Run();
 SharedMapExplorationTests.Run();
 SharedMapStoreTests.Run();
 SharedMapPortalTests.Run();
-SharedMapPortalRefreshTests.Run();
+SharedMapMarkerRefreshTests.Run();
+SharedMapResourceTests.Run();
+SharedMapTerrainTests.Run();
+SharedMapResourceStoreTests.Run();
+SharedMapPinRemovalTests.Run();
+SharedMapPinChangesTests.Run();
 InfiniteTorchesTests.Run();
 InfiniteTorchesRefillRulesTests.Run();
 DiagnosticLogTests.Run();
@@ -35,6 +40,7 @@ PlayerActivityDebugTests.Run();
 RaidRulesTests.Run();
 
 PlayerPresenceDiagnosticsTests.Run();
+PlayerConnectionNoticesTests.Run();
 
 PlayerPresenceEventsTests.Run();
 
