@@ -28,6 +28,9 @@ public sealed class SharedMap : IServerModule
     private SharedMapMarkerRefresh? _portalRefresh;
     private SharedMapResourceStore? _resources;
     private SharedMapMarkerRefresh? _resourceRefresh;
+    private SharedMapDungeonStore? _dungeons;
+    private SharedMapPinState? _pinState;
+    private SharedMapLandmarkStore? _runestones, _spawners;
 
     internal string StoreDirectory => _storeDirectory;
     public string Name => "SharedMap";
@@ -61,6 +64,8 @@ public sealed class SharedMap : IServerModule
         {
             SharedMapPatches.CheckCompatibility();
             if (_settings.ResourceMarkerSync.Value) SharedMapResources.CheckCompatibility();
+            if (_settings.DungeonMarkerSync.Value) SharedMapDungeons.CheckCompatibility();
+            if (_settings.RunestoneMarkerSync.Value || _settings.SpawnerMarkerSync.Value) SharedMapLandmarks.CheckCompatibility();
             _presenceRegistration = _players.Events.Subscribe(PresenceChanged, Fail,
                 () => _processing.IsEmptyPaused, () => _processing.IsRunning, () => _processing.IsServerReady);
         }
@@ -87,6 +92,7 @@ public sealed class SharedMap : IServerModule
                 FlushStore();
                 FlushPortalState();
                 FlushResourceState();
+                FlushDungeonState();
                 var exploration = new SharedMapExploration(minimap.m_textureSize, minimap.m_pixelSize, minimap.m_exploreRadius, minimap.m_exploreInterval);
                 var store = new SharedMapStore(_storeDirectory, uid, exploration);
                 bool loaded = store.Load();
@@ -104,6 +110,19 @@ public sealed class SharedMap : IServerModule
                     _diagnostics.ResourceStateOpened(loadedResources, loadedResourcePins, resources.Deposits.Count);
                 }
                 _resources = resources; _resourceRefresh = resourceRefresh;
+                SharedMapDungeonStore? dungeons = null;
+                if (_settings.DungeonMarkerSync.Value)
+                {
+                    dungeons = new SharedMapDungeonStore(_storeDirectory, uid);
+                    bool loadedDungeons = dungeons.Load();
+                    _diagnostics.DungeonStateOpened(loadedDungeons, dungeons.Count);
+                }
+                _dungeons = dungeons;
+                _runestones = _settings.RunestoneMarkerSync.Value ? new SharedMapLandmarkStore(_storeDirectory, uid, false) : null;
+                _spawners = _settings.SpawnerMarkerSync.Value ? new SharedMapLandmarkStore(_storeDirectory, uid, true) : null;
+                _runestones?.Load(); _spawners?.Load();
+                _pinState = new SharedMapPinState(_storeDirectory, uid, _diagnostics.PinStateChanged);
+                _pinState.Load();
                 _exploration = exploration; _store = store;
                 _portalRefresh = portalRefresh;
                 _bootstrap = loaded ? null : new SharedMapBootstrap(ZDOMan.instance, exploration);
@@ -123,7 +142,7 @@ public sealed class SharedMap : IServerModule
             if (!_occupied) return;
             if (_controller == null)
             {
-                _controller = new SharedMapController(this, _settings, _players.Presence, _exploration, _portalRefresh!, _logger, _resources, _resourceRefresh, _players.RoutedMessages);
+                _controller = new SharedMapController(this, _settings, _players.Presence, _exploration, _portalRefresh!, _logger, _resources, _resourceRefresh, _players.RoutedMessages, _dungeons, _pinState, _runestones, _spawners);
                 _controller.Install();
             }
             _processing.Ready();
@@ -141,6 +160,7 @@ public sealed class SharedMap : IServerModule
         FlushStore();
         FlushPortalState();
         FlushResourceState();
+        FlushDungeonState();
         if (occupied.HasValue) _processing.EmptyPaused();
         else _processing.Unavailable("player presence unavailable");
     }
@@ -174,6 +194,11 @@ public sealed class SharedMap : IServerModule
         bool resourcesSaved = _resources?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true;
         bool publicationsSaved = _resourceRefresh?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true;
         if (resourcesSaved || publicationsSaved) _diagnostics.ResourceStateSaved(now, _resources?.Deposits.Count ?? 0);
+        if (_dungeons?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true)
+            _diagnostics.DungeonStateSaved(now, _dungeons.Count);
+        _pinState?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value);
+        _runestones?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value);
+        _spawners?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value);
     }
 
     private void FlushPortalState()
@@ -189,6 +214,13 @@ public sealed class SharedMap : IServerModule
             throw new IOException("Resource state could not be flushed; prior files were retained.");
     }
 
+    private void FlushDungeonState()
+    {
+        if (!ModuleCleanup.Run(_logger, Name,
+            () => { if (_dungeons?.Save() == true) _diagnostics.DungeonStateSaved(UnityEngine.Time.unscaledTime, _dungeons.Count); },
+            () => _pinState?.Save(), () => _runestones?.Save(), () => _spawners?.Save())) throw new IOException("Dungeon/pin/landmark state could not be flushed.");
+    }
+
     public void Shutdown()
     {
         IsActive = false;
@@ -196,7 +228,8 @@ public sealed class SharedMap : IServerModule
         _processing.Reset();
         var registration = _presenceRegistration;
         _presenceRegistration = null;
-        ModuleCleanup.Run(_logger, Name, () => registration?.Dispose(), StopController, FlushStore, FlushPortalState, FlushResourceState);
-        _exploration = null; _store = null; _bootstrap = null; _portalRefresh = null; _world = null; _worldUid = 0; _resources = null; _resourceRefresh = null;
+        ModuleCleanup.Run(_logger, Name, () => registration?.Dispose(), StopController, FlushStore, FlushPortalState, FlushResourceState, FlushDungeonState);
+        _exploration = null; _store = null; _bootstrap = null; _portalRefresh = null; _world = null; _worldUid = 0; _resources = null; _resourceRefresh = null; _dungeons = null; _pinState = null;
+        _runestones = null; _spawners = null;
     }
 }

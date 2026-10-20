@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.55
+
+- Added optional InfiniteTorches refilling for campfires, hearths and bonfires. IncludeFireplaces defaults off, with separate Campfires, Hearths and Bonfires controls for choosing which types receive free fuel.
+- Added DungeonMarkerSync, enabled by default, with persistent labeled hammer markers at supported dungeon exterior entrances.
+- Added optional dungeon discovery in previously explored community terrain, disabled by default and independent of resource discovery.
+- Added AllowPlayerMapWrites so server owners can reject player uploads while automatic exploration, markers and Read Map continue.
+- Added short remaining-pickup percentages for supported dungeons, including permanent core, Fenris Hair and ancient gemstone pickups. DungeonLootProgress independently hides percentages while retaining entrance markers and saved progress.
+- Added optional shared X checkmarks, off by default, with persistent state and vanilla marker-adoption handling.
+- Added RunestoneMarkerSync and SpawnerMarkerSync, both enabled by default, for placed lore runestones and visible, player-destructible recurring spawner objects. Hidden creature-spawn points are excluded. Each has one independent switch and automatically includes eligible points in community-explored terrain.
+- Added a warning when enabled spawner discovery has no compatible source types, with catalog rejection details available in Debug logs.
+- Removed confirmed destroyed spawner markers while retaining discovery history across restarts; killing a spawned creature does not remove its source marker.
+- Suppressed duplicate dungeon publications within ten metres of a fixed entrance anchor and clean nearby uploaded dungeon-labeled hammer copies, including stale percentage labels. Preserve other player notes and separate saved entrance histories.
+- Added configurable resource-marker spacing: hide resource pins within ten metres of another generated landmark by default, retaining resource history and depletion tracking.
+- Reduced packet-copying, repeated map decompression and temporary allocations in dungeon scans, player tracking and routed-message observation while retaining existing scan intervals and validation.
+- Rejected malformed compressed map uploads while preserving prior table data.
+- Updated SharedMap guides, marker backup coverage and illustrations, with shared safety/client limitations collected in one page.
+
 ## 0.1.54
 
 - Added SharedMap resource markers for outdoor Copper, Tin, Silver, Obsidian and supported static Flametal deposits, with independent controls enabled by default and no client mod required.

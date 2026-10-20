@@ -1,27 +1,31 @@
 # AFKNightWatch
 
-Coordinates majority sleep and prevents inferred-idle players from blocking sleep. Clients need no mod. AFKRaidWatch controls raid protection independently.
+Coordinates majority sleep and excludes inferred-idle players from sleep voting. AFKRaidWatch controls raids independently. See [server setup](../server-setup.md#afknightwatch), [AFK limitations](../limitations.md#afk-detection-sleep-and-raids), and the [specification](../specs/afk-night-watch.md).
 
-![AFKNightWatch: infer activity, count sleepers and begin sleep after the configured grace; defaults require more than half of non-idle players, with normal bed and time-of-day rules](../images/afk-night-watch-workflow.jpg)
+![AFKNightWatch: count eligible sleepers and apply the configured majority and grace period](../images/afk-night-watch-workflow.jpg)
 
-Health changes never count as player activity. Food-related health loss, regeneration and incoming damage neither postpone AFK nor end an existing AFK state. Other activity signals still apply; death and unavailable player data retain their existing eligibility rules. See the [shared observation contract](../architecture.md#player-activity).
+## Sleep rules
 
-Defaults require strictly more than half of non-idle participants: one of two is insufficient, two of three is enough. A known living player must actually be in bed. Once the threshold is met while some players remain outside bed, sleep waits 30 real seconds by default so others can reach bed. If everyone gets into bed, sleep can start immediately. Losing the threshold or reliable tracking restarts the wait. SleepDelaySeconds accepts 0–300; zero removes the wait. Native bed requirements, afternoon/night allowance, cooldown and broadcasts remain. Inferred idle defaults to five minutes without observed activity; some local camera/menu/inventory actions are invisible.
+Defaults require strictly more than half of non-idle participants: one of two is insufficient; two of three is enough. A living player must be in bed. Once quorum is met while others remain outside bed, the default 30-second grace gives them time to join. Everyone in bed bypasses the wait. Lost quorum or reliable tracking restarts it. Native bed requirements, afternoon/night allowance and cooldown remain.
 
-`[AFKNightWatch] Enabled` controls sleep. MajoritySleepEnabled and ExcludeAFKFromSleep can be chosen independently. Turning majority off retains unanimity among non-excluded participants; turning exclusion off keeps idle players in the vote. Majority sleep alone does not require AFK tracking. Shared thresholds live under `[PlayerActivity]`. Stop the server before edits and restart to apply them. See [server configuration](../server-setup.md#afknightwatch), [specification](../specs/afk-night-watch.md) and [supported environment](../server-setup.md#supported-environment).
+Majority and AFK exclusion are independent. Disabling majority requires unanimity among non-excluded participants. Disabling exclusion retains idle players in the vote. Majority sleep alone does not start AFK tracking.
 
-DebugMode defaults false, is generated even for disabled features and follows [global/hidden precedence](../server-setup.md#configuration). Sleep summaries describe relevant votes and server outcomes, with observation ages and unknown values; a met quorum does not prove a completed skip. Detailed actor observations appear under PlayerActivity when PlayerActivity.DebugMode, global debug or a registered consumer permits shared diagnostics, unless suppressed in PlayerActivity; ordinary AFK entry/exit notices remain visible with debugging off. Raid debug does not enable sleep output. Changed summaries and bounded details follow the [logging contract](../architecture.md#repetition-and-volume-limits), including the [five-minute empty-server pause](../architecture.md#empty-server-debug-pause). Warnings, errors and requested reports remain available. The specification describes remaining diagnostic incident limitations.
+## Configuration
 
-Player-dependent processing pauses when the server becomes empty or player presence is unavailable, and resumes on the first joined player once required world services are ready. Additional connections do not restart processing. The feature stays configured Enabled during this pause; native game systems continue. See the [presence lifecycle](../architecture.md#presence-driven-lifecycle).
+Settings belong under `[AFKNightWatch]`; stop the server before edits and restart afterward.
 
-AFK entry and exit notices appear at Info even with debugging off, naming the player and reporting the current AFK count out of joined players. Only actual classification changes produce notices. Disconnects or lost tracking carry a reason; unavailable tracking does not imply the player became active. These notices are shared across the AFK features.
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| Enabled | true | Enable sleep rules. |
+| MajoritySleepEnabled | true | Use the configured quorum. |
+| ExcludeAFKFromSleep | true | Remove eligible idle non-sleepers from the vote. |
+| RequiredSleepingPercent | 50 | Percentage threshold; 1–100. |
+| RequireMoreThanPercent | true | Strictly exceed the threshold; 100 requires everyone. |
+| SleepDelaySeconds | 30 | Continuous quorum grace; 0–300 real seconds. |
+| DebugMode | false | Feature diagnostics through the [shared debug policy](../server-setup.md#configuration). |
 
-Gameplay lifecycle uses the shared joined-world state, established by native character spawning rather than an incoming connection or login handshake. After its own cleanup completes, the module acknowledges an empty-server pause to the shared service. One shared PlayerPresence notice confirms all features are inactive until a player joins; individual empty-server notices are suppressed. After a player joins, the shared active notice waits for successful initialization of all enabled consumers. Each enabled module reports Ready once when its required dedicated-server services become available, regardless of players. This indicates readiness to process, not installed player-dependent hooks or a verified gameplay effect. Individual processing activation and pause reasons belong in Debug, including later starts; no per-feature Resumed notice appears in normal output. Death/respawn does not end a joined session. See the [shared lifecycle](../architecture.md#presence-driven-lifecycle).
+Shared idle thresholds and activity signals are defined under [PlayerActivity](../server-setup.md#playeractivity). Health changes do not count as activity.
 
-Normal logs report one confirmed sleep start under the configured rules while some players were not in bed. Ordinary unanimous sleep, pending waits and generic sleep endings produce no feature result notice. Debug explains the settings, observed player counts, required sleepers and delay behind the decision, alongside native timing evidence.
+## Diagnostics
 
-A startup Debug policy entry identifies whether global or feature DebugMode enables diagnostics, or the hidden override suppresses them. It requires the [loader Debug filters](../server-setup.md#configuration) even when explaining suppression.
-
-Detected loader Debug filtering is explained by a Warning followed immediately by Info instructions for the affected outputs; see [server configuration](../server-setup.md#configuration).
-
-The shared [hidden version override](../server-setup.md#hidden-version-override) lets an operator authorize one exact game version after reviewing compatibility. It does not validate gameplay or bypass this feature's runtime checks.
+Info reports confirmed sleep starts assisted by these rules while some players were outside bed. Debug explains participants, sleepers, exclusions, required count, grace and native timing. Shared PlayerActivity owns named AFK entry/exit notices, visible with debugging off. Sleep and raid diagnostics remain independent.

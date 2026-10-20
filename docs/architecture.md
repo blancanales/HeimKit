@@ -2,111 +2,26 @@
 
 ## Scope and current status
 
-HeimKit is a C# BepInEx plugin for Windows Valheim dedicated servers. Supported game, loader and framework versions are documented in [server setup](server-setup.md#supported-environment). Its independently configurable modules are InfiniteTorches, WeatherGuard, AFKNightWatch, AFKRaidWatch and SharedMap. SharedMap defaults enabled and owns persistent community exploration and table map-data filtering described in [its specification](specs/shared-map.md). Its optional PortalMarkerSync subfeature also defaults enabled and maintains player-built portal markers; ResourceMarkerSync optionally records outdoor metal/Obsidian discoveries, enabled by default; other location/resource families remain outside scope.
+HeimKit is one C# BepInEx plugin for Windows dedicated servers. InfiniteTorches, WeatherGuard, AFKNightWatch, AFKRaidWatch and SharedMap are independently configured modules. SharedMap owns terrain/table filtering and optional portal, resource, dungeon, runestone and recurring-spawner markers. See [feature specifications](specs) for behavior and [supported environment](server-setup.md#supported-environment) for versions.
 
-The current distribution is one plugin DLL with independently controlled modules. Shared code is allowed. Each module must work without another module being enabled. Windows-only support is an explicit product constraint until Linux support is explicitly added.
-
-WeatherGuard is under `src/HeimKit/Features/WeatherGuard/`; see [its specification](specs/weather-guard.md). Its configuration uses `[WeatherGuard]`. Its code moves eligible player-built structural-piece processing to the server, loads supporting context and filters client state while preserving existing creators and native commands. Enabled is its feature switch. World-created claiming is inactive.
-
-
-This document explains the project-wide design. [Contributing](contributing.md) gives the procedure for adding and organizing code. [Feature specs](specs) define individual behavior. [README.md](../README.md) provides the project overview and links to detailed documents. [AGENTS.md](../AGENTS.md) directs contributors to these documents.
+Modules must work with unrelated modules disabled and isolate failures/cleanup. This document owns shared design; [contributing](contributing.md) owns procedures, [server setup](server-setup.md) owns operations, and [limitations](limitations.md) owns user-facing caveats.
 
 ## File placement
 
 ```text
-HeimKit/
-  AGENTS.md
-  README.md
-  LICENSE
-  build.ps1
-  Publish-Thunderstore.ps1
-  config/
-    heimkit.cfg
-  docs/
-    architecture.md
-    contributing.md
-    server-setup.md
-    world-backups.md
-    development.md
-    images/
-      icon.png
-      heimkit-banner.jpg
-      feature-overview.jpg
-      server-installation.jpg
-    features/
-      infinite-torches.md
-      weather-guard.md
-      afk-night-watch.md
-      afk-raid-watch.md
-    specs/
-      infinite-torches.md
-      weather-guard.md
-      afk-night-watch.md
-      afk-raid-watch.md
-  src/
-    HeimKit/
-      HeimKit.csproj
-      Plugin.cs
-      Configuration/
-        ConfigurationLoader.cs
-        DiagnosticsSettings.cs
-        PlayerActivitySettings.cs
-      Shared/
-        IServerModule.cs
-        Players/
-          PlayerServices.cs
-          IPlayerPresence.cs
-          PlayerPresence.cs
-          IPlayerActivityObservations.cs
-          PlayerActivityService.cs
-          PlayerActivityTracker.cs
-          PlayerActivityDiagnostics.cs
-          PlayerActivityNotices.cs
-          RoutedActivityReader.cs
-          ActivitySamples.cs
-          Models/
-      Features/
-        WeatherGuard/
-          WeatherGuard.cs
-          WeatherGuardSettings.cs
-          WeatherGuardController.cs
-          WeatherGuardDiagnostics.cs
-          WeatherGuardPatches.cs
-          WeatherGuardRules.cs
-          WeatherGuardNetworkFilter.cs
-          Models/
-            Routing.cs
-            WeatherGuardStatus.cs
-            WearObservation.cs
-            RainEvidence.cs
-            WearProcessingState.cs
-        AFKNightWatch/
-          AFKNightWatch.cs
-          AFKNightWatchSettings.cs
-          AFKNightWatchController.cs
-          AFKNightWatchDiagnostics.cs
-          AFKNightWatchSleepVoteCoordinator.cs
-          AFKNightWatchSleepQuorumRules.cs
-          Models/
-            NightWatchStatus.cs
-        AFKRaidWatch/
-          AFKRaidWatch.cs
-          AFKRaidWatchSettings.cs
-          AFKRaidWatchController.cs
-          AFKRaidWatchDiagnostics.cs
-          AFKRaidWatchPatches.cs
-          AFKRaidWatchRules.cs
-          Models/
-            RaidWatchStatus.cs
-        InfiniteTorches/
-          InfiniteTorches.cs
-          InfiniteTorchesController.cs
-          InfiniteTorchesSettings.cs
-          InfiniteTorchesDiagnostics.cs
-          InfiniteTorchesPendingRefills.cs
-          Models/
-            RefillObservation.cs
-            RefillRequest.cs
+AGENTS.md, README.md, LICENSE
+src/HeimKit/
+  Plugin.cs
+  Configuration/        # Shared settings, loading and compatibility
+  Shared/               # Logging, lifecycle and player services
+  Features/<Name>/      # Settings, lifecycle, processing, diagnostics and Models/
+config/heimkit.cfg      # Optional reference defaults
+docs/
+  features/             # User guides
+  specs/                # Feature contracts
+  architecture.md, contributing.md, server-setup.md, development.md
+  limitations.md, world-backups.md
+  images/
 ```
 
 | Responsibility | Location |
@@ -118,7 +33,7 @@ HeimKit/
 | Optional example configuration | `config/heimkit.cfg` |
 | Module behavior and acceptance criteria | `docs/specs/<feature-name>.md` |
 
-Use one folder inside Features for each module. Put its class files inside that folder, not directly under Features. Move a helper to Shared when multiple implemented features actually use it or it defines an application-wide contract. Future reuse alone does not qualify. Shared code must not implicitly enable a module or require another module's private state.
+Use one folder inside Features for each module. Put its class files inside that folder, not directly under Features. Shared helpers require multiple implemented consumers or an application-wide contract. Shared code must not implicitly enable a module or require another module's private state.
 
 ## Naming
 
@@ -222,7 +137,7 @@ Ordinary output answers whether a feature is enabled, ready, paused or resumed; 
 
 Group records at the producer's logical-operation boundary using operational results, not by comparing already-formatted lines. A batch of torch updates or raid candidate exclusions produces one count; an unsupported-prefab lookup produces one warning with grouped reason counts. Emit nothing for empty or unchanged batches. Flush only completed operations, clear batches on failure/pause/shutdown, and keep new passes separate. Nested native raid scopes share the outer batch. Actual time-skip transitions are naturally single events regardless of the number of sleepers or repeated votes. Do not delay a first failure, a lifecycle transition or a requested report to wait for unrelated messages. Different failures, feature states and named players retain their identities; they are not interchangeable merely because they occur consecutively.
 
-Normal results describe observed server effects rather than assumed causes. Sleep time-skip ending does not prove that morning was reached or all clients slept successfully. Excluding candidate locations does not establish that a raid would otherwise have started, that all locations were excluded or that an existing raid was canceled. WeatherGuard acquisition is not proof of prevented damage. Log collection and formatting remain observational and cannot change gameplay choices or native exception propagation.
+Log results must name the observed operation/outcome and preserve native execution/exception behavior. Shared interpretation and causality limits belong in [server observations and logs](limitations.md#server-observations-and-logs).
 
 ### Debug policy startup declaration
 
@@ -256,13 +171,15 @@ Deduplication uses stable feature/event/reason identities and relevant object or
 
 Each feature emits at most one SUMMARY per 60 seconds. WeatherGuard Medium output contains up to twelve compact qualifying-item protection RESULT samples per summary, prioritizing new/changed status under the semantic deduplication rules above. Its level and optional world-created inclusion are defined in WeatherGuardSettings; global OR feature DebugMode enables diagnostics. Medium skips detailed evidence collection. In Detailed mode, WeatherGuard reserves one processing-counter DETAIL alongside that summary and at most six watched-object RESULT records. OBJECT, ACTION and additional DETAIL categories each allow six samples per 60 seconds; native command RESULT samples have a separate six-message allowance. Wear DETAIL selection also limits each protected/unprotected and exposed/covered group to three distinct candidates per window. InfiniteTorches emits one ordinary Info count per reconciliation pass with observed sufficient fuel updates, never one Info entry per torch; empty/unconfirmed passes stay quiet. InfiniteTorches allows four request ACTION records and six outcome RESULT records per 60 seconds. All pending refill outcomes use its Diagnostics formatter; per-pass output cannot bypass the shared limits. Summaries report `omitted_messages_interval` when event samples exceed their allowance. These are omitted log attempts, not lost gameplay measurements.
 
-Log conclusions state precisely what is observed: installed patches are readiness, bypassing a weather branch is processing evidence, replicated fuel increases are state observations, and none of these alone establishes client presentation or a delivery acknowledgement. Explicit server-operator coverage reports use normal requested output independently of automatic debug enablement, suppression and sample budgets; they do not turn diagnostics on. Report the observed blocker, rather than an unexplained collection of booleans or a guessed cause. Keep supporting metadata only where it helps explain the result. Feature-specific measurement contracts belong in their current specifications.
+Explicit operator reports use Info independently of automatic budgets and Debug settings. Report observed blockers with supporting metadata; feature-specific fields belong in the current specification.
 
 ## Player activity
 
 `Shared/Players/PlayerServices` is owned by Plugin and injected into all feature constructors. Its IPlayerPresence source takes one native peer census per update. ConnectedCount counts transport peers (including incoming/loading connections); ReadyCount counts completed native handshakes, which alone do not establish world entry. JoinedCount and HasJoinedPlayers drive gameplay lifecycle notifications. A native ready peer joins once the server receives a nonempty CharacterID, registered by Game.SpawnPlayer after creating the character. Keep that same peer session joined during death/respawn, when CharacterID can temporarily become empty. Disconnect removes the session; a new peer object must establish its own spawn even if it reuses an ID. World replacement resets joined tracking. Unavailable observations pause consumers without falsely announcing a logout. The Debug startup/empty grace still uses transport presence so loading diagnostics remain visible. Null counts mean unavailable, never zero.
 
 PlayerConnectionNotices emits an immediate PlayerPresence Info entry for each named character connection and disconnection, using the same PlayerPresence census with no AFK lease or Debug requirement. A connection is established at the first ready character spawn, not a transport handshake. Cache the native peer ID and character name by peer object so a departure retains its identity after native fields disappear and separate sessions with the same name or reused peer ID remain distinct. Keep the last nonblank observed name, normalize control characters, bound names to 128 characters and fall back to the peer ID if absent. Preserve session records across unavailable observations and death/respawn; only absence from a successful peer census establishes a disconnection. Clear session records silently on world replacement and shutdown. These per-player notices remain separate from coordinated aggregate feature-status notices.
+
+Refresh live readiness and character/session state each update, but reuse the peer snapshot array while its ordered peer references are unchanged. Connection notices reuse census/departure buffers and sanitize names only when the raw name changes. Routed-message observers refresh their iteration snapshot only on subscription changes; callback removal/failure still prevents later delivery to a removed subscriber and restores the packet cursor for each consumer.
 
 PlayerPresenceEvents coordinates PlayerPresenceDiagnostics with consumer cleanup. Emit `PlayerPresence: No players have joined the world; all features are inactive until a player joins.` once for initial zero joined players and once after the last joined session leaves, only after every registered enabled gameplay consumer acknowledges completed cleanup. Do not emit individual empty-server pauses or repeat the aggregate while empty. Disabled/incompatible modules have no gameplay registration and do not hold up the aggregate. With no enabled consumers, the empty notice still establishes occupancy. A failed empty/unavailable callback blocks the aggregate for that empty interval even after failure isolation removes the subscription; retain error reporting and continue other consumers. A new joined interval resets this coordination. Unknown population is not empty and preserves the last announced occupancy. Emit `PlayerPresence: Players have joined the world; all enabled features are active.` once after all registered enabled consumers confirm successful initialization for the first joined session. Delayed native readiness defers the notice; additional joins do not repeat it. Check activation after callbacks and module ticks. An inactive consumer removed during an occupied interval blocks an activation claim for that interval. Incoming connections, completed handshakes without character spawning, additional joins and respawns do not produce occupied transitions.
 
@@ -272,13 +189,13 @@ Register live server-ready, empty-cleanup and running-state getters with Events.
 
 `Shared/Players/PlayerActivityService` implements `IPlayerActivityObservations`. `Configuration/PlayerActivitySettings` binds the five restart-required detection settings and a visible DebugMode defaulting false under `[PlayerActivity]`. Its shared DebugLoggingPolicy resolves the manual-only DisableDebugLogging override in the same section. Models live under `Shared/Players/Models`; tracker, routed reader, transition samples and observation counters use responsibility-based shared names. Sleep policy and evidence stay in AFKNightWatch; raid policy and evidence stay in AFKRaidWatch.
 
-The service samples ready peers' valid, network-owned characters while retaining loading peers as unknown observations. Known does not mean active: distinguish Known/Alive/InBed from inferred Idle and consult Reliable after Snapshot. Unknown/nonfinite/loading records and known dead actors are never inferred idle. Preserve native eligibility on unavailable service or unreliable inference; sleep also requires a known living bed sleeper. Idle is server inference, not verified human absence. Movement is cumulative from the activity anchor; replicated body rotation, equipment and emote changes count, and bed/station occupancy holds players active. Health changes never count as activity, including food-related decline, regeneration and incoming damage. Camera-only input and unsent inventory, map, menu or input actions may be invisible.
+The service samples ready peers' valid, network-owned characters while retaining loading peers as unknown observations. Known does not mean active: distinguish Known/Alive/InBed from inferred Idle and consult Reliable after Snapshot. Unknown/nonfinite/loading records and known dead actors are never inferred idle. Preserve native eligibility on unavailable service or unreliable inference; sleep also requires a known living bed sleeper. Movement is cumulative from the activity anchor; replicated body rotation, equipment and emote changes count, and bed/station occupancy holds players active. Health changes never count as activity, including food-related decline, regeneration and incoming damage. Visibility limits are defined in [AFK limitations](limitations.md#afk-detection-sleep-and-raids).
 
 Health is read only to establish finite actor data and living/dead eligibility. No health increase or decrease resets the activity timer or exits AFK. Native Player.UpdateFood can lower maximum health and clamp current health without damage; incoming damage also does not demonstrate player input. Maximum health and damage cause are therefore unnecessary for activity classification. Death, loading and unreliable observations retain their existing exclusion and recovery rules. Existing authenticated routed activity remains independent: an observed outgoing RPC_Damage counts for its authenticated sender, not the target. No health, ownership, damage handling or network traffic is modified, and no client changes are required.
 
-The native replicated crafting animation holds station users active. Authenticated routed chat, animation triggers and native damage/repair/removal/container actions reset activity where observed; housekeeping does not. The observer associates the physical RPC connection with a ready peer and owned character, checks the serialized sender, and restores the packet cursor without modifying bytes, recipients, parameters or native execution. It does not install custom client handlers or claim every client action is visible. A native container-open request holds a ten-second pending grace; an observed container owned by that peer with native InUse remains active until released. It stores at most one target per connected peer and does not load containers, change ownership or read inventories.
+The native replicated crafting animation holds station users active. Authenticated routed chat, animation triggers and native damage/repair/removal/container actions reset activity where observed; housekeeping does not. The observer associates the physical RPC connection with a ready peer and owned character, checks the serialized sender, and restores the packet cursor without modifying bytes, recipients, parameters or native execution. It installs no custom client handlers. A native container-open request holds a ten-second pending grace; an observed container owned by that peer with native InUse remains active until released. It stores at most one target per connected peer and does not load containers, change ownership or read inventories.
 
-Unknown/nonfinite actor data, death, character changes, reconnects, wall-clock rollback and observation gaps longer than three sample intervals plus one second reset inference and grace. Bed occupants remain active actual sleepers. Passive health regeneration does not count as activity. Sampling uses unscaled wall-clock time, so night skipping does not advance the idle clock. Connected actor capacity is 4,096; overflow inserts uncertainty, emits a bounded ordinary warning and retains native decisions. Observer failures clear inference and use the shared warning-incident limits; native packets still execute.
+Unknown/nonfinite actor data, death, character changes, reconnects, wall-clock rollback and observation gaps longer than three sample intervals plus one second reset inference and grace. Bed occupants remain active actual sleepers. Sampling uses unscaled wall-clock time, so night skipping does not advance the idle clock. Connected actor capacity is 4,096; overflow inserts uncertainty, emits a bounded ordinary warning and retains native decisions. Observer failures clear inference and use the shared warning-incident limits; native packets still execute.
 
 ### Ordinary AFK notices
 
@@ -327,7 +244,7 @@ Current hookups:
 | AFKRaidWatch | Automatic raid candidate hooks | While its ready controller runs | None |
 | InfiniteTorches | Refill controller and pending requests | None | None |
 | WeatherGuard | Protection controller, gameplay hooks and retained ownership | None | Explicit coverage requests (administration/status) |
-| SharedMap | Position sampling, portal/resource discovery, depletion observation, grouping/publication selection, table initialization and map-field filtering; world map and publication state retained across pauses | None | Dirty terrain/discovery/publication-state saves and lifecycle flushes (save management); absent-file first-run read-only table import (intentional offline world processing) |
+| SharedMap | Position sampling, portal/resource/dungeon/runestone/spawner discovery, depletion observation, grouping/publication selection, table initialization and map-field filtering; world map and publication state retained across pauses | None | Dirty terrain/discovery/publication-state saves and lifecycle flushes (save management); absent-file first-run read-only table import (intentional offline world processing) |
 
 ### Integrating a consumer
 
@@ -358,10 +275,10 @@ The root `CHANGELOG.md` owns concise user-facing release notes for Thunderstore,
 
 The root README introduces HeimKit's value for users, describes each feature's benefits and high-level expectations, summarizes compatibility and essential limitations, and links to usage guides and specifications under docs. It also contains a documentation index and license information. Detailed operational and technical content stays in its owning document. The canonical content-placement rules are in [contributing](contributing.md#update-documentation).
 
-The [Supported environment section of server setup](server-setup.md#supported-environment) is the sole documentation source for supported version values; all other documents link there, including the README and development references. Server setup also owns shared operational instructions. Development owns build commands and external development references. Each feature guide owns usage and diagnostic interpretation; each feature specification owns implementation behavior and technical contracts. Cross-link these documents rather than copying their detailed content.
+The [Supported environment section of server setup](server-setup.md#supported-environment) is the sole documentation source for supported version values; all other documents link there, including the README and development references. Server setup also owns shared operational instructions. Development owns build commands and external development references. Each feature guide owns usage/settings/diagnostic fields; each specification owns implementation contracts. User-facing safety and gameplay/client/log caveats belong in [limitations](limitations.md). Cross-link these documents rather than copying their detailed content.
 
 Keep one current guide and one current specification per feature. Do not append development journals, abandoned designs, per-release histories, task tracking, completion checkboxes or passed/pending test inventories. Testing instructions, results and validation-status notes belong only in the active chat; follow the [chat-only rule](contributing.md#testing-information-belongs-in-chat-only). Keep architecture and agent files focused on durable project rules. Git provides source history.
 
 WeatherGuard retains the shared DebugLoggingPolicy through its controller and diagnostics, rather than copying an initial boolean. Each diagnostic opportunity reads the current loaded global-or-feature setting and suppression/activity gates. This does not add automatic configuration-file reload; file edits still require the documented restart.
 
-When feature diagnostics are configured on, startup checks the currently registered native disk and console listeners. A known listener excluding Debug produces one visible feature Warning identifying its LogLevels setting, immediately followed by Info messages explaining the independent loader filter, the config file and each affected section with a LogLevels example, preservation of existing levels and the required restart. The explanation also states that feature DebugMode can operate with global HeimKit DebugMode off. Intentional hidden suppression does not produce a delivery warning. The check does not alter loader settings or infer the behavior of unknown/custom listeners.
+DebugLoggingDelivery inspects known native listeners during startup and explains excluded Debug severity through Warning/Info. It preserves listener settings; the operator procedure is in [server configuration](server-setup.md#diagnostics).

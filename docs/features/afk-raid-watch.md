@@ -1,27 +1,21 @@
 # AFKRaidWatch
 
-Helps protect idle-only locations from new normal automatic random raids. It is an independent Windows dedicated-server feature; clients need no mod. AFKNightWatch separately controls sleep.
+Protects inferred-idle-only locations from new automatic random raids. AFKNightWatch controls sleep independently. See [server setup](../server-setup.md#afkraidwatch), [AFK limitations](../limitations.md#afk-detection-sleep-and-raids), and the [specification](../specs/afk-raid-watch.md).
 
-![AFKRaidWatch: check nearby players in native raid range, exclude qualifying idle-only locations and retain eligibility for active or uncertain players; existing raids and ordinary enemies remain](../images/afk-raid-watch-workflow.jpg)
+![AFKRaidWatch: exclude qualifying idle-only locations from automatic raid selection](../images/afk-raid-watch-workflow.jpg)
 
-Health changes never count as player activity. Food-related health loss, regeneration and incoming damage neither postpone AFK nor end an existing AFK state. Other activity signals still apply; death and unavailable player data retain their existing eligibility rules. See the [shared observation contract](../architecture.md#player-activity).
+## Protection rules
 
-Protection uses the native local event range. Every relevant nearby actor must be known, alive, outside beds and inferred idle. Active or uncertain nearby players retain normal eligibility. An active player elsewhere does not remove an idle-only area's protection. Existing raids, explicit/admin, forced/scripted and standalone events continue normally. This does not grant invulnerability or prevent ordinary enemies.
+Within native event range, every relevant nearby player must be known, alive, outside beds and inferred idle. Active, dead, loading or uncertain nearby players retain normal eligibility. Active players elsewhere do not remove protection from an idle-only area.
 
-`[AFKRaidWatch] Enabled` alone controls protection and defaults true. DebugMode defaults false. Shared idle thresholds live in `[PlayerActivity]`, defaulting to five minutes idle and one minute join/recovery grace. Detection runs during daylight whenever either enabled consumer needs it. Inferred idle cannot prove human absence; some client-local actions remain invisible. Stop the server before edits and restart. See [configuration](../server-setup.md#afkraidwatch), [specification](../specs/afk-raid-watch.md) and [supported environment](../server-setup.md#supported-environment).
+Only ordinary automatic random-event selection is filtered. Existing raids, explicit/admin events and forced/scripted events retain native behavior. Detection continues during daylight while an enabled consumer needs it.
 
-Global or feature debugging follows [hidden suppression](../server-setup.md#hidden-per-feature-debug-suppression). Raid summaries describe actual supplied-candidate evaluations, exclusions and observed event outcomes with ages. Targeted details describe local populations, native gate/hook evidence and start/setter observations; they do not prove client delivery, enemy spawning or causality. Detailed PlayerActivity observations appear when PlayerActivity.DebugMode, global debug or a registered consumer permits shared diagnostics, unless suppressed in PlayerActivity; ordinary AFK entry/exit notices remain visible with debugging off; raid debug does not enable sleep diagnostics. Bounded streams follow the [repetition contract](../architecture.md#repetition-and-volume-limits) and [empty-server pause](../architecture.md#empty-server-debug-pause). Empty servers skip HeimKit filtering while native schedulers continue. The specification describes remaining diagnostic incident limitations.
+## Configuration
 
-Player-dependent processing pauses when the server becomes empty or player presence is unavailable, and resumes on the first joined player once required world services are ready. Additional connections do not restart processing. The feature stays configured Enabled during this pause; native game systems continue. See the [presence lifecycle](../architecture.md#presence-driven-lifecycle).
+`[AFKRaidWatch] Enabled = true` controls protection; `DebugMode = false` controls feature diagnostics through the [shared debug policy](../server-setup.md#configuration). Stop the server before edits and restart afterward.
 
-AFK entry and exit notices appear at Info even with debugging off, naming the player and reporting the current AFK count out of joined players. Only actual classification changes produce notices. Disconnects or lost tracking carry a reason; unavailable tracking does not imply the player became active. These notices are shared across the AFK features.
+Shared thresholds live under [PlayerActivity](../server-setup.md#playeractivity), with defaults of five minutes idle and one minute join/recovery grace. Health changes do not count as activity. This feature works with sleep rules disabled.
 
-Gameplay lifecycle uses the shared joined-world state, established by native character spawning rather than an incoming connection or login handshake. After its own cleanup completes, the module acknowledges an empty-server pause to the shared service. One shared PlayerPresence notice confirms all features are inactive until a player joins; individual empty-server notices are suppressed. After a player joins, the shared active notice waits for successful initialization of all enabled consumers. Each enabled module reports Ready once when its required dedicated-server services become available, regardless of players. This indicates readiness to process, not installed player-dependent hooks or a verified gameplay effect. Individual processing activation and pause reasons belong in Debug, including later starts; no per-feature Resumed notice appears in normal output. Death/respawn does not end a joined session. See the [shared lifecycle](../architecture.md#presence-driven-lifecycle).
+## Diagnostics
 
-When a normal automatic selection excludes AFK-only candidates, one normal-log entry reports the excluded count for that selection pass. It does not claim that a raid was prevented or canceled; other candidates can remain eligible. Individual locations and reasons remain in Debug.
-
-A startup Debug policy entry identifies whether global or feature DebugMode enables diagnostics, or the hidden override suppresses them. It requires the [loader Debug filters](../server-setup.md#configuration) even when explaining suppression.
-
-Detected loader Debug filtering is explained by a Warning followed immediately by Info instructions for the affected outputs; see [server configuration](../server-setup.md#configuration).
-
-The shared [hidden version override](../server-setup.md#hidden-version-override) lets an operator authorize one exact game version after reviewing compatibility. It does not validate gameplay or bypass this feature's runtime checks.
+Info groups excluded candidates once per native automatic selection pass. Debug explains local population, eligibility reasons, native gates and observed event transitions. Shared PlayerActivity owns named AFK entry/exit notices, visible with debugging off. Raid debugging does not enable sleep diagnostics.

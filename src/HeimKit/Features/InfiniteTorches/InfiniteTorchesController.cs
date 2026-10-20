@@ -25,6 +25,7 @@ internal sealed class InfiniteTorchesController : IDisposable
     private readonly Dictionary<long, ZNetPeer> _owners = new();
     private ZNetScene? _scene;
     private string _configuredNames = "";
+    private int _configuredFireplaces;
     private float _nextTick;
     private int _cursor;
     private bool _announced;
@@ -75,7 +76,7 @@ internal sealed class InfiniteTorchesController : IDisposable
             }, result => { Count(result.Outcome); _diagnostics.Result(now, result); });
             _diagnostics.RefillSummary(fuelUpdates);
             operation = "resolving configured light-source prefabs";
-            if (_scene != scene || _configuredNames != _settings.Prefabs.Value) LoadPrefabs(scene);
+            if (_scene != scene || _configuredNames != _settings.Prefabs.Value || _configuredFireplaces != _settings.FireplaceSelection) LoadPrefabs(scene);
             if (_torches.Count == 0)
             {
                 _diagnostics.Report(now, () => "No supported light-source prefabs configured. Check Torches.Prefabs and startup warnings.");
@@ -172,7 +173,12 @@ internal sealed class InfiniteTorchesController : IDisposable
         _torches.Clear();
         var rejected = new Dictionary<string, int>();
         int rejectionCount = 0;
+        var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (string raw in _settings.Prefabs.Value.Split(','))
+            if (raw.Trim().Length > 0) names.Add(raw.Trim());
+        foreach (string fireplace in new[] { "fire_pit", "hearth", "bonfire" })
+            if (_settings.FireplaceEnabled(fireplace)) names.Add(fireplace);
+        foreach (string raw in names)
         {
             string name = raw.Trim();
             if (name.Length == 0) continue;
@@ -181,7 +187,7 @@ internal sealed class InfiniteTorchesController : IDisposable
             string? rejection = go == null ? "prefab not found" : fire == null ? "no Fireplace component"
                 : InfiniteTorchesRefillRules.RejectionReason(name, fire.m_canRefill, fire.m_infiniteFuel,
                     fire.m_canTurnOff, fire.m_enabledObjectLow != null || fire.m_enabledObjectHigh != null,
-                    fire.m_maxFuel);
+                    fire.m_maxFuel, _settings.FireplaceEnabled(name));
             if (rejection != null)
             {
                 rejected.TryGetValue(rejection, out int count); rejected[rejection] = count + 1; rejectionCount++;
@@ -192,6 +198,7 @@ internal sealed class InfiniteTorchesController : IDisposable
         _diagnostics.UnsupportedPrefabs(rejectionCount, rejected);
         _scene = scene;
         _configuredNames = _settings.Prefabs.Value;
+        _configuredFireplaces = _settings.FireplaceSelection;
         if (!_announced)
         {
             if (_torches.Count > 0) _module.ProcessingReady();

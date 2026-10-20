@@ -24,6 +24,7 @@ internal static class WeatherGuardNetworkFilterTests
             data.Write(1L); data.Write(new Vector3()); data.Write(length); data.SetPos(0);
             int callbacks = 0;
             Reject(data, p => WeatherGuardNetworkFilter.FilterData(p, _ => true, out _, (_, _, _) => callbacks++));
+            Reject(data, p => WeatherGuardNetworkFilter.FilterData(p, _ => false, out _));
             if (callbacks != 0) throw new Exception("Invalid packet changed authority metadata.");
 
             var routed = new ZPackage();
@@ -50,6 +51,13 @@ internal static class WeatherGuardNetworkFilterTests
         var offset = new ZPackage(); offset.Write(777); expected.Serialize(offset); offset.SetPos(4);
         parsed = WeatherGuardNetworkFilter.ReadRouted(offset);
         if (offset.GetPos() != 4 || parsed.m_targetZDO != id) throw new Exception("Nonzero routing cursor lost.");
+        var state = new ZPackage(); state.Write(777); state.Write(1); state.Write(id); state.Write(ZDOID.None); state.SetPos(4);
+        var same = WeatherGuardNetworkFilter.FilterData(state, _ => false, out int blocked);
+        if (!ReferenceEquals(same, state) || blocked != 0 || state.GetPos() != 4)
+            throw new Exception("Unchanged state packet lost its nonzero cursor or allocated a replacement.");
+        var filtered = WeatherGuardNetworkFilter.FilterData(state, _ => true, out blocked);
+        if (blocked != 1 || state.GetPos() != 4 || filtered.ReadInt() != 0 || !filtered.ReadZDOID().IsNone() || filtered.GetPos() != filtered.Size())
+            throw new Exception("Invalidation-only filtering included the caller prefix or lost the terminator.");
         System.Console.WriteLine("PASS: embedded ZDO/routed lengths rejected before allocation, no invalid-packet metadata callbacks, native routing bytes and cursors preserved.");
     }
 }

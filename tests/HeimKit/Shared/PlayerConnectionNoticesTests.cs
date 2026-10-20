@@ -58,6 +58,11 @@ internal static class PlayerConnectionNoticesTests
             var longName = Peer(15, new string('x', 500));
             notices.Observe(new[] { longName }, new[] { longName });
             Check(records[^1].Text.Contains(new string('x', 128)) && !records[^1].Text.Contains(new string('x', 129)), "Character name length was unbounded.");
+            longName.m_playerName = "Renamed\nPlayer";
+            notices.Observe(new[] { longName }, new[] { longName });
+            notices.Observe(Array.Empty<ZNetPeer>(), Array.Empty<ZNetPeer>());
+            Check(records[^1].Text.Contains("Renamed Player") && records[^1].Text.Contains("disconnected"),
+                "Name caching missed a later name change or lost sanitization.");
             Check(records.All(r => r.Level == LogLevel.Info), "Character notices depended on debugging or used incorrect severity.");
         }
         finally { presence.Clear(); DiagnosticLog.ServerActivity.Reset(); }

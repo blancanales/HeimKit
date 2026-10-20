@@ -20,6 +20,7 @@ public sealed class PlayerRoutedMessages : IDisposable
     private static PlayerRoutedMessages? _current;
     private readonly Harmony _harmony = new("heimkit.player_routed_messages");
     private readonly List<Subscription> _subscriptions = new();
+    private Subscription[] _snapshot = Array.Empty<Subscription>();
     public IDisposable Subscribe(Action<ZRpc, ZPackage> observed, Action<Exception> failed)
     {
         if (_subscriptions.Count == 0)
@@ -34,13 +35,13 @@ public sealed class PlayerRoutedMessages : IDisposable
             catch { _harmony.UnpatchSelf(); _current = null; throw; }
         }
         var subscription = new Subscription(this, observed, failed);
-        _subscriptions.Add(subscription); return subscription;
+        _subscriptions.Add(subscription); _snapshot = _subscriptions.ToArray(); return subscription;
     }
     private static void Observe(ZRpc rpc, ZPackage pkg)
     {
         var current = _current;
         if (current == null) return;
-        foreach (var subscription in current._subscriptions.ToArray())
+        foreach (var subscription in current._snapshot)
         {
             if (!current._subscriptions.Contains(subscription)) continue;
             int cursor = pkg.GetPos();
@@ -55,13 +56,16 @@ public sealed class PlayerRoutedMessages : IDisposable
     }
     private void Remove(Subscription subscription)
     {
-        if (!_subscriptions.Remove(subscription) || _subscriptions.Count != 0) return;
+        if (!_subscriptions.Remove(subscription)) return;
+        _snapshot = _subscriptions.ToArray();
+        if (_subscriptions.Count != 0) return;
         try { _harmony.UnpatchSelf(); }
         finally { if (ReferenceEquals(_current, this)) _current = null; }
     }
     public void Dispose()
     {
         _subscriptions.Clear();
+        _snapshot = Array.Empty<Subscription>();
         try { _harmony.UnpatchSelf(); }
         finally { if (ReferenceEquals(_current, this)) _current = null; }
     }

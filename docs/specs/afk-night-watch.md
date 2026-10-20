@@ -1,5 +1,6 @@
 # AFKNightWatch specification
 
+Gameplay and observation limitations: [safety and limitations](../limitations.md).
 ## Purpose and server-only scope
 
 AFKNightWatch owns configurable majority sleep and inferred-AFK exclusion from sleep on Windows dedicated servers. AFKRaidWatch independently owns raid protection. Clients require no mod. Supported versions appear only in [server setup](../server-setup.md#supported-environment). Native bed ownership, warmth, exposure, enemies, wetness, afternoon/night allowance, cooldown and sleep broadcasts remain unchanged. Other HeimKit features remain independent.
@@ -20,7 +21,7 @@ Disabling majority while retaining exclusion requires every non-idle participant
 
 Plugin owns one [PlayerServices hub](../architecture.md#player-activity). AFKNightWatch leases its activity service only when Enabled and ExcludeAFKFromSleep require inference. Majority sleep alone reads the shared presence character roster without idle tracking. The same observations can serve AFKRaidWatch during daylight; no consumer depends on another feature being enabled. Empty servers skip sampling and custom sleep evaluation while native processing continues. Missing readiness, unreliable inference or shared failure retains native behavior; recovery restarts grace.
 
-The shared detector ignores all health changes as activity, including passive food-related decline, regeneration and incoming damage. Health remains relevant to actor reliability and living/dead eligibility. Other activity signals and recovery rules follow the [shared observation contract](../architecture.md#player-activity), independently of diagnostic switches and without client modification.
+Use the shared [activity signals and recovery rules](../architecture.md#player-activity).
 
 AFKNightWatch owns compatibility, startup and isolated module failure. Its controller owns one activity lease and one sleep-vote registration. AFKNightWatchSleepVoteCoordinator installs one native vote prefix and separate read-only diagnostic observers; AFKNightWatchSleepQuorumRules owns quorum calculation. Models owns SleepDecision, NativeSleepObservation and NightWatchStatus. Shutdown and initialization rollback release every registration safely and repeatedly. Failed optional observations do not remove gameplay hooks.
 
@@ -30,31 +31,24 @@ Info reports configured Enabled/Disabled and one Ready when dedicated-server ser
 
 Sleep summaries contain last relevant participants, sleepers, threshold, excluded idle, native fallback, decision age and observed time-skip outcome/age. They emit at most once per minute on semantic change, with one compact unchanged heartbeat per five minutes. Hook invocation counts and advancing ages alone do not trigger full summaries. No recurring summary is emitted for empty or unobserved sleep-attempt scope. Targeted native sleep RESULT evidence has a separate six-per-minute cap, semantic gate/outcome deduplication and unknown values. One bounded DETAIL exposes sleep-hook counters alongside a changed summary, rather than mixing raid or routed counters into the summary. These streams together remain below the 60-record feature ceiling.
 
-Read-only probes distinguish server sleeping/time-skipping before and after UpdateSleeping, afternoon/night, cooldown, game time, SkipToMorning calls and completed sessions. Registration proves initialization; a met quorum or skip invocation does not establish a completed time skip or client delivery. Significant outcomes retain ages. Shared actor observations and ordinary AFK transitions belong to the shared PlayerActivity service. Its bounded transition queue does not rotate unchanged actors. Warnings and errors remain independent of debug; diagnostic warning notices are throttled to five minutes, but the complete project incident-identity/repeat-count contract is not yet implemented for every diagnostic observer.
+Read-only probes distinguish server sleeping/time-skipping before and after UpdateSleeping, afternoon/night, cooldown, game time, SkipToMorning calls and completed sessions. Significant outcomes retain ages. Shared actor observations and ordinary AFK transitions belong to the shared PlayerActivity service. Its bounded transition queue contains changed actors only. Warnings/errors remain independent of Debug; diagnostic warning notices are throttled to five minutes. Incident-accounting limits are covered in [limitations](../limitations.md#server-observations-and-logs).
 
 ## Native mechanism and limitations
 
-The mechanism derives from the installed supported Game.UpdateSleeping/EverybodyIsTryingToSleep, Bed.Interact, ZNet character ownership and replicated player/routed fields. Proprietary game code is not distributed. Other sleep patches can conflict. Server inference cannot observe every client-local action or prove human absence; initialization and compilation do not establish live Unity behavior.
+The mechanism derives from the installed supported Game.UpdateSleeping/EverybodyIsTryingToSleep, Bed.Interact, ZNet character ownership and replicated player/routed fields. Proprietary game code is not distributed.
 
 ## Presence lifecycle
 
-The enabled module subscribes to Plugin's shared presence events. Empty or unavailable population releases its controller, native hooks and activity lease; the registration remains for reconnection. Occupancy permits controller creation only when the dedicated world is ready. Additional connections do not restart it. Shutdown/failure removes its registration, and a failed module is not automatically restarted by later occupancy. Native gameplay continues while this module is paused. Reconnection recreates resources with fresh activity grace. The registration and cleanup contract is defined in [architecture](../architecture.md#presence-driven-lifecycle).
-
+Use the [presence lifecycle](../architecture.md#presence-driven-lifecycle) and the feature-specific resource ownership below.
 
 ## Player-service integration
 
 Follow the [required hookup](../architecture.md#required-feature-hookup). Plugin injects PlayerServices into AFKNightWatch. The enabled, compatible module owns one presence registration and a controller only while occupied and native player/world services are ready. False/null releases the controller, sleep registration and any activity lease; true resumes with fresh inference grace once ready, with Tick retrying delayed readiness. Additional logins do not recreate resources. Idle inference is leased only when ExcludeAFKFromSleep requires it. Majority sleep alone uses shared presence. No empty-server exception applies. Shutdown/rollback/failure disposes registration and controller independently; failure does not disable other consumers.
 
-Ordinary AFK entry/exit is logged once at Info by the shared detector, with the specific player and current AFK/joined counts, independently of DebugMode. Tracking loss and departures carry explicit reasons; unavailable inference is not reported as observed activity. The feature consumes these states without duplicating notices. See the [AFK logging contract](../architecture.md#ordinary-afk-notices).
-
-Gameplay lifecycle uses the shared joined-world state, established by native character spawning rather than an incoming connection or login handshake. After its own cleanup completes, the module acknowledges an empty-server pause to the shared service. One shared PlayerPresence notice confirms all features are inactive until a player joins; individual empty-server notices are suppressed. After a player joins, the shared active notice waits for successful initialization of all enabled consumers. Each enabled module reports Ready once when its required dedicated-server services become available, regardless of players. This indicates readiness to process, not installed player-dependent hooks or a verified gameplay effect. Individual processing activation and pause reasons belong in Debug, including later starts; no per-feature Resumed notice appears in normal output. Death/respawn does not end a joined session. See the [shared lifecycle](../architecture.md#presence-driven-lifecycle).
+Shared PlayerActivity owns [AFK notices](../architecture.md#ordinary-afk-notices); consumers do not duplicate them.
 
 Standard Info reports one confirmed sleep start under the configured rules while some roster players were not in bed. The accepted known vote must belong to the same native UpdateSleeping call that changes server sleeping/time-skipping from inactive to active. A met quorum, pending delay, cooldown-blocked vote, native error, missing observation, existing skip on initialization or unanimous sleep does not produce this notice. No generic start/end Info is emitted. AFKNightWatchSleepNotices owns transition deduplication and resets on controller disposal. Debug carries the effective majority/exclusion switches, percentage and strictness, configured delay, remaining delay, roster/participant/sleeper/excluded counts and required count; native start/end and timing gates remain optional evidence. Native outcome and notice callbacks preserve native exception propagation. See the [standard logging contract](../architecture.md#standard-feature-events-and-grouping).
 
-Debug policy startup declarations follow the [shared contract](../architecture.md#debug-policy-startup-declaration), identifying global/feature enablement and hidden suppression independently of gameplay enablement.
-
-Detected loader Debug filtering is explained by a Warning followed immediately by Info instructions for the affected outputs; see [server configuration](../server-setup.md#configuration).
-
 ## Game-version compatibility
 
-Before activation, the module uses the shared GameVersionCompatibility policy and compares the observed game version to its exact requirement. The [manual version override](../server-setup.md#hidden-version-override) replaces that requirement without bypassing Enabled, native readiness, API/signature checks or isolated failure handling. Compatibility policy and warning ownership follow [architecture](../architecture.md#configuration).
+Use the shared [compatibility contract](../architecture.md#configuration) before activation.

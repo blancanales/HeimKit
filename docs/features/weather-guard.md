@@ -1,52 +1,46 @@
 # WeatherGuard
 
-Automatic weather protection for existing and newly player-built structures, preserving their creators. Activation does not require repair, logout or rejoin. World-created claiming is inactive. Repairing an existing world-created piece does not change this scope; player-built replacements and additions are evaluated as separate pieces.
+Protects existing and newly player-built structures from configured weather wear while preserving their creators. Activation is automatic during play; repair, logout and rejoin are not required. Combat damage, repair, removal and structural support remain native.
 
-![WeatherGuard: protect existing and newly player-built structures from configured rain and underwater wear while preserving combat damage and structural support; world-created structures excluded](../images/weather-guard-workflow.jpg)
+![WeatherGuard: protect player-built structures from rain and underwater wear while preserving combat and support](../images/weather-guard-workflow.jpg)
 
-## Usage and scope
+See [server setup](../server-setup.md), [safety and limitations](../limitations.md#weatherguard-and-infinitetorches), and the [specification](../specs/weather-guard.md).
 
-Automatic Debug output follows the shared [five-minute empty-server pause](../architecture.md#empty-server-debug-pause). Reconnection resumes eligible diagnostics without restarting the feature; warnings, errors, requested reports and gameplay remain available.
+## Scope and configuration
 
-`[WeatherGuard] DebugMode` defaults to `false` and is added automatically to the active `heimkit.cfg` on startup when missing, even if this feature is disabled. Existing values are preserved. See the [debug configuration rules](../server-setup.md#configuration) for global and hidden override precedence.
+Eligible pieces are static player-built structural categories with native weather wear. World-created structures, containers, moving objects, non-building categories and already weather-immune materials are excluded. Repairing a world-created piece does not claim it.
 
-WeatherGuard is enabled by default in new configurations. Existing `[WeatherGuard] Enabled` values are preserved; set it to `true` in the loader-provided `heimkit.cfg` and restart to enable a previously disabled installation. See [server setup](../server-setup.md) for installation and shared configuration.
+Settings belong under `[WeatherGuard]`. Stop the server before editing and restart to apply changes. Existing values are preserved.
 
-Protection can wait for server context loading. The scope is static player-built structural categories with rain/wetness wear; containers, moving objects, non-building categories and already rain-immune materials are excluded. `ProtectRain` and `ProtectUnderwater` independently select weather protection and both default to true. When both are false, no pieces are acquired. In an overlap, an active unprotected wetness source keeps native weather processing available. `ExcludedPrefabs` leaves exact matching prefab types under native processing; it is empty by default. Identifiers are case-sensitive, comma-separated and contain only letters, digits or underscores; no wildcard, display-name or substring matching is performed. These options require a restart. Invalid or over-limit entries are ignored with a warning; valid entries remain. The [specification](../specs/weather-guard.md) defines selection priority and bounds. Snow, Ashlands/lava and other biome hazards are not suppressed.
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| Enabled | true | Enable automatic protection. |
+| ProtectRain | true | Suppress eligible rain wear. |
+| ProtectUnderwater | true | Suppress eligible underwater wear. |
+| ExcludedPrefabs | empty | Exact case-sensitive prefab identifiers, comma-separated. |
+| DebugMode | false | Feature diagnostics through the [shared debug policy](../server-setup.md#configuration). |
+| DebugLogLevel | Detailed | Medium gives path summaries; Detailed adds counters and representative observations. |
+| LogWorldCreatedItems | false | Include world-created diagnostic controls without protecting them. |
 
-Global `Diagnostics.DebugMode` or `[WeatherGuard] DebugMode` enables troubleshooting unless hidden suppression is set. Optional output requires the [BepInEx Debug filters](../server-setup.md#configuration). `DebugLogLevel = Medium` shows one grouped path summary: what is eligible and managed, where native weather processing waits or stops, and how many native damage contributions were removed and confirmed prevented. `Detailed` is the default and adds counters for loading, ownership, networking and support, plus representative roof/wetness/shield/health/timer values. Identical blocked pieces do not each repeat the same result. Unchanged health stays quiet; newly observed health loss and errors remain visible. Existing configured Medium values are preserved. `LogWorldCreatedItems` can include world-created diagnostic controls without protecting them. File edits require the documented restart.
+With both protection channels off, WeatherGuard acquires no pieces. An unprotected wetness source retains native processing when channels overlap. ExcludedPrefabs accepts letters, digits and underscores; invalid/over-limit entries produce a warning while valid entries remain. Snow, lava and other biome hazards retain native behavior.
 
 ## Coverage report
 
-Request a report using the [local server-admin request file](../server-setup.md#requested-weatherguard-coverage). The one requested summary does not depend on debug settings. It covers the most recently retained nearby regions around ready players, with scan age and capacity limits reported. It is not a whole-world inventory or proof of successful wet-weather damage prevention.
+Use the [local request file](../server-setup.md#requested-weatherguard-coverage) for an Info report, including when debugging is off or the module is paused/disabled. It describes recently retained ready-player regions.
 
-`eligible_now` counts nearby records selected by current policy; `protected_now` counts those with a loaded server instance, ready support context and current server ownership. `waiting_now` counts the remaining eligible records, broken down by instance, terrain, surrounding-object, capacity or ownership reasons. `skipped_now` counts other nearby records, including non-building objects, with reasons such as native eligibility, world-created, `excluded_prefab` and `weather_protection_disabled`. Eligible equals protected plus waiting for the reported scope. Unloaded eligible pieces are reported separately and never counted as protected. Distant records and world areas outside this scope are explicitly unevaluated/unobserved. With no observed ready-player region, counts are unknown; disabled modules likewise report an inactive state without scanning the world. Rain/underwater flags describe configured protection channels, not observed rain conditions.
+| Field | Meaning |
+| --- | --- |
+| eligible_now | Records selected by current policy. |
+| protected_now | Eligible records with a loaded server instance, support context and current server ownership. |
+| waiting_now | Eligible records awaiting instance, terrain, surrounding objects, capacity or ownership. |
+| skipped_now | Other nearby records, grouped by exclusion reason. |
 
-DebugLogLevel accepts only Medium or Detailed; invalid values fall back to Detailed. Per-feature diagnostic output and collection can be suppressed through the [hidden debug override](../server-setup.md#hidden-per-feature-debug-suppression), without disabling protection or standard startup, readiness, warnings and errors.
+Eligible equals protected plus waiting within the reported scope. The report includes scan age, capacity and configured channels.
 
-Protection pauses when the server becomes empty or player presence is unavailable. WeatherGuard releases retained network ownership and removes its protection hooks, then resumes when players return and world services are ready. Enabled stays unchanged; additional logins do not restart it. Requested coverage reports remain available while paused or disabled. See the [player-service integration](../specs/weather-guard.md#player-service-integration).
+## Diagnostics
 
-Gameplay lifecycle uses the shared joined-world state, established by native character spawning rather than an incoming connection or login handshake. After its own cleanup completes, the module acknowledges an empty-server pause to the shared service. One shared PlayerPresence notice confirms all features are inactive until a player joins; individual empty-server notices are suppressed. After a player joins, the shared active notice waits for successful initialization of all enabled consumers. Each enabled module reports Ready once when its required dedicated-server services become available, regardless of players. This indicates readiness to process, not installed player-dependent hooks or a verified gameplay effect. Individual processing activation and pause reasons belong in Debug, including later starts; no per-feature Resumed notice appears in normal output. Death/respawn does not end a joined session. See the [shared lifecycle](../architecture.md#presence-driven-lifecycle).
+Info reports confirmed weather-contribution prevention once per completed native wear sweep. A single affected piece is identified; multiple pieces produce one count. Capacity reduction and recovery are separate notices.
 
-If processing reaches capacity, one warning identifies reduced coverage and one Info notice reports recovery. When native weather damage is due and WeatherGuard removes its contribution, a successful complete native wear sweep emits `WeatherGuard: Prevented weather damage to N pieces.` Exactly one affected piece is identified by its registered prefab name and unique object ID, for example `WeatherGuard: Prevented weather damage to wood_stair (piece 1:341004).` Multiple affected pieces in the same sweep remain one combined count, even when the game processes them across several frames. Pieces reaching their wet-timer threshold in different sweeps have separate notices. Player-built eligibility is the documented scope and is not repeated in each notice. Acquisition, uncovered geometry and unchanged health remain Debug evidence. A later actual damage opportunity can produce another prevention event.
+Medium Debug explains eligibility, management and native processing gates. Detailed adds startup settings, ownership/loading/network counters, representative wetness/roof/timer/health observations and acquisition/release totals. Changed health loss and errors remain visible; unchanged health stays quiet.
 
-A startup Debug policy entry identifies whether global or feature DebugMode enables diagnostics, or the hidden override suppresses them. It requires the [loader Debug filters](../server-setup.md#configuration) even when explaining suppression.
-
-WeatherGuard retains the shared DebugLoggingPolicy through its controller and diagnostics, rather than copying an initial boolean. Each diagnostic opportunity reads the current loaded global-or-feature setting and suppression/activity gates. This does not add automatic configuration-file reload; file edits still require the documented restart.
-
-Detected loader Debug filtering is explained by a Warning followed immediately by Info instructions for the affected outputs; see [server configuration](../server-setup.md#configuration).
-
-
-The game performs its native warmup, wetness, shielding, health and greater-than-sixty-second wet-timer checks. WeatherGuard removes only the weather contribution at the damage-addition point; native timers, combat and support continue. The normal notice requires successful processing and respects native restrictions that would already disable damage. Eligible covered pieces remain managed for seamless protection after roof removal.
-
-Debug identifies roof checks as a sample: `roof_sample_size_now` with covered, exposed, managed/waiting, underwater and cache-disagreement sample counts. `roof_unchecked_or_stale_now` accounts for eligible pieces outside that sample. For example, a sample of 360 out of 1,765 eligible pieces leaves 1,405 unchecked/stale; the sample’s covered/exposed counts are not full-scope totals. Unchecked or more than thirty-second-old geometry is reported as unknown, with the oldest current check age. Twelve pieces can be checked per second, so the counts accumulate across scans. These counts are separate from the three-piece health sample. Weather-immune materials are skipped by their native weather-wear flag, rather than by a material-name list.
-
-Piece and ready-player biomes provide location context, including Swamp. `server_environment_wet` describes the server environment only; it is not a measurement of your local rain or Wet status. A prevention notice waits for native wetness/timing to reach the weather-damage addition. Repeated routine ownership-transfer blocks are summarized as counts instead of individual entries.
-
-
-Detailed Debug prints the feature settings and fixed processing limits once at startup. Recurring summaries show observed progress, conditions and outcomes; they do not repeat the rain/underwater switches, debug level or probe limits. Piece details likewise omit configured switches. Medium shows the prevention path without the startup settings detail. Requested coverage reports retain their channel context.
-
-
-Current management is refreshed on each scan, including reacquisition, independently of the age of a roof observation. Detailed Debug groups successful acquisitions and releases into interval counts with release reasons, rather than listing the same operation for each piece. Lifetime totals remain available to diagnose repeated ownership churn. Eligible-piece and wear-call interval counts appear once in their applicable summary; companion counter details do not repeat them.
-
-The shared [hidden version override](../server-setup.md#hidden-version-override) lets an operator authorize one exact game version after reviewing compatibility. It does not validate gameplay or bypass this feature's runtime checks.
+Roof fields describe their sample size, age and unchecked/stale counts. Piece/player biomes and server wetness provide context. The [specification](../specs/weather-guard.md#exposure-counts-and-biome-evidence) defines these fields and budgets.

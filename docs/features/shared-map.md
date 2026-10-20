@@ -1,133 +1,207 @@
 # SharedMap
 
-SharedMap records exploration around server-observed players in one persistent community map. Collection starts without requiring a cartography table. Newly observed tables receive the community terrain, and accepted table writes are normalized on the server. Players retrieve the last replicated data using vanilla Read Map; no client installation is required.
+SharedMap saves community exploration and discoveries, then shares them through vanilla cartography tables. Install HeimKit on the dedicated server; players use unmodified clients and choose **Read Map** to receive updates. Collection works before any table exists.
 
-SharedMap is enabled by default. PortalMarkerSync is its optional portal-management subfeature, also enabled by default. Turning off PortalMarkerSync leaves community exploration, resource discovery when enabled, persistence and death-pin filtering active. ResourceMarkerSync is a separate optional subfeature, enabled by default. Existing configuration values are preserved on upgrade.
+SharedMap and portal/resource/dungeon/runestone/recurring-spawner markers default enabled. Each source works independently. See [safety and limitations](../limitations.md#sharedmap) for discovery, client-update and upload limitations, and [server setup](../server-setup.md) for installation and shared settings.
 
-![SharedMap workflow: explore, discover outdoor resources, share saved exploration and markers at cartography tables, then Read Map; independent portal and resource controls, pickaxe-discovered Silver and selected shared-pin removal](../images/shared-map-workflow.jpg)
+![SharedMap: explore, save discoveries across restarts and Read Map; five enabled-by-default marker options, optional dungeon percentages, visible destructible spawners and configurable resource spacing](../images/shared-map-workflow.jpg)
 
 ## Shared exploration
 
-The native loaded Minimap supplies radius, pixel size, grid size and sampling interval. Exploration follows vanilla's pixel-circle calculation, regardless of camera visibility. Dead, unavailable and interior-height character observations are excluded. Sampling can miss travel between observations; teleport endpoints never reveal a connecting corridor.
+Terrain is recorded around usable outdoor player positions using the native minimap radius and interval. Accepted table exploration is unioned with the community map, so a smaller upload never erases existing exploration. Readers receive it in vanilla's shared-exploration layer; personally explored terrain remains separate.
 
-Valid exploration already stored on a table or received in a table write is merged into the community map. Previously accepted terrain is not erased by a later writer with less exploration. Table terrain enters each reader's vanilla shared-exploration layer. That layer has no individual owner; personally explored terrain remains separate and the vanilla shared-map display toggle remains available.
-
-## Table data
-
-SharedMap fills table map data when native creation/replication paths observe the table and during bounded nearby reconciliation. A player does not first need to write a map. The server changes only the map-data field and lets native revisions and replication distribute it. SharedMap does not take network ownership of tables, change their creators, or alter health, repair, destruction or wards.
-
-Incoming accepted ZDO updates and server-local writes to the map field are filtered. Shared death pins are removed. Other supported pins, except explicitly selected removals and managed portal records described below, retain their original owner, author, name, position and checked state. This does not remove personal death markers from a player's map. Resource pins are added only when ResourceMarkerSync is enabled; cave/location markers are outside scope.
-
-Unsupported or malformed incoming map fields are rejected in favor of the prior field. Existing malformed tables are left intact for review. Ordinary Write Map still uploads saved personal pins as vanilla does; selective private-pin sharing is not included. Empty tables without generated markers use exploration-only native data. Portal markers use a reserved shared service owner, independently of table network ownership.
-
-Normalization happens when the server accepts replicated state. A client can briefly retain its own unsanitized local write until a newer server revision arrives, and an early table read can precede initialization or replication. SharedMap cannot retroactively change a read already performed on a vanilla client. Field-change logs describe server state, not proof of delivery or a player map read.
-
-## Removing an unwanted shared pin
-
-An ordinary player-created pin can remain in table data after local deletion: vanilla Write Map reads the table before uploading. Read Map can re-import another player's shared pin, whereas an absent pin attributed to the reader is not re-imported. This is why deleting your own pin and writing can succeed while another player's copy returns; later uploads from anyone retaining a copy can restore the table entry. SharedMap supports removal of a specific shared pin using its exact identity, preserving other pins with the same label elsewhere.
-
-The active configuration directory contains `HeimKit/SharedMap/world-<world ID>.map`. Beside it, create a UTF-8 file with the same world prefix and extension `.pin-admin.request`. Its contents are one command:
-
-- `find Vile` lists matching table pins at Info with each pin's ID, icon and XYZ coordinates. Matching labels are exact and case-sensitive.
-- `remove <pin ID>` persistently excludes the selected pin and sweeps saved tables. Copy the complete ID for the intended location from the lookup result.
-- `allow <pin ID>` removes that exclusion, permitting future uploads; it does not restore deleted table data.
-
-After the plugin has loaded, requests need no server restart. They are consumed while SharedMap has joined players and native world services are ready. Each request file contains one command and is deleted after acceptance; create it again for the next command. Ensure the actual filename ends in `.pin-admin.request`, not `.request.txt`. Invalid requests remain for correction and produce a warning. Lookup and removal advance gradually without loading distant scenes. Results are limited to 64 distinct lookup pins, with excess results reported. Debugging is not required. The `.pin-removals` file and its backup retain exclusions across restarts. Other labels and locations remain eligible. Renamed, moved, icon-changed or owner-changed pins have new identities; these rules target specific records rather than disabling an automatic portal/resource source.
-
-After a removal finishes and replicates, use Read Map. Personal client pins may still need manual deletion. The server cannot force deletion from personal maps or guarantee replacement when another nearby pin matches vanilla's distance rule. Exploration, portals and deposits are preserved.
+On first use without a saved community map, SharedMap imports valid exploration from existing saved tables, including distant tables. It saves the completed import before starting player capture. Later starts load the saved map.
 
 ## PortalMarkerSync
 
-With PortalMarkerSync enabled, player-built portals in community-explored terrain are added automatically, including unconnected portals and saved portals far from players. Markers use the vanilla portal-shaped icon and the portal's tag as the name, without a special text prefix; blank tags use `NoName`. Portal records are discovered at the table scan interval and current names/positions are read from accepted server data. No player needs to use Write Map. Readers retrieve the markers using vanilla Read Map.
+Player-built portals in community-explored terrain receive portal-shaped markers. Labels use current portal tags, or `NoName` when blank; connected and unconnected endpoints qualify.
 
-Eligibility uses the persistent community map, including terrain imported from older tables, rather than only the current session or current reader's travels. Portals in already explored terrain can therefore appear without anyone revisiting them. Terrain outside the community's explored area does not qualify.
+PortalClusterDistanceMeters groups endpoints around a fixed first portal. Groups display `Multi Portals (N)` at their centre; single portals keep their tag. Zero shows individual endpoints. Renames and removals are reconciled from current world records; small persistent publication offsets help refresh renamed markers.
 
-PortalClusterDistanceMeters defaults to 60 metres. Nearby portals appear as one `Multi Portals (N)` marker at their centre, using the portal icon. Each group stays anchored to its first portal, selected in stable world-object order; portals must be within the configured horizontal distance of that anchor, so a chain of neighbours does not group a whole region. A group's span can reach twice the configured distance. A single portal keeps its tag. Set the distance to zero to show portals individually. Changes require restart.
-
-Generated markers and every uploaded pin using the portal-shaped icon are managed portal data, regardless of their names or authors. Their names and positions are replaced by the current portal catalog; duplicates, old names, old locations and deleted portals do not remain in normalized table data. While PortalMarkerSync is enabled, reserve that icon for actual portals: a portal-icon pin used for a cave or another purpose will also be replaced in shared table data. Other icon types are preserved except for obsolete portal duplicates matching the current portal label (case-insensitive) within three horizontal metres of its published position. Disabling PortalMarkerSync removes service-owned generated pins as tables are normalized, while leaving terrain and player-owned pins intact.
-
-Vanilla can keep an already present pin within one metre without updating its label when Read Map runs. PortalMarkerSync defaults true and works around this by shifting a renamed portal/group marker to another nearby publication position. A marker starts at the actual location; later label changes select a position more than 1.1 metres from the prior marker, at most about 2.83 metres from the actual portal or group centre. The portal itself never moves. Unchanged labels keep their chosen position across reads, reconnects and restarts. The rename workaround is always active while PortalMarkerSync is enabled.
-
-This encourages vanilla to insert the renamed pin and remove the unmatched old shared pin during the same Read Map operation. Nearby other pins can still block insertion, personal pins are not forcibly removed, and a client missing enough renames can encounter a reused position. Deleted/recreated portal identities and regrouping can also affect replacement. The server cannot confirm client reads or force an automatic map refresh. Portal names/groups come from saved world records; publication slots are retained separately beside the terrain file.
+While enabled, automatic portal management reserves every portal-icon pin in table data for actual portals. Other icons are preserved except matching nearby obsolete portal pins; automatic reconciliation preserves player-owned hammer pins. Disabling portal sync removes generated portal records and preserves player-owned pins.
 
 ## ResourceMarkerSync
 
-ResourceMarkerSync records outdoor Copper, Tin, Silver, Obsidian and static Flametal deposits as players travel within the native exploration radius. Dots use short resource labels. No table needs to exist during discovery; choose Read Map later to receive the saved discoveries. This is independent of PortalMarkerSync and does not require clients to install anything.
+Records outdoor Copper, Tin, Silver, Obsidian and static Flametal deposits with labeled dot markers. Scraps, dungeon resources, creatures, dropped items, ordinary stone and player-built objects are excluded.
 
-Only allowlisted mineable deposits qualify. Scrap piles, dungeon/interior resources, giant weapons/armour, creatures (including lava Leviathans), dropped/pickable items, ordinary stone and player-built objects are excluded. Static Flametal uses the supported meteorite deposit record when present; the plugin does not generate it. Gold is excluded. Silver stays hidden until a direct pickaxe hit on the vein or a qualifying pickaxe impact within SilverDiscoveryRadiusMeters of it; the default is 10 horizontal metres. Digging nearby can reveal the nearest eligible vein without hitting Silver itself. A direct hit saves the struck vein even if its centre is farther away. Both paths reuse the saved discovery and update its percentage. Ordinary travel, Wishbone pings and old explored terrain do not unlock it. Only discovered Silver joins shared groups. Native generation, replication and sampling can delay detection or miss brief travel between observations.
+Silver requires a direct pickaxe hit or a qualifying pickaxe impact near the nearest eligible vein. SilverDiscoveryRadiusMeters controls nearby impact discovery; direct hits select the struck vein. Travel, Wishbone pings and retrospective exploration do not unlock Silver.
 
-ResourceClusterDistanceMeters defaults to 30 metres and groups only the same resource type around a fixed first discovery. Zero shows individual deposits. Nearby discovered Tin nodes display Tin (N), then Tin when only one remains, and disappear after the final confirmed removal. Counts describe discovered deposit nodes, not ore yields or mining fragments. Retained depleted anchors keep groups stable, and neighbouring chains cannot extend a group's reach. Copper and discovered Silver markers show remaining-section percentages, such as Copper 65% or Silver 65%. This includes the deposit's underground mining sections; it is not a promise of a particular ore yield or a measurement of exposed rock. Grouped Copper/Silver combines original and remaining section counts, including zero remaining for confirmed removed boulders. The last observed percentage persists when a record is unavailable. A resource label followed by ?% means progress is not yet known; a future valid observation can supply it. Discovering another boulder can increase a group's percentage. Historical exhausted groups show 0% when retained. There is no reliable buried indicator, so no below-ground claim is added. Other resource groups retain their short resource label.
+ResourceClusterDistanceMeters groups the same resource type around fixed discovery anchors; zero shows each deposit. Tin groups show remaining discovered nodes, such as `Tin (3)`. Copper and Silver show remaining-section percentages, such as `Copper 65%`; `?%` means progress is unknown. Confirmed depleted nodes disappear when ResourceRemoveDepleted is true; false retains historical nodes.
 
-ResourceRemoveDepleted defaults true. Only confirmed terminal destruction or complete valid depleted mining health retires a node; an intact deposit becoming a fractured mining object is still the same discovery. Unloaded/missing objects and unavailable damage information do not establish depletion. Removed objects whose destruction was not observed may retain markers. Setting this option false displays historical nodes too.
+ResourceMarkerHideDistanceMeters defaults to 10 metres. A generated resource marker or group at or within that horizontal distance of a published portal, dungeon, runestone or physical-spawner marker is hidden to reduce clutter. Resource discoveries, grouping and depletion tracking are retained; another resource marker does not hide it. The comparison uses final published map positions after marker exclusions and offsets. Resources can reappear when the nearby landmark marker is removed or its source is disabled. Set the distance to 0 to disable this display rule. Personal pins are preserved. See [client map updates](../limitations.md#client-map-updates) for existing personal-map copies.
 
-ResourceDiscoverPreviouslyExplored defaults false: old explored terrain alone does not discover deposits. Enabling it also scans saved eligible deposits in the accumulated community-explored terrain, including exploration imported from tables. It does not load distant scenes or generate terrain. Retrospective work runs only with joined players and advances gradually. Turning it off stops that extra discovery source; accepted discoveries still persist across restarts.
+ResourceDiscoverPreviouslyExplored also discovers eligible deposits in saved community-explored terrain without a revisit. Silver keeps its mining requirement. Turning the setting off retains accepted discoveries. Player-created dot pins keep their original records.
 
-Resource pins have their own service owner. Player-created dots, including matching resource labels, retain their native records; the dot icon is not reserved. Tin count changes use persistent small publication offsets shared with the portal refresh mechanism. Vanilla can still retain a nearby existing pin without updating its name or icon. Choose Read Map again after updates; local stale-pin cleanup can remain necessary. Shared-map visibility affects these pins like other shared pins; there is no new per-resource client filter.
+## DungeonMarkerSync
 
-## Reading updates and existing pins
+Records supported dungeon **exterior entrances** within the native exploration radius. Markers use the vanilla hammer/T icon and a short type label. Each gateway keeps its own saved discovery record. Shared tables publish one dungeon marker per fixed ten-metre anchor, suppressing nearby duplicates without deleting discoveries or world objects. DungeonLootProgress adds short remaining-pickup percentages where supported, such as `Burial Chamber 40%` and `Frost Cave 0%`. Arbitrary player hammer notes are preserved. Uploaded hammer pins using a recognized dungeon label, with or without a percentage, are removed within ten metres of a generated dungeon anchor so stale copies do not accumulate.
 
-Use **Read Map** at a vanilla cartography table to retrieve the data currently available there. Exploration, portal and resource changes do not force an automatic refresh of an open player map. Tables near usable players are reconciled periodically; when several tables are nearby, the configured per-pass limit spreads updates across passes. A distant table is refreshed when the server observes it through the supported update paths or it becomes a nearby candidate.
+| Dungeon family | Marker label |
+| --- | --- |
+| Forest crypts | Burial Chamber |
+| Swamp crypts | Sunken Crypt |
+| Troll caves | Troll Cave |
+| Mountain caves | Frost Cave |
+| Mistlands mines | Infested Mine |
+| Queen dungeon | Infested Citadel |
+| Hildir crypt | Smouldering Tomb |
+| Hildir cave | Howling Cavern |
+| Morgen caves | Putrid Hole |
+| Lord Reto's tomb | Reto's Tomb |
+| Bear caves | Bear Cave |
+| Winding tunnels | Winding Tunnels |
+| Mörkhalla | Mörkhalla |
 
-Vanilla can retain any saved pin within one metre of an incoming marker without updating its name or icon. Different players may see different results from the same table because each has different existing pins. Removing a stale duplicate locally and choosing Read Map again may be necessary, even after the server has corrected the table. Keep the vanilla shared-map display enabled when viewing community exploration.
+Only verified placed entrances qualify. Sealed Tower, ordinary buildings, disabled dungeon variants and the condition-controlled Prison entrance are excluded. The [specification](../specs/shared-map.md#automatic-dungeon-entrances) lists exact prefabs.
 
-Server cleanup removes matching nearby obsolete records from table data and uses a small persistent marker offset when needed to encourage replacement. It cannot inspect or erase a player's personal map. Ordinary Write Map still follows vanilla sharing behavior; SharedMap does not provide private-pin selection or guaranteed per-client replacement.
+DungeonDiscoverPreviouslyExplored also discovers placed entrances whose exterior points lie in saved community-explored terrain. It scans gradually without generating locations or loading scenes. Disabling retrospective discovery retains accepted records. Disabling DungeonMarkerSync retains its store and removes generated dungeon pins during table normalization.
+
+### Pickup percentages
+
+Use `[SharedMap] DungeonLootProgress` to control pickup percentages independently of entrance markers:
+
+```ini
+[SharedMap]
+DungeonMarkerSync = true
+DungeonLootProgress = true
+```
+
+Set `DungeonLootProgress = false` to show plain dungeon names without percentages. Leave `DungeonMarkerSync = true` to keep the entrance markers. Existing discoveries, visits and saved progress are retained. Stop the server before editing the active `heimkit.cfg`, then restart to apply the setting.
+
+| Dungeon | Tracked permanent pickup |
+| --- | --- |
+| Burial Chamber / Smouldering Tomb | Surtling Core stands |
+| Infested Mine | Black Core stands |
+| Frost Cave / Howling Cavern | Hanging Fenris Hair |
+| Winding Tunnels | Frost Core pickups |
+| Mörkhalla | Ancient gemstone pickups |
+
+Percentages stay hidden until the server observes someone inside that dungeon or verifies that at least one tracked pickup has already been picked. Afterward, Read Map shares the remaining percentage with everyone. The percentage counts unpicked sites divided by the established placed total. All picked, or a supported dungeon with no tracked pickups, displays `0%`; unsupported or unknown inventories keep the ordinary label. Empty inventories may take an additional 30 seconds to establish after entry.
+
+Visits and progress survive restarts. Existing saves without visit history unlock percentages after an observed entry or a fresh scan confirming already-picked items. Untouched or empty inventories alone do not establish a visit. Turning DungeonLootProgress off hides percentages while retaining discoveries, visits and saved progress.
+
+### Shared X checkmarks
+
+SharePinCheckmarks defaults false, keeping player X marks personal. Enable it with AllowPlayerMapWrites to share checked/unchecked changes through Write Map and Read Map across dungeon, portal, resource, runestone, spawner and ordinary player pins. For a grey shared marker, the first click makes it personal and the next toggles its X; Write Map shares the change. Manual X marks are independent of pickup percentages. Checkmarks and publication positions survive restarts in `.pin-state`. Percentage/checkmark changes use small publication offsets around the original source; see [client map updates](../limitations.md#client-map-updates).
+
+## RunestoneMarkerSync
+
+This source defaults enabled and shares separate vanilla dot markers for placed Boar, Greydwarf, Draugr and biome lore runestones. The [specification](../specs/shared-map.md#runestone-eligibility-and-placement) lists all eleven supported location prefabs. Stones qualify through their actual placed point; reading them is unnecessary. Boss trophy stones, Vegvisirs and decorative writing are excluded. Boar Runestones identify Meadows landmarks, not recurring boar farms.
+
+Eligible placed stones inside saved community exploration are also discovered automatically. Disabling RunestoneMarkerSync retains discoveries and removes its generated table publications during reconciliation.
+
+## SpawnerMarkerSync
+
+This source defaults enabled and shares visible, player-destructible, stationary recurring spawner objects as vanilla dots. Supported sources include Greydwarf nests, both bone piles, Draugr piles, Charred stone/elite/event/cross sources, Jotun cores, Elaking single/double holes and Mork blob sources. Hidden creature-spawn points around dungeons, invisible recurring points, fish and Kvastur spawn instructions are excluded. The [classification table](../specs/shared-map.md#spawner-eligibility-and-classification) owns exact prefabs, labels and exclusions. One-shot points and incompatible legacy EvilHeart_Swamp are excluded.
+
+Eligible physical source points inside saved community exploration are also discovered automatically. Saved markers for previously accepted hidden spawn points are omitted during table reconciliation; discovery history is retained. Accepted terminal source destruction hides its marker. Killing its creature or unloading the scene does not retire a source. Destruction history survives restarts. Disabling SpawnerMarkerSync retains history and removes its generated table pins during reconciliation.
+
+If spawner markers are enabled but no compatible source types can be registered, SharedMap logs a warning that new spawner discovery is unavailable. SharedMap.DebugMode includes the effective switches, candidate count and grouped rejection reasons in the completed landmark audit.
+
+RunestoneMarkerSync and SpawnerMarkerSync are the only settings for these two sources. All marker sources remain independent of one another, player-upload permissions and shared X marks. Use Read Map after table reconciliation to receive changes. See [discovery](../limitations.md#discovery) for interior/source-observation scope and [client map updates](../limitations.md#client-map-updates) for delivery.
+
+## Allowing player map writes
+
+AllowPlayerMapWrites controls player uploads. True accepts valid terrain and ordinary pins under SharedMap's filtering rules. False retains prior server-accepted map data while automatic exploration, generated markers and Read Map continue. Existing table pins and first-run import are preserved. See [upload limitations](../limitations.md#player-uploads) for vanilla UI behavior.
+
+SharedMap changes only table map data. It preserves table ownership, creators, health, damage, repairs, wards and other world fields. Shared death pins are filtered; personal death markers remain native. Malformed incoming data is rejected in favor of prior data; malformed existing tables are left for review.
+
+## Removing an unwanted shared pin
+
+Beside `HeimKit/SharedMap/world-<world UID>.map` in the active configuration directory, create a UTF-8 file named `world-<world UID>.pin-admin.request`. Use the same world prefix as the map file. Put one command in it:
+
+| Command | Action |
+| --- | --- |
+| `find Vile` | List up to 64 distinct exact-label matches at Info, including each pin's full ID, icon and coordinates. |
+| `remove <pin ID>` | Persistently exclude that record and sweep saved tables. |
+| `allow <pin ID>` | Remove the exclusion so future uploads are accepted. |
+
+Copy the complete ID for the intended location. Removal targets owner, label, position and icon; other pins with the same label remain. Changing those fields creates a new identity. `allow` permits future uploads rather than recreating a deleted record.
+
+Requests run with joined players and ready world services; no restart or DebugMode is needed. Accepted request files are deleted. Create a new file for another command. Invalid requests remain for correction and produce a warning. Ensure the filename ends in `.request`, not `.request.txt`. Read Map after the completed sweep and replication.
+
+Shared-pin removal uses the server-side request file above. For X-mark behavior and client attribution, see [player uploads](../limitations.md#player-uploads).
+
+### Worked example: remove a pin named Vile
+
+This procedure requires access to the dedicated server's files. Use the request file while SharedMap is enabled, the server is running and at least one player has joined the world. No server restart or DebugMode change is needed.
+
+1. Locate the active `heimkit.cfg` using the configuration path logged at startup. For manager installations, use the active server profile; see [active configuration locations](../server-setup.md#shared-configuration-and-maintenance).
+2. From that configuration directory, open `HeimKit/SharedMap`. Identify the current world's `.map` file. For example, if it is `world-0000000000000123.map`, the request filename must be `world-0000000000000123.pin-admin.request`. Use your actual world's prefix throughout.
+3. Open the server's BepInEx console or active `BepInEx/LogOutput.log` so you can read SharedMap's administration messages.
+4. In the same directory as the `.map` file, create the request file with a text editor. Save as UTF-8, select **All files** in the save dialog and use the exact `.pin-admin.request` filename. Enable File Explorer's **File name extensions** display to check that `.txt` was not appended.
+5. Put only this line in the request file, then save and close it:
+
+   ```text
+   find Vile
+   ```
+
+   Replace `Vile` with the pin's complete, case-sensitive label when removing another item. Include spaces and any displayed percentage as part of the label; do not add quotation marks.
+6. Wait for `Looking up table pins named "Vile"` and the lookup results in the log. Each `Table pin` result contains a full 64-character lowercase ID, icon, XYZ coordinates and owner. Compare the coordinates and icon to the item you intend to remove. If several pins have the same label, select the result for the intended location. Wait for `Pin lookup completed` before continuing.
+7. Copy that result's complete pin ID. The accepted lookup request file disappears automatically. Recreate the same request filename containing one line:
+
+   ```text
+   remove <pin ID>
+   ```
+
+   Replace `<pin ID>`, including the angle brackets, with the actual ID copied from the log. Save and close the file.
+8. Wait for `Removal rule enabled for pin` and then `Selected-pin cleanup sweep completed` in the log. The first message confirms the saved exclusion; the second confirms the table sweep finished. Review any warning about malformed tables separately.
+9. After the sweep and replication, have players use **Read Map** at a cartography table to receive the updated shared data. For markers already copied to a personal map, follow [client map updates](../limitations.md#client-map-updates).
+
+If the lookup reports zero matches, check the exact label, capitalization and current percentage. The lookup searches server-saved table pins, so a pin that exists only on a personal map is outside this lookup.
+
+To undo the exclusion, recreate the same request file with `allow <pin ID>`, substituting the same actual ID. Wait for `Future uploads allowed for pin`. Future accepted uploads or automatic marker reconciliation can then publish that exact record again; the command does not recreate a deleted pin by itself. See [player uploads](../limitations.md#player-uploads) for X marks, source identity and personal-map behavior.
 
 ## Configuration
 
-| Setting in SharedMap | Default | Meaning |
+Settings belong under `[SharedMap]`. Stop the server before editing; restart to apply changes. Existing values are preserved and missing defaults are generated automatically. Updating does not turn an existing `RunestoneMarkerSync = false` or `SpawnerMarkerSync = false` into true; change those two values explicitly if you want to enable them in an existing configuration.
+
+| Setting | Default | Purpose |
 | --- | --- | --- |
-| Enabled | true | Independent enable switch. |
-| PortalMarkerSync | true | Automatically maintain explored player-built portals and correct managed portal markers. |
-| PortalClusterDistanceMeters | 60 | Group portals within this horizontal distance of the first portal; 0 to 100 metres, zero disables grouping. |
-| ResourceMarkerSync | true | Record outdoor Copper, Tin, Silver, Obsidian and static Flametal deposits independently of portals. |
-| ResourceDiscoverPreviouslyExplored | false | Also discover remaining deposits in previously community-explored terrain without a revisit; existing discoveries persist either way. |
-| ResourceClusterDistanceMeters | 30 | Fixed-anchor horizontal grouping distance for same-type deposits; 0–100 metres, zero disables grouping. |
-| SilverDiscoveryRadiusMeters | 10 | Pickaxe-impact discovery radius for the nearest Silver vein; 1 through 30 horizontal metres. |
-| ResourceRemoveDepleted | true | Hide confirmed removed/depleted nodes; false retains historical nodes. Missing/unloaded state never establishes depletion. |
-| TableIntervalSeconds | 10 | Nearby table reconciliation interval, 2 to 120 seconds. |
-| MaxTablesPerPass | 1 | Table payloads per first-run import tick, periodic reconciliation pass or requested pin-administration tick, 1 to 8; incoming writes and new tables use their native event boundary. |
-| SaveIntervalSeconds | 60 | Dirty community-map save interval, 10 to 600 seconds. |
-| PinDebugNameFilter | empty | Focus per-pin Debug detail on an exact label, such as Vile; empty samples all labels. |
-| DebugMode | false | Optional feature diagnostics. |
-
-Stop the server before editing and restart to apply settings. The central loader preserves existing values and adds missing defaults. An existing false value for PortalMarkerSync or ResourceMarkerSync stays false; enable the subcomponent explicitly if desired after upgrading. Radius and sampling interval come from the native component rather than a separate radar setting. SharedMap uses player-presence services without acquiring AFK tracking. Empty or unavailable presence removes its gameplay hooks and controller; accepted map data remains available for the next joined session.
-
-## First startup
-
-When this world has no saved community map, SharedMap first scans existing saved cartography tables across the world, including distant tables. It merges valid exploration into its own file before starting player capture. This read-only import can run with no players online and does not change table data. Invalid payloads are skipped with a startup warning.
-
-Even if there are no tables or no exploration to import, an empty map file records completion. Later restarts load that file and skip the initial scan. An interrupted import is retried; an unreadable or corrupt existing community file remains an error.
+| Enabled | true | Community exploration and table filtering. |
+| PortalMarkerSync | true | Named player-built portal markers. |
+| PortalClusterDistanceMeters | 60 | Portal anchor grouping distance; 0–100 metres, zero disables grouping. |
+| ResourceMarkerSync | true | Outdoor metal and Obsidian markers. |
+| ResourceDiscoverPreviouslyExplored | false | Discover eligible deposits in old community exploration. |
+| ResourceClusterDistanceMeters | 30 | Same-type resource grouping; 0–100 metres, zero disables grouping. |
+| ResourceMarkerHideDistanceMeters | 10 | Hide resource markers within this horizontal distance of another generated landmark; 0–100 metres, zero disables hiding. |
+| SilverDiscoveryRadiusMeters | 10 | Nearest-vein discovery around a qualifying impact; 1–30 metres. |
+| ResourceRemoveDepleted | true | Hide confirmed depleted deposits. |
+| DungeonMarkerSync | true | Separate labeled exterior dungeon markers. |
+| DungeonLootProgress | true | Show pickup percentages after observed entry or verified already-picked items. |
+| SharePinCheckmarks | false | Accept shared X marks from allowed player uploads. |
+| DungeonDiscoverPreviouslyExplored | false | Discover placed entrances in old community exploration. |
+| RunestoneMarkerSync | true | Share eligible placed lore stones, including community-explored points. |
+| SpawnerMarkerSync | true | Share eligible recurring sources, including community-explored points; hide confirmed destroyed sources. |
+| AllowPlayerMapWrites | true | Accept player terrain/pin uploads; false retains server map data. |
+| TableIntervalSeconds | 10 | Nearby reconciliation interval; 2–120 seconds. |
+| MaxTablesPerPass | 1 | Table payloads per import/reconciliation/admin pass; 1–8. |
+| SaveIntervalSeconds | 60 | Dirty-save interval; 10–600 seconds. Lifecycle transitions flush sooner. |
+| PinDebugNameFilter | empty | Exact case-sensitive label for per-pin Debug details; counts include all labels. |
+| DebugMode | false | Enable SharedMap diagnostics through the [shared debug policy](../server-setup.md#configuration). |
 
 ## Storage and recovery
 
-The community terrain lives in `HeimKit/SharedMap/world-<world UID in hexadecimal>.map` beneath the active BepInEx configuration directory. It is separate from the native world save and exists independently of tables. Its world identity and grid metadata are checked on load. Corrupt, unreadable, incompatible or truncated files disable SharedMap rather than starting an empty replacement.
+Files live in `HeimKit/SharedMap` beneath the active BepInEx configuration directory. Each uses `world-<world UID in hexadecimal>` as its prefix.
 
-The matching `.portal-pins` file retains marker names, publication slots and last published positions for the rename workaround. Portal identities follow their saved prefab and position, so native object-ID changes on restart do not assign a different portal's name history. Earlier state is reassociated only by a unique nearby actual location; ambiguous matches start fresh. Its bounded records, world identity and checksum are validated before use. Missing state starts fresh; corrupt state or a missing primary file with a retained backup disables SharedMap rather than silently overwriting it. All stores use the configured dirty-save interval and lifecycle flushes. A crash can lose publication choices since the last completed save.
+| Extension | Saved state |
+| --- | --- |
+| `.map` | Community exploration and minimap geometry. |
+| `.portal-pins` | Stable portal labels and publication positions. |
+| `.resources` | Resource discoveries, depletion and mining progress. |
+| `.resource-pins` | Resource publication labels and positions. |
+| `.entrances` | Dungeon gateway identities, exterior coordinates, labels, visits and pickup progress. |
+| `.runestones` | Placed lore-stone discoveries and actual source points. |
+| `.spawners` | Recurring-source discoveries and terminal-destruction tombstones. |
+| `.pin-state` | Shared checkmarks, source identities and marker refresh positions. |
+| `.pin-removals` | Selected pin exclusions. |
 
-The matching .resources file retains resource discoveries, depletion evidence and fixed anchor identities; .resource-pins retains resource publication positions/names. These are separate from tables and native world saves. Native object IDs can change on restart; saved resource types and positions are used to reassociate discoveries conservatively. The world-specific `.pin-removals` file separately retains selected pin exclusions, saved atomically when an admin command is accepted; lookup request files are transient and are not backup state. Corruption or orphaned backups never silently create replacements. Disabling resource markers retains these files while removing resource-service pins from normalized tables.
-
-Dirty data is saved periodically and flushed on empty/unavailable presence, world changes, failure and shutdown. Saves use a flushed temporary file and atomic replacement; the prior map is retained as `.bak`. Unchanged terrain does not trigger a disk write. A crash can lose observations since the last completed save. Saving accepted terrain and the first-run read-only import can run without joined players. Ordinary table reconciliation and new player exploration wait for joined players.
-
-Include this map directory with the corresponding world backup, after stopping the server. Restore world and community data from the same backup point to avoid revealing exploration retained from a later world state. The file uses world UID rather than display name. A radius/interval change may retain existing pixels, but a different grid or pixel scale must not reinterpret them. See [world backups](../world-backups.md#sharedmap-data).
+Stores validate world identity, format, bounds and checksums. Dirty saves use flushed temporary files and atomic replacement, keeping the previous file as `.bak`. Accepted state is flushed on pause, world changes, failure and shutdown. Marker disablement retains discovery files. See [backup and recovery](../world-backups.md#sharedmap-data).
 
 ## Diagnostics
 
-Startup, readiness and failures follow the shared logging contract. A completed first-run import reports tables found, valid payloads imported and explored pixels saved; invalid payloads produce one separate summary warning. Normal result messages group changed tables and removed shared death pins by completed incoming packet or reconciliation pass. Empty or unchanged operations stay quiet. Invalid existing tables and rejected incoming fields produce bounded warnings; storage failures disable only SharedMap and remain visible with debug off.
+Info reports storage selection, completed first-run import, grouped discoveries/removals and table changes. Unchanged passes stay quiet. Failures remain visible with debugging off.
 
-Opening a world's community store reports at Info whether an existing map loaded, including its explored-pixel count and skipped import, or an absent map triggered first-run import. Corrupt stores remain failures rather than triggering an import. These messages occur at world/store initialization, not on each player join or scan.
+Debug adds native radius/cadence, supported dungeon prefab/gateway counts, discovery source and coordinates, mining evidence, publication choices and table pin changes. Dungeon proximity details include the original player sample and distance/radius. Pickup evidence reports gateway identity, total/picked sites, remaining percentage and availability reason. Saved-layout details report dungeon type, room count, payload size and decode status. Visit details distinguish observed interior entry from a prior visit inferred from matched picked items; empty-inventory evidence reports its settling state. Checkmark logs distinguish accepted uploads from publication changes. Storage details identify loaded and saved counts. Pin changes show owner, label, position, icon and replication sender when available. PinDebugNameFilter narrows per-pin details without changing totals or processing.
 
-Optional Debug output identifies the selected world UID and community-file path at store initialization, and reports native geometry, current explored-pixel count, latest sampling/table scope and completed saves. See the [debug and hidden suppression contract](../server-setup.md#hidden-per-feature-debug-suppression), [technical specification](../specs/shared-map.md), [presence lifecycle](../architecture.md#required-feature-hookup) and [supported environment](../server-setup.md#supported-environment).
-
-Debug publication details include old/new names, actual and published positions, chosen slot and distance from the previous marker. Separate table details include the table ID, data revision and update reason. Each stream is capped at six records per minute; these describe server decisions and field changes, not client delivery. Summaries distinguish new pixels from player circles and table imports since the current controller started; those counters reset when its gameplay controller is recreated. Refresh-state load/save evidence is also optional Debug output. Gameplay collection, slot selection and saving continue independently of debug settings.
-
-Portal catalog Debug summaries report registered records, eligible explored portals, excluded records, resulting grouped marker count and clustering distance, bounded to one summary per minute. Separate removal details identify a marker's identity and prior label when it leaves publication state because it is no longer eligible or has regrouped, bounded to six records per minute. Removal evidence describes server publication state, not confirmed client cleanup.
-
-Catalog summaries identify persisted community exploration as the eligibility source and include the native pin type. Up to six rotating publication samples per minute include marker identity, label, published position and icon type, so stable markers omitted by the initial change-event budget are observable over subsequent scans. These samples do not inspect personal client pins or confirm client rendering.
-
-When Debug is enabled, table normalization reports preserved pins whose labels match generated portal labels without regard to case. Up to six records per minute identify the preserved icon, owner and position alongside the generated portal icon type. The evidence distinguishes removed nearby duplicates from preserved distant matching labels; it does not confirm client rendering.
-
-Resource results group newly recorded discoveries and confirmed removals at the table reconciliation interval, even when no table exists. Unchanged operations stay quiet. Optional resource Debug output reports discovery-record counts, the last prepared marker count and retrospective mode once per minute, plus up to six publication details per minute. These describe server observations and publication choices, not a confirmed client read.
-
-Silver discovery uses observed pickaxe impacts and, for client-owner digging, recent pickaxe animation correlated with newly accepted terrain lowering. Missing baselines or delayed/ambiguous evidence leave Silver hidden and can require another impact. Earlier stored Silver records without mining-discovery evidence remain hidden until qualifying discovery. No terrain or mining behaviour is changed.
-
-Pin-change Debug logs show additions, removals and checked/author changes between previous, received and normalized table data. These include ordinary player-created pins, even when HeimKit does not need to rewrite the accepted upload. Details identify label, position, icon, original owner and the replication sender when available. The sender may be the table-owning client forwarding another player's write; it is not proof of who clicked Write Map. Set PinDebugNameFilter to an exact label to focus detail; summary counts still include all labels. Player-pin details have separate limits from automatic markers. Output remains sampled and bounded, with omitted-evidence counts; malformed snapshots never establish a deletion. Debug logging does not change pin processing or confirm client display.
+Discovery/publication details are capped at six per stream per minute; the [specification](../specs/shared-map.md#logging) owns the full limits. Shared debug configuration, loader filters and presence notices are described in [server setup](../server-setup.md#configuration).

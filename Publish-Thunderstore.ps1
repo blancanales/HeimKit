@@ -14,7 +14,7 @@ param(
     [string]$PackageName = 'HeimKit',
     [string]$WebsiteUrl = 'https://github.com/blancanales/HeimKit',
     [string]$ReadmeBaseUrl = 'https://github.com/blancanales/HeimKit/blob/main',
-    [string]$Description = 'Server-side quality-of-life features for Windows Valheim dedicated servers: shared exploration, portal and resource markers, torch upkeep, weather protection, sleep coordination and idle-player raid protection.',
+    [string]$Description = 'Valheim: Infinite Torches (InfiniteTorches), fuel-free braziers, Shared Map (SharedMap), exploration/map sharing, pins/markers, portals, ore/resources, dungeons, runestones, spawners, rain/weather protection, sleep, AFK raid protection. Server-only.',
     [string[]]$AdditionalDependencies = @(),
     [switch]$Force
 )
