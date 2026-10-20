@@ -52,37 +52,58 @@ public static class WeatherGuardNetworkFilter
         try
         {
             if (original.Size() > MaximumPacketBytes) throw new InvalidDataException("Oversized ZDO packet.");
-            var invalid = new List<ZDOID>();
-            var rejectedRecords = new List<(ZDOID Id, uint Data, ushort Owner)>();
+            // Keep opaque payloads in the source buffer. Allocate a replacement only
+            // after the whole packet validates and actually contains protected IDs.
+            List<(int Start, int Length)>? removed = null;
+            List<(ZDOID Id, uint Data, ushort Owner)>? rejectedRecords = null;
             int count = original.ReadInt();
             if (count < 0 || count > MaximumRecords) throw new InvalidDataException("Invalid sector count.");
+            int invalidBlocked = 0;
             for (int i = 0; i < count; i++)
             {
+                int start = original.GetPos();
                 var id = original.ReadZDOID();
-                if (protectedId(id)) blocked++; else invalid.Add(id);
+                if (!protectedId(id)) continue;
+                blocked++; invalidBlocked++;
+                (removed ??= new()).Add((start, original.GetPos() - start));
             }
-            var output = new ZPackage();
-            output.Write(invalid.Count);
-            foreach (var id in invalid) output.Write(id);
             int records = 0;
             while (true)
             {
+                int start = original.GetPos();
                 var id = original.ReadZDOID();
                 if (id.IsNone()) break;
                 if (++records > MaximumRecords) throw new InvalidDataException("Too many ZDO records.");
                 ushort ownerRevision = original.ReadUShort();
                 uint revision = original.ReadUInt();
-                long owner = original.ReadLong();
-                var position = original.ReadVector3();
-                var data = ReadPackage(original);
-                if (protectedId(id)) { blocked++; rejectedRecords.Add((id, revision, ownerRevision)); continue; }
-                output.Write(id); output.Write(ownerRevision); output.Write(revision);
-                output.Write(owner); output.Write(position); output.Write(data);
+                original.ReadLong();
+                original.ReadVector3();
+                int length = original.ReadInt();
+                if (length < 0 || length > MaximumPacketBytes || length > original.Size() - original.GetPos())
+                    throw new InvalidDataException("Invalid embedded package length.");
+                original.SetPos(original.GetPos() + length);
+                if (!protectedId(id)) continue;
+                blocked++;
+                (removed ??= new()).Add((start, original.GetPos() - start));
+                (rejectedRecords ??= new()).Add((id, revision, ownerRevision));
             }
             if (original.GetPos() != original.Size()) throw new InvalidDataException("Trailing ZDO data.");
-            output.Write(ZDOID.None); output.SetPos(0);
+            if (blocked == 0) return original;
+            byte[] source = original.GetArray();
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            writer.Write(count - invalidBlocked);
+            int offset = cursor + sizeof(int);
+            foreach (var range in removed!)
+            {
+                writer.Write(source, offset, range.Start - offset);
+                offset = range.Start + range.Length;
+            }
+            writer.Write(source, offset, source.Length - offset);
+            var output = new ZPackage(stream.ToArray());
             // Do not change authority until the complete packet has validated.
-            if (rejected != null) foreach (var record in rejectedRecords) rejected(record.Id, record.Data, record.Owner);
+            if (rejected != null && rejectedRecords != null)
+                foreach (var record in rejectedRecords) rejected(record.Id, record.Data, record.Owner);
             return output;
         }
         finally { original.SetPos(cursor); }

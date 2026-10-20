@@ -106,7 +106,8 @@ internal static class SharedMapResourceTests
         Check(pins.Single(p => p.Owner == SharedMapTableData.ResourceOwner).Type == 3, "Resources did not use the dot/service owner.");
         Check(SharedMapTableData.Merge(map, merged, out _, Array.Empty<MapMarker>(), resources: resource) == null, "Unchanged resources rewrote a table.");
         var portal = new[] { new MapMarker("Tin (2)", 0, 1, 0, "portal") };
-        byte[] both = SharedMapTableData.Merge(map, merged, out _, portal, true, resources: resource)!;
+        // Isolate label reconciliation from the independently configurable proximity rule.
+        byte[] both = SharedMapTableData.Merge(map, merged, out _, portal, true, resources: resource, resourceMarkerHideDistanceMeters: 0)!;
         Check(Pins(both).Any(p => p.Owner == SharedMapTableData.ResourceOwner) && Pins(both).Any(p => p.Owner == SharedMapTableData.PortalOwner), "Matching portal/resource labels removed a managed source.");
         byte[] disabled = SharedMapTableData.Merge(map, merged, out _, Array.Empty<MapMarker>(), resources: Array.Empty<MapMarker>())!;
         Check(Pins(disabled).Count == 1 && Pins(disabled)[0].Raw.SequenceEqual(personal.Raw), "Disabling resources removed a personal pin or retained generated pins.");

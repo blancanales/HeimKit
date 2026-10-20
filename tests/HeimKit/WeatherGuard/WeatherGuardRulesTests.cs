@@ -55,6 +55,7 @@ internal static class WeatherGuardRulesTests
         var claimed = new ZDOID(1L, 10U); var ordinary = new ZDOID(2L, 20U);
         var packet = Packet(claimed, ordinary); var bytes = packet.GetArray();
         var unchanged = WeatherGuardNetworkFilter.FilterData(packet, _ => false, out int zero);
+        Check(ReferenceEquals(packet, unchanged), "Unprotected packet filtering must reuse the validated original packet.");
         Check(zero == 0 && bytes.SequenceEqual(unchanged.GetArray()) && packet.GetPos() == 0 && bytes.SequenceEqual(packet.GetArray()), "unprotected packets remain byte-identical and original cursor/bytes untouched");
         var output = WeatherGuardNetworkFilter.FilterData(packet, id => id == claimed, out int blocked);
         Check(blocked == 2 && packet.GetPos() == 0 && bytes.SequenceEqual(packet.GetArray()), "protected state and sector invalidation filtered without changing source");

@@ -13,6 +13,7 @@
     <Reference Include="0Harmony"><HintPath>$(BepInExCore)\0Harmony.dll</HintPath></Reference>
     <Reference Include="assembly_valheim"><HintPath>$(GameManaged)\assembly_valheim.dll</HintPath></Reference>
     <Reference Include="assembly_utils"><HintPath>$(GameManaged)\assembly_utils.dll</HintPath></Reference>
+    <Reference Include="SoftReferenceableAssets"><HintPath>$(GameManaged)\SoftReferenceableAssets.dll</HintPath></Reference>
     <Reference Include="Splatform"><HintPath>$(GameManaged)\Splatform.dll</HintPath></Reference>
     <Reference Include="UnityEngine"><HintPath>$(GameManaged)\UnityEngine.dll</HintPath></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(GameManaged)\UnityEngine.CoreModule.dll</HintPath></Reference>

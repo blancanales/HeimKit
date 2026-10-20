@@ -1,5 +1,6 @@
 # WeatherGuard specification
 
+Gameplay and observation limitations: [safety and limitations](../limitations.md).
 ## Purpose and scope
 
 WeatherGuard automatically protects eligible player-built structural pieces from rain and wetness wear on a Windows Valheim dedicated server. Existing creator ownership is preserved. Activation requires no player repair, logout, rejoin or manual refresh. Unclaimed world-generated pieces are not protected or claimed by the current code.
@@ -8,9 +9,7 @@ The module uses BepInEx and Harmony and is designed for unmodified clients. Supp
 
 ## Configuration
 
-Automatic Debug output follows the shared [five-minute empty-server pause](../architecture.md#empty-server-debug-pause). Reconnection resumes eligible diagnostics without restarting the feature; warnings, errors, requested reports and gameplay remain available.
-
-The shared [hidden debug suppression contract](../server-setup.md#hidden-per-feature-debug-suppression) applies in this feature's existing configuration section. Settings resolve it through DebugLoggingResolver; effective debug policy gates optional output and diagnostic collection while gameplay and standard lifecycle/warnings/errors remain active. The key has no generated default.
+Debug settings use the [shared suppression contract](../server-setup.md#hidden-per-feature-debug-suppression).
 
 | Section | Setting | Default | Behavior |
 | --- | --- | --- | --- |
@@ -71,15 +70,17 @@ These timing and damage values come from Valheim's own compiled dedicated-server
 | Weather-damage amount | The same method contributes `5f` to percentage wear and converts percentage wear to health damage using `num / 100f * m_health`: five percent of maximum health from the weather branch. Other native branches can contribute to the same wear total. |
 | Subsequent intervals | After a weather-damage contribution, the timer is set to the current wear time. A dry update inside the weather branch resets it to zero. The branch is evaluated only while the native health fraction is above `0.5f` and the piece is unshielded. |
 | Final damage restrictions | `WearNTear.UpdateWear` cancels percentage wear for a piece that cannot be removed and suppresses its application when `NoBuildingFall` is active. |
-| Roof-cache refresh | `WearNTear.UpdateCover(float dt)` refreshes cover after its accumulated timer exceeds `4f`, when the environment is wet or the piece is in Deep North. `WearNTearUpdater.UpdateWearNTear` schedules these calls; this accumulator threshold must not be treated as a guaranteed four-second wall-clock delay. |
+| Roof-cache refresh | `WearNTear.UpdateCover(float dt)` refreshes cover after its accumulated timer exceeds `4f`, when the environment is wet or the piece is in Deep North. `WearNTearUpdater.UpdateWearNTear` schedules these calls; the accumulator is advanced by native scheduling. |
 
-The first rain-damage opportunity occurs on the first qualifying wear update after the wet timer exceeds 60 game-time seconds, following any loading and cover-detection delay. Periodic update scheduling adds delay. Therefore there is no unconditional fixed duration measured from player spawn; elapsed time alone does not establish qualifying exposure.
+The first rain-damage opportunity occurs on the first qualifying wear update after the wet timer exceeds 60 game-time seconds, following any loading and cover-detection delay. Periodic update scheduling adds delay. Timing begins from the native qualifying wetness state, not character spawn.
 
 WeatherGuard allows the native wet timer to run and suppresses the weather contribution only when the native method reaches its addition. It does not estimate prevented damage from a shadow wet duration or from unchanged health. Native server wetness can differ from a remote player's local weather; biome context and the server wet flag are logged separately.
 
 ## Client-update guards
 
 Incoming connected-client state records and sector invalidations for protected IDs are excluded from ZDO packets. Unprotected records retain their original content. Packet parsing preserves the original cursor and validates the complete packet before applying metadata corrections. Embedded ZDO and relevant routed-packet lengths must fit the remaining bytes and packet-size limit before allocating a payload buffer; trailing routed data is rejected. Unrelated routed traffic retains native decoding.
+
+State filtering validates embedded body lengths and advances across opaque bodies without allocating nested packages. If no records are excluded, return the original packet after complete validation. Otherwise copy surviving byte ranges into one replacement, preserving record bytes and the native terminator. Rejection callbacks run only after complete validation and replacement preparation.
 
 Rejected client revisions at or above the server's revisions cause the server to advance its metadata and resend its own snapshot. Client health, support and creator values are not accepted. Revision overflow disables the module rather than wrapping.
 
@@ -95,7 +96,7 @@ Client health, snow and fragment broadcasts for protected pieces are rejected. P
 | Filtered packet size | 2 MiB |
 | Packet record count | 32,768 |
 
-Capacity warnings state that unmanaged pieces remain under vanilla processing. Context loading and ownership handover may delay protection. Loading additional terrain and network objects increases server work.
+Capacity warnings state that unmanaged pieces remain under vanilla processing. Context loading is budgeted separately from ownership acquisition.
 
 Disabling, shutdown or module failure deactivates patches and releases network ownership, forcing released snapshots to connected peers in the same world. Cleanup attempts every retained piece even if one release fails, reports failures and clears local tracking. A replacement world is never used to send old ownership snapshots. Other modules remain independent. The implementation does not persist a weather flag, claim marker or new creator. It does not automatically remove custom fields already stored in a world by another implementation.
 
@@ -103,7 +104,7 @@ Disabling, shutdown or module failure deactivates patches and releases network o
 
 WeatherGuardCoverageRequests handles the fixed local request file in the loader config directory at most once per second. The [admin access procedure](../server-setup.md#requested-weatherguard-coverage) is filesystem-authorized and requires no client changes or debug enablement. The file is consumed before producing a single ordinary requested SUMMARY. Access warnings are bounded until successful consumption; report exceptions are isolated from gameplay processing. The plugin ticks inactive modules for explicit administration, while each module continues gating gameplay by IsActive. WeatherGuard reports inactive/unobserved scope when disabled or awaiting world services rather than performing a whole-world scan.
 
-WeatherGuardController builds coverage data only on request from the retained nearby record set and the most recent player-region scan. Eligibility and exact exclusions use the same selection as acquisition; loaded-instance validity, native current owner, terrain and cached surrounding-context readiness establish protected counts. Scan age and capacity limitations are explicit. CoverageSnapshot partitions observed records into eligible/skipped, and eligible records into protected/waiting; unloaded eligible records are a waiting subset. Skipped reasons include records that are not structural candidates. Distant records and world areas outside retained scope are not evaluated. Unknown counts are distinct from measured zeros. Rain/underwater configuration describes channels, not proven prevented damage. WeatherGuardDiagnostics formats requested reports independently of automatic debug gating and budgets.
+WeatherGuardController builds coverage data only on request from the retained nearby record set and the most recent player-region scan. Eligibility and exact exclusions use the same selection as acquisition; loaded-instance validity, native current owner, terrain and cached surrounding-context readiness establish protected counts. Scan age and capacity limitations are explicit. CoverageSnapshot partitions observed records into eligible/skipped, and eligible records into protected/waiting; unloaded eligible records are a waiting subset. Skipped reasons include records that are not structural candidates. Distant records and world areas outside retained scope are not evaluated. Unknown counts are distinct from measured zeros. Rain/underwater fields identify configured channels. WeatherGuardDiagnostics formats requested reports independently of automatic debug gating and budgets.
 
 ## Logging
 
@@ -119,7 +120,7 @@ Detailed includes the Medium path plus loading, exclusions, capacity and omitted
 
 Up to three exposed player-built pieces and optional world-created controls retain sampled health histories. Individual RESULT entries are emitted for newly observed health loss, including loss followed by repair. Unchanged health produces no routine per-piece result; suppression counts belong in grouped summaries and the normal prevention notice. Health loss retains its measured amount and identity without attributing an unknown cause to weather. Native command exceptions remain Error. Diagnostic collection does not alter roof, wetness, timers, creator or gameplay decisions.
 
-Normal output for prevention is tied to one complete native WearNTearUpdater wear sweep. UpdateWearNTear processes the scheduled pieces across multiple frame calls, retaining a nonzero m_index while more remain and returning it to zero when the sweep finishes. Confirmed pieces accumulate across those calls and are reported only at that completed-sweep boundary. The updater index API is checked during installation; partial sweeps emit no result. Failure, pause, shutdown and world replacement discard unfinished sweep data. A successful protected UpdateWear invocation records its distinct piece only after a configured native weather contribution was removed and final native removability/NoBuildingFall restrictions would permit damage. On successful sweep completion, emit one Info entry: `WeatherGuard: Prevented weather damage to N pieces.` For exactly one piece, identify its captured registered prefab name and object ID instead: `WeatherGuard: Prevented weather damage to wood_stair (piece 1:341004).` If the prefab is unavailable, retain the known piece ID. Multiple pieces emit the count only, without separate per-piece entries. Player-built eligibility remains a documented scope rule and is not repeated in this Info wording. Piece identity is captured before native wear executes, so successful native processing can still report it if the object is removed by another native wear cause. Duplicate identities within the sweep count once; empty, unsuccessful or failed batches emit no successful result. A direct native wear invocation outside the updater is its own single-piece pass. A later genuine weather-damage opportunity can report prevention again. This event reports removal of the native weather contribution, never prevention of support/combat damage, preservation of the entire piece or a client-visible health change. Ownership acquisition, exposed geometry and stable health alone cannot emit it.
+Normal output for prevention is tied to one complete native WearNTearUpdater wear sweep. UpdateWearNTear processes the scheduled pieces across multiple frame calls, retaining a nonzero m_index while more remain and returning it to zero when the sweep finishes. Confirmed pieces accumulate across those calls and are reported only at that completed-sweep boundary. The updater index API is checked during installation; partial sweeps emit no result. Failure, pause, shutdown and world replacement discard unfinished sweep data. A successful protected UpdateWear invocation records its distinct piece only after a configured native weather contribution was removed and final native removability/NoBuildingFall restrictions would permit damage. On successful sweep completion, emit one Info entry: `WeatherGuard: Prevented weather damage to N pieces.` For exactly one piece, identify its captured registered prefab name and object ID instead: `WeatherGuard: Prevented weather damage to wood_stair (piece 1:341004).` If the prefab is unavailable, retain the known piece ID. Multiple pieces emit the count only, without separate per-piece entries. Player-built eligibility remains a documented scope rule and is not repeated in this Info wording. Piece identity is captured before native wear executes, so successful native processing can still report it if the object is removed by another native wear cause. Duplicate identities within the sweep count once; empty, unsuccessful or failed batches emit no successful result. A direct native wear invocation outside the updater is its own single-piece pass. A later genuine weather-damage opportunity can report prevention again. This event reports removal of the native weather contribution. Ownership acquisition, exposed geometry and stable health alone cannot emit it.
 
 ## Source responsibilities
 
@@ -147,20 +148,13 @@ User installation and general configuration belong in [server setup](../server-s
 
 ConfigurationLoader manages the shared file, and DiagnosticsSettings binds the common debug switch. The main class activates the controller only after enable and compatibility checks pass and world services are ready; the controller performs gameplay work and reports processing failures to the main class.
 
-Gameplay lifecycle uses the shared joined-world state, established by native character spawning rather than an incoming connection or login handshake. After its own cleanup completes, the module acknowledges an empty-server pause to the shared service. One shared PlayerPresence notice confirms all features are inactive until a player joins; individual empty-server notices are suppressed. After a player joins, the shared active notice waits for successful initialization of all enabled consumers. Each enabled module reports Ready once when its required dedicated-server services become available, regardless of players. This indicates readiness to process, not installed player-dependent hooks or a verified gameplay effect. Individual processing activation and pause reasons belong in Debug, including later starts; no per-feature Resumed notice appears in normal output. Death/respawn does not end a joined session. See the [shared lifecycle](../architecture.md#presence-driven-lifecycle).
-
 Normal prevention output follows the native weather-contribution/pass contract in [Logging](#logging). Acquisition and geometry checks are Debug evidence only.
 
-Processing capacity degradation produces one Warning when the limit is reached, not one warning per unmanaged piece or poll. WeatherGuardDiagnostics.CapacityState reports one Info recovery when a later scope scan clears that limit. Recovery states only that the processing limit cleared; it does not prove full-world protection or weather-damage prevention. Exclusion-list setup warnings include the rejected/unknown count and the setting to review. Individual acquisition and per-piece evidence remain optional Debug output; requested coverage reports remain separately available. See the [standard logging contract](../architecture.md#standard-feature-events-and-grouping).
-
-Debug policy startup declarations follow the [shared contract](../architecture.md#debug-policy-startup-declaration), identifying global/feature enablement and hidden suppression independently of gameplay enablement.
+Processing capacity degradation produces one Warning when the limit is reached, not one warning per unmanaged piece or poll. WeatherGuardDiagnostics.CapacityState reports one Info recovery when a later scope scan clears that limit. Recovery identifies the cleared processing limit. Exclusion-list setup warnings include the rejected/unknown count and the setting to review. Individual acquisition and per-piece evidence remain optional Debug output; requested coverage reports remain separately available. See the [standard logging contract](../architecture.md#standard-feature-events-and-grouping).
 
 WeatherGuard retains the shared DebugLoggingPolicy through its controller and diagnostics, rather than copying an initial boolean. Each diagnostic opportunity reads the current loaded global-or-feature setting and suppression/activity gates. This does not add automatic configuration-file reload; file edits still require the documented restart.
 
-Detected loader Debug filtering is explained by a Warning followed immediately by Info instructions for the affected outputs; see [server configuration](../server-setup.md#configuration).
-
-The native environment update depends on a main camera and can return before selecting a local environment on a headless server. EnvMan.IsWet and the reported server_environment are server-wide observations, not weather measurements at each remote player or structure. Fresh roof geometry and native cached cover remain separate observations; a dry server environment does not establish dry conditions at a player's swamp building. Ownership and geometry establish diagnostic scope; normal prevention requires removal of an actual native weather contribution.
-
+The native environment update depends on a main camera and can return before selecting a local environment on a headless server. EnvMan.IsWet/server_environment identify server-wide context; RoofCheck and cached cover remain separate fields. See [weather observation limits](../limitations.md#weatherguard-and-infinitetorches). Ownership and geometry establish diagnostic scope; normal prevention requires removal of an actual native weather contribution.
 
 ### Exposure counts and biome evidence
 
@@ -170,4 +164,4 @@ Piece biomes come from WorldGenerator at each checked piece position; ready play
 
 ## Game-version compatibility
 
-Before activation, the module uses the shared GameVersionCompatibility policy and compares the observed game version to its exact requirement. The [manual version override](../server-setup.md#hidden-version-override) replaces that requirement without bypassing Enabled, native readiness, API/signature checks or isolated failure handling. Compatibility policy and warning ownership follow [architecture](../architecture.md#configuration).
+Use the shared [compatibility contract](../architecture.md#configuration) before activation.

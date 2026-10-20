@@ -33,6 +33,8 @@ internal static class SharedMapTests
                 "Automatic portals and default grouping were not configured independently.");
             Check(settings.ResourceMarkerSync.Value && !settings.ResourceDiscoverPreviouslyExplored.Value,
                 "Resource sync must default on while retrospective discovery defaults off independently.");
+            Check(settings.DungeonMarkerSync.Value && !settings.DungeonDiscoverPreviouslyExplored.Value && settings.AllowPlayerMapWrites.Value,
+                "Dungeon sync and player writes must default on; retrospective dungeon discovery must default off.");
             Check(settings.PinDebugNameFilter.Value == "", "Pin debug filter must default to all labels.");
             Check(settings.SilverDiscoveryRadiusMeters.Value == 10, "Silver discovery must default to 10 metres.");
             Check(settings.ResourceClusterDistanceMeters.Value == 30 && settings.ResourceRemoveDepleted.Value,
