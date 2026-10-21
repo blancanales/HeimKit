@@ -7,6 +7,7 @@ Install HeimKit on a Windows Valheim dedicated server. Players use unmodified cl
 | Item | Current baseline |
 | --- | --- |
 | HeimKit release baseline | 0.1.55 |
+| HeimKit development build | 0.1.56-world-features.10 |
 | Valheim Dedicated Server | 1.0.20; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
@@ -14,6 +15,10 @@ Install HeimKit on a Windows Valheim dedicated server. Players use unmodified cl
 | Build output | `src/HeimKit/bin/<Debug or Release>/netstandard2.1/HeimKit.dll` |
 
 This section is the sole documentation source for HeimKit's supported game, loader, runtime and framework versions. Other documents link here rather than repeating version values. Update this baseline when code guards and dependencies change.
+
+## Live building-restoration settings
+
+[HeimMender](features/heim-mender.md) owns live reload of its section in the existing config file, including enabled/debug controls and a numbered administrative repair request. Save a complete valid section; malformed values retain current settings. Other sections require their documented restart.
 
 ## SharedMap module
 
@@ -63,7 +68,7 @@ Absent values use the audited baseline. Invalid/unreadable values warn once and 
 
 Shared sections `[Diagnostics]` and `[PlayerActivity]` precede feature sections. Startup preserves existing values and adds missing defaults. Use [config/heimkit.cfg](../config/heimkit.cfg) as a reference; keep the active file when upgrading.
 
-Feature controls are documented in their guides: [InfiniteTorches](features/infinite-torches.md#configuration), [WeatherGuard](features/weather-guard.md#scope-and-configuration), [AFKNightWatch](features/afk-night-watch.md#configuration), [AFKRaidWatch](features/afk-raid-watch.md#configuration) and [SharedMap](features/shared-map.md#configuration). Stop the server before configuration edits and restart afterward.
+Feature controls are documented in their guides: [InfiniteTorches](features/infinite-torches.md#configuration), [WeatherGuard](features/weather-guard.md#scope-and-configuration), [AFKNightWatch](features/afk-night-watch.md#configuration), [AFKRaidWatch](features/afk-raid-watch.md#configuration), [SharedMap](features/shared-map.md#configuration), [TameTravel](features/tame-travel.md#configuration), [DoorKeeper](features/door-keeper.md#configuration), [ForestRenewal](features/forest-renewal.md#configuration) and [SeaSalvage](features/sea-salvage.md#configuration). Stop the server before configuration edits and restart afterward.
 
 ### Diagnostics
 
@@ -131,4 +136,4 @@ Each enabled module reports Ready once when native services are available. After
 
 Read the active `BepInEx/LogOutput.log` and confirm the launch route, configuration path, build identity and compatibility notices. Remove credentials/join codes before sharing logs. Feature guides explain processing fields; [limitations](limitations.md) explains visibility and timing.
 
-To disable a module, stop the server, set its Enabled=false and restart. To remove HeimKit, stop the server and remove its DLL from the active profile/server installation. Torch fuel remains ordinary native data. WeatherGuard releases ownership and adds no persisted protection/creator flag. Preserve SharedMap stores for later use or matching recovery.
+To disable HeimMender, save Enabled=false in its live section. For other modules, stop the server, set Enabled=false and restart. To remove HeimKit, stop the server and remove its DLL from the active profile/server installation. Torch fuel remains ordinary native data. WeatherGuard releases ownership and adds no persisted protection/creator flag. Preserve SharedMap stores for later use or matching recovery.

@@ -2,7 +2,7 @@
 
 ![HeimKit: shield and longhouse emblem beside the HeimKit name](docs/images/heimkit-banner.jpg)
 
-Quality-of-life features for Windows Valheim dedicated servers: infinite torches, shared map exploration and markers, weather protection, majority sleep and AFK raid protection.
+Quality-of-life features for Windows Valheim dedicated servers: infinite torches, shared map exploration and markers, weather protection, majority sleep, AFK raid protection, tame portal travel, door closing, tree renewal, sunken-loot recovery and gradual building repairs.
 
 Install on the server. Players use unmodified Valheim clients. Choose each feature independently in `heimkit.cfg`.
 
@@ -52,6 +52,36 @@ Optional settings discover resources/dungeons in previously explored terrain or 
 
 [Usage, settings and administration](docs/features/shared-map.md) · [Specification](docs/specs/shared-map.md)
 
+### DoorKeeper
+
+Closes eligible player-built doors and gates after a delay once players clear the doorway. Native manual access remains; keyed and special doors are excluded. Defaults enabled.
+
+[Usage and settings](docs/features/door-keeper.md) · [Specification](docs/specs/door-keeper.md)
+
+### TameTravel
+
+Brings explicitly following or portal-waiting tamed wolves, boars, lox, asksvin, hens and moose along a validated trip between linked outdoor portals. Preserves the same animal and its saved state. Follow, stay and portal-wait commands have vanilla emote fallbacks. Explicit followers can use configurable stopping distance through bounded server control. Defaults enabled.
+
+[Usage and settings](docs/features/tame-travel.md) · [Specification](docs/specs/tame-travel.md)
+
+### ForestRenewal
+
+Renews supported trees from stumps left behind or their confirmed-cleared locations, using vanilla saplings, renewal chance, delay, terrain/building exclusions and persisted cooldowns. Native growth requirements remain. Defaults enabled.
+
+[Usage and settings](docs/features/forest-renewal.md) · [Specification](docs/specs/forest-renewal.md)
+
+### SeaSalvage
+
+Recovers eligible stable sunken item drops into ordinary floating cargo crates while preserving native item data. Active client-owned and unsupported drops wait or remain untouched. Defaults enabled.
+
+[Usage and settings](docs/features/sea-salvage.md) · [Specification](docs/specs/sea-salvage.md)
+
+### HeimMender
+
+Gradually repairs damaged player-built structures with configurable cycles, chance and limits. Administrators can request nearby repairs, and its settings reload during play. Defaults enabled.
+
+[Usage and administration](docs/features/heim-mender.md) · [Specification](docs/specs/heim-mender.md)
+
 ## Setup and compatibility
 
 Windows dedicated servers with BepInExPack Valheim are supported. See [supported environment](docs/server-setup.md#supported-environment) for exact requirements and [safety and limitations](docs/limitations.md) for gameplay/client constraints.
@@ -66,6 +96,11 @@ Follow [server setup](docs/server-setup.md#installation) for Thunderstore Mod Ma
 - [Safety and limitations](docs/limitations.md): world risks, server observations and client limitations.
 - [World backups](docs/world-backups.md): matching world and SharedMap backups/recovery.
 - [SharedMap](docs/features/shared-map.md): exploration, marker options, uploads and pin administration.
+- [DoorKeeper](docs/features/door-keeper.md): delayed door closing.
+- [ForestRenewal](docs/features/forest-renewal.md): optional sapling renewal.
+- [SeaSalvage](docs/features/sea-salvage.md): floating recovery cargo.
+- [TameTravel](docs/features/tame-travel.md): explicit followers through linked outdoor portals.
+- [HeimMender](docs/features/heim-mender.md): gradual and administrative building repairs.
 - [Development](docs/development.md): build and packaging commands.
 - [Architecture](docs/architecture.md): shared design and lifecycle contracts.
 - [Contributing](docs/contributing.md): source/documentation procedures.

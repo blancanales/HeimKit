@@ -2,7 +2,7 @@
 
 ## Scope and current status
 
-HeimKit is one C# BepInEx plugin for Windows dedicated servers. InfiniteTorches, WeatherGuard, AFKNightWatch, AFKRaidWatch and SharedMap are independently configured modules. SharedMap owns terrain/table filtering and optional portal, resource, dungeon, runestone and recurring-spawner markers. See [feature specifications](specs) for behavior and [supported environment](server-setup.md#supported-environment) for versions.
+HeimKit is one C# BepInEx plugin for Windows dedicated servers. InfiniteTorches, WeatherGuard, AFKNightWatch, AFKRaidWatch, SharedMap, DoorKeeper, ForestRenewal, SeaSalvage and TameTravel are independently configured modules. SharedMap owns terrain/table filtering and optional portal, resource, dungeon, runestone and recurring-spawner markers. See [feature specifications](specs) for behavior and [supported environment](server-setup.md#supported-environment) for versions.
 
 Modules must work with unrelated modules disabled and isolate failures/cleanup. This document owns shared design; [contributing](contributing.md) owns procedures, [server setup](server-setup.md) owns operations, and [limitations](limitations.md) owns user-facing caveats.
 
@@ -64,7 +64,7 @@ Each module implements `IServerModule`:
 | `Tick(now)` | Perform module work only when enabled and compatible; respect scheduling. |
 | `Shutdown()` | Stop work and release module resources. Safe to repeat. |
 
-Disabled modules must not scan world objects, send gameplay messages or install active patches. The entry point may tick inactive modules to service explicit local administration. A module must gate gameplay independently; WeatherGuard's requested coverage reports describe inactive/unobserved scope without starting a controller or scanning world objects. Shut down scheduled work and remove any owned patches/subscriptions when those mechanisms are added. Current config edits require a server restart; live toggling is not advertised.
+Disabled modules must not scan world objects, send gameplay messages or install active patches. The entry point may tick inactive modules to service explicit local administration. A module must gate gameplay independently; WeatherGuard's requested coverage reports describe inactive/unobserved scope without starting a controller or scanning world objects. Shut down scheduled work and remove any owned patches/subscriptions when those mechanisms are added. Config edits require a server restart except HeimMender's feature-owned, debounced section reload. That observer remains independent of gameplay and cannot change other modules.
 
 A module error must disable and report that module rather than deliberately disabling unrelated modules. The entry point catches lifecycle failures per module. Shared ModuleCleanup reports cleanup errors and continues remaining cleanup steps; feature controllers clear active registrations before disposing them. Cleanup errors must not interrupt other modules. Construction/registration failures are also caught per module. A failure in the shared configuration setup currently prevents startup and must be reported clearly.
 
@@ -244,6 +244,10 @@ Current hookups:
 | AFKRaidWatch | Automatic raid candidate hooks | While its ready controller runs | None |
 | InfiniteTorches | Refill controller and pending requests | None | None |
 | WeatherGuard | Protection controller, gameplay hooks and retained ownership | None | Explicit coverage requests (administration/status) |
+| DoorKeeper | Door/context observations, native instances and ownership fencing | None | None |
+| ForestRenewal | Standing-stump/destruction observation, durable renewal decisions, structure footprints and fenced stump-to-sapling replacement | None | None |
+| SeaSalvage | Source settling, terrain/water context, item transfer and short source ownership fences | None | None |
+| TameTravel | Authenticated follow commands, portal traversal observations, destination context and original-animal ownership transactions | None | None |
 | SharedMap | Position sampling, portal/resource/dungeon/runestone/spawner discovery, depletion observation, grouping/publication selection, table initialization and map-field filtering; world map and publication state retained across pauses | None | Dirty terrain/discovery/publication-state saves and lifecycle flushes (save management); absent-file first-run read-only table import (intentional offline world processing) |
 
 ### Integrating a consumer
@@ -263,11 +267,27 @@ Shared world state and network ownership are different concerns. Inspect both cl
 
 Use vanilla-compatible mechanisms and verify ownership transitions. Review changed APIs and update the relevant spec before changing the built-in audited version. Operators can explicitly replace the exact version requirement through the [hidden version override](server-setup.md#hidden-version-override); this does not change the documented audited baseline or bypass runtime compatibility checks.
 
+## Native world operations
+
+DoorKeeper and SeaSalvage share ServerObjectAuthority and NativeZdoPackets for explicitly retained native-record ownership, packet provenance, stale-data/destruction fencing and release. DoorKeeper permits the native door/damage/repair/removal commands; unpublished salvage sources permit none. Consumers release their own records; native assignments resume after release. Unreadable guarded packets are rejected with a bounded shared Error incident rather than disabling independent consumers; an exhausted object revision fails only its owning consumer. The native scene includes retained door instances while owned. Existing WeatherGuard authority remains independent.
+
+PlayerWorldScope reads the Plugin-owned presence roster, rejects unavailable actors and rotates one actor's bounded sector scope per pass. Its player-clearance checks use current positions and prior movement segments. ForestRenewal and SeaSalvage share NativeWorldObject for ordinary persistent native ZDO creation. WorldTerrainContext retains native terrain/compiler instances and supports DoorKeeper's surrounding-world context; consumers release these inclusions on pause/failure/world replacement. Native scene removal handles released instances without deleting their persistent world records.
+
+Ordinary result grouping for the new modules is one confirmed closed-door, placed-sapling or transferred-item-drop count per pass. Optional summaries report only changed current scope and pass/lifetime results, at most once per 60 seconds. ForestRenewal's durable consumed decisions are save management triggered by occupied gameplay: one immutable ledger snapshot writes in the background, and main-thread world mutation waits for its acknowledged generation; it performs no offline renewals.
+
+TameTravel also owns bounded, explicitly requested follower spacing, with original-record draining before server simulation, ready scene context and release for native riding or portal reservation. Its follow hook changes only retained animals' follow movement; native combat remains. TameTravel owns its traversal/animal transaction fence because source-state draining and destination-owner reconciliation differ from retained static objects. It reuses NativeZdoPackets for native payload boundaries and WorldTerrainContext for destination scene preparation. Authenticated player-data application observes fresh vanilla emotes; PlayerRoutedMessages supplies shared routed input and native ping echoes. Follow/stay results remain per named player, and travel counts group per journey, distinguishing relocation from confirmed resumed ownership. Debug evidence has a separate bounded feature budget.
+
 ## Contributor procedures
+
+TameTravel retains a bounded queue of successfully applied owner-position updates alongside authenticated emote observation. Native network callbacks capture evidence only; the feature controller performs source/destination validation, world queries and animal transactions. Traversal diagnostics have their own bounded stream so follow-motion samples cannot suppress entry and cancellation evidence.
 
 Follow [contributing.md](contributing.md) to add or change a feature. Each feature owns a settings class, a main lifecycle class and a Models folder when data types are needed. Helpers follow actual responsibilities rather than a fixed template. Shared ConfigurationLoader handles the single config file; DiagnosticsSettings binds the common debug switch. Feature constructors bind settings before the loader saves and Plugin initializes modules.
 
 Build commands and development references are maintained in [development](development.md). Supported versions and installation belong in [server setup](server-setup.md).
+
+## Native character and terrain readiness
+
+Shared world processing uses NativeCharacterHealth for native living/dead eligibility: an omitted saved health field is the native full-health representation, while explicit nonfinite/nonpositive health remains invalid. This helper never fills in or changes health. WorldTerrainContext verifies native compiler initialization and heightmap/paint readiness before loading saved terrain; only the verified native early-return initialization path is resumed. Incomplete context postpones dependent gameplay, while unexpected failures retain module isolation.
 
 ## Documentation content
 
@@ -282,3 +302,9 @@ Keep one current guide and one current specification per feature. Do not append 
 WeatherGuard retains the shared DebugLoggingPolicy through its controller and diagnostics, rather than copying an initial boolean. Each diagnostic opportunity reads the current loaded global-or-feature setting and suppression/activity gates. This does not add automatic configuration-file reload; file edits still require the documented restart.
 
 DebugLoggingDelivery inspects known native listeners during startup and explains excluded Debug severity through Warning/Info. It preserves listener settings; the operator procedure is in [server configuration](server-setup.md#diagnostics).
+
+HeimMender owns native repair selection, bounded batches and confirmation, terminal administration and its section-only live configuration observer under its feature folder. Only operator-request/configuration handling remains active without presence; repairs always require joined players. Normal results group confirmed repairs by completed automatic or administrative batch; owner, health, queue and deferral evidence remains in Debug.
+
+World-feature Diagnostics own optional shared ProcessingTiming scopes. Effective debug suppression prevents their allocation. They report nonempty controller scope and interval average/maximum milliseconds at most once per minute, excluding native work scheduled outside the controller pass.
+
+Shared ServerObjectAuthority resolves its complete native patch set using exact parameter signatures before installation. The active-area hook targets the instance Vector3 overload; static overloads are distinct native APIs. Constructor rollback removes partial hooks.

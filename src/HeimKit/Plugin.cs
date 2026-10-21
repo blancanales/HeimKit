@@ -11,10 +11,15 @@ using HeimKit.Shared.Players;
 using HeimKit.Features.AFKRaidWatch;
 using HeimKit.Features.SharedMap;
 using UnityEngine;
+using HeimKit.Features.DoorKeeper;
+using HeimKit.Features.ForestRenewal;
+using HeimKit.Features.SeaSalvage;
+using HeimKit.Features.TameTravel;
+using HeimKit.Features.HeimMender;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.1.55")]
+[BepInPlugin("heimkit", "HeimKit", "0.1.56-world-features.10")]
 [BepInProcess("valheim_server.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -26,9 +31,9 @@ public sealed class Plugin : BaseUnityPlugin
     {
         DiagnosticLog.StartSession();
 #if DEBUG
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.55. Build configuration: Debug.");
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.56-world-features.10. Build configuration: Debug.");
 #else
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.55. Build configuration: Release.");
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.56-world-features.10. Build configuration: Release.");
 #endif
         try
         {
@@ -40,6 +45,11 @@ public sealed class Plugin : BaseUnityPlugin
                 Register(() => new AFKNightWatch(config, Logger, _players), "AFKNightWatch");
                 Register(() => new AFKRaidWatch(config, Logger, _players), "AFKRaidWatch");
                 Register(() => new SharedMap(config, Logger, _players), "SharedMap");
+                Register(() => new DoorKeeper(config, Logger, _players), "DoorKeeper");
+                Register(() => new ForestRenewal(config, Logger, _players), "ForestRenewal");
+                Register(() => new SeaSalvage(config, Logger, _players), "SeaSalvage");
+                Register(() => new TameTravel(config, Logger, _players), "TameTravel");
+                Register(() => new HeimMender(config, Logger, _players), "HeimMender");
                 return config;
             });
         }

@@ -74,3 +74,4 @@ WeatherGuardExposureTrackingTests.Run();
 WeatherGuardWearPassTests.Run();
 
 WeatherGuardSettingsLoggingTests.Run();
+WorldAdditionsTests.Run();
