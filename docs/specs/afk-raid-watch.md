@@ -17,7 +17,7 @@ Use the shared [activity signals and recovery rules](../architecture.md#player-a
 
 ## Diagnostics and limitations
 
-Summaries describe actual candidate evaluations and exclusions, retaining outcome ages and unknown causes. Targeted bounded details retain native range/population, scope, gate counters, setter outcomes and start-request returns. Logging follows the [shared repetition requirements](../architecture.md#repetition-and-volume-limits) and empty-server debug pause. Changed summaries emit at most once per minute; unchanged relevant scope has one compact heartbeat per five minutes. Candidate RESULT and start/setter RESULT streams each cap at six per minute, and one targeted hook/schedule DETAIL can accompany a changed summary. The combined streams remain below the 60-record feature ceiling. Candidate reasons are semantically deduplicated in a 256-entry cache. Feature warning notices are throttled to five minutes. Incident-accounting limits are covered in [limitations](../limitations.md#server-observations-and-logs). Diagnostics cannot change gameplay eligibility.
+Summaries describe actual candidate evaluations and exclusions, retaining outcome ages and unknown causes. Targeted bounded details retain native range/population, scope, gate counters, setter outcomes and start-request returns. Logging follows the [shared repetition requirements](../architecture.md#repetition-and-volume-limits) and empty-server debug pause. Changed summaries emit at most once per minute; unchanged relevant scope has one compact heartbeat per five minutes. Candidate outcome sample and start/setter outcome sample streams each cap at six per minute, and one targeted hook/schedule evidence can accompany a changed summary. The combined streams remain below the 60-record feature ceiling. Candidate reasons are semantically deduplicated in a 256-entry cache. Feature warning notices are throttled to five minutes. Incident-accounting limits are covered in [limitations](../limitations.md#server-observations-and-logs). Diagnostics cannot change gameplay eligibility.
 
 ## Presence lifecycle
 
@@ -34,3 +34,7 @@ Standard Info output groups all actual candidate exclusions from one outer nativ
 ## Game-version compatibility
 
 Use the shared [compatibility contract](../architecture.md#configuration) before activation.
+
+## HeimKit Core integration
+
+The performance rebuild in `src/HeimKit2/Features/` consumes PlayerServices presence/activity leases, Core native target resolution and shared diagnostic budgets; no world subscription. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.

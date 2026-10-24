@@ -91,87 +91,78 @@ Each module has its own section and `Enabled` setting. Torch settings currently 
 
 ## Logging
 
-Info and Warning output uses a concise, human-readable format:
+HeimKit uses the topic-based grammar below. BepInEx adds its own severity/source prefix outside this record. Info and Warning wording is retained from HeimKit except for WeatherGuard's prevention roll-up; Debug and Error describe outcomes in complete sentences.
 
 ```text
-Feature: Message
+Info / Warning: HH:mm:ss Feature: Sentence.
+Debug / Error:  HH:mm:ss Feature.topic: Sentence. key=value key="value with spaces"
 ```
 
-Use one short sentence stating the status or problem. A warning includes its practical impact and an action when one is available. Do not append event categories, elapsed time, settings dumps, hook lists, schema metadata or metric fields. Essential information such as an unsupported version or a configuration filename may be included naturally in the sentence. Routine startup reports the application name/version, configuration loaded or created and each feature's configured Enabled/Disabled state. Each enabled feature subsequently reports `Feature: Ready.` once when its required dedicated-server services become available, regardless of players. Ready means the module is prepared to start player-dependent processing; it does not claim installed gameplay hooks or verified effects. Later processing activation and pauses belong in optional Debug output; normal active/inactive status belongs only to PlayerPresence. Normal startup waiting belongs at Debug; there is no overall plugin Ready message. Emit Ready once per module initialization session; player departures and later processing starts do not repeat it. Long behavior explanations belong in the feature guides. Configuration values, debug-policy resolution, hook registration and processing details belong in optional Debug output.
+Every record starts with server-local `DateTime.Now`, formatted with invariant culture. `DiagnosticLog.WallClock` is injectable. Startup also includes the full local date and time in its version sentence. Each record occupies one physical line; sentence control characters become spaces. Exception details use `error_type`, `error` and escaped `stack` fields, following the incident limits below. The elapsed-time field is absent. Debug policy declarations carry `log_schema=2`.
 
-Debug, Error and exception details use the structured format:
+`Core/Diagnostics/DiagnosticLog` owns formatting and severity preservation. Topics are immutable `LogTopic` values validated against `[a-z][a-z0-9_]*`. Shared topics live in Core; feature-owned topics live in each feature's LogTopics class.
 
-```text
-Feature: EVENT | Plain-language result | elapsed_s=value | field=value
-```
-
-BepInEx supplies the Debug, Info, Warning or Error prefix. Optional diagnostics use Debug; ordinary state output and explicitly requested admin reports use Info. Choose severity from the event's impact, not its formatter: Warning describes a recoverable problem or degraded behavior; Error describes a failed operation or disabled feature. An exception is not automatically fatal. A recoverable exception may have a concise Warning notice, but its exception type, message, stack and supporting fields use a structured Error record, subject to the incident limits below. Do not emit duplicate exception details from multiple layers for the same failure. DETAIL is an event category, not a separate configuration switch or BepInEx severity. Application version is visible at Info startup; `log_schema=1` belongs in Debug metadata. `elapsed_s` is monotonic wall-clock time since plugin startup; native game-clock values use separate fields such as `game_time_s` and observed wet duration.
-
-| Event | Meaning |
+| Shared topic | Meaning |
 | --- | --- |
-| LIFECYCLE | Startup, enabled/disabled state, readiness, warnings and failures. |
-| SUMMARY | Current scope and activity over a reporting interval. |
-| OBJECT | First observation, eligibility change or end of observation. |
-| ACTION | An operation performed or request sent; delivery is not implied. |
-| RESULT | An observed outcome, its measurements and any evaluation blockers. |
-| DETAIL | Supporting timing, loading, calculation or network evidence. |
+| `lifecycle` | Startup, readiness, enabled state and failures. |
+| `config` | Debug policy and settings declarations. |
+| `scope` | Current scope and changed processing summaries. |
+| `timing` | Bounded processing measurements. |
+| `presence` | Shared player connection and population observations. |
+| `afk` | Shared activity and idle-inference observations. |
 
-`Shared/DiagnosticLog` owns both formats and severity preservation. Structured field names contain letters, digits or underscores; project fields use snake_case. Values use invariant numeric formatting without rounding away measured precision, lowercase booleans and `unknown` for unavailable values. Structured backslashes, pipes, carriage returns and newlines are escaped as `\\`, `\|`, `\r` and `\n`, so each message occupies one physical line and delimiters in values are distinguishable. Simple messages retain readable paths and normalize embedded line breaks to spaces. Never treat unavailable client calculations as zero or infer damage cause from health change alone. Counter suffixes distinguish `_now` snapshots, `_pass` latest-pass counts, `_interval` reporting-window events and `_total` controller-lifetime totals.
+Feature topics and their subjects are listed in the [feature guides](features). A message must state its observed outcome and relevant reason without requiring the reader to interpret fields. Use an available character name in the sentence; supporting fields can retain object and peer identity. State the observation window in prose: this pass, the last minute or controller lifetime. Counter keys do not use snapshot, pass, interval or total suffixes; lifetime counters use a descriptive `lifetime_` prefix.
 
-Startup, readiness, warnings and errors remain visible with `[Diagnostics] DebugMode = false`. Optional troubleshooting requires global OR feature DebugMode and an unsuppressed feature policy; WeatherGuard level and world-item inclusion select diagnostic detail and scope without independently enabling diagnostics. Feature Diagnostics classes own message selection, evidence formatting and debug gating. `Shared/DiagnosticBudget` supplies reusable 60-second sample windows and omitted-message counts. `Configuration/DebugLoggingResolver` resolves the manual-only `DisableDebugLogging` key without binding absent defaults, and `DebugLoggingPolicy` computes (global DebugMode OR feature DebugMode) AND NOT feature suppression. All current modules use this policy. The key is omitted from generated and reference config; BepInEx preserves manually supplied unbound entries on save. Overrides are cached per loaded ConfigFile and feature section. Invalid/unreadable values suppress debug collection/output and produce one standard warning per section/configuration. The [configuration contract](server-setup.md#hidden-per-feature-debug-suppression) defines inheritance, preservation and restart behavior. Future features must use this resolver.
+### Fields and verbosity
 
-Controllers collect operational measurements and counters independently of printing limits. Feature suppression also skips optional diagnostic snapshots, roof probes and histories; required ownership, support context and refill tracking continue. A suppressed summary poll is not counted as an omitted event. Standard warnings and errors are independent of DebugMode and debug sampling; repeated incidents use the separate limits below.
+Fields use logfmt with exactly one separating space. Keys match `[a-z][a-z0-9_]*` and are unique within a record. Values are unquoted unless empty or containing a space, quote, equals sign, backslash or control character. Quoted values escape backslashes, quotes, newlines and carriage returns; other control characters are escaped as well. Invariant formatting uses lowercase booleans, plain integers, two decimals for fractional milliseconds, one decimal for metre/second measurements and positions, and up to three decimals for other fractional numbers. Vector3 positions use `x,y,z` with one decimal and no spaces. Native object IDs retain their `user:id` text.
+
+Normal fields omit null, empty strings, `unknown`, numeric zero, false and the empty object ID. Dropped-record counts are empty when nothing was dropped, so they appear only when a sample stream overflowed; their values name lowercase sample streams, never the retired categories. `FieldAlways` retains meaningful zero/false values. Null remains omitted rather than invented. Normal lines carry no more than eight fields; defensive overflow keeps the first eight and appends `omitted_fields`. Invalid or unsupported optional fields cannot throw a formatting error that disables gameplay.
+
+`[Diagnostics] DebugVerbosity` selects `Normal` (default) or `Verbose` for HeimKit. It does not enable debugging. Verbose evidence requires the feature's effective debug policy and the Verbose setting together, uses the same subject topic, and may exceed eight fields. Its sentence names the subject (the player, piece, marker or window) so it stays readable when other records interleave. When a Normal or Error record hands its remaining fields to Verbose, Verbose starts at the first field the record did not show. Both tiers share the existing per-feature ceiling of sixty optional Debug records per minute. Build optional field sets only after their policy, cadence, sample and tier gates permit emission. `FeatureDiagnostics` owns the shared Normal/Verbose gates. Formatting reuses a thread-local StringBuilder and concrete collection enumerators, with no LINQ or per-record HashSet; warmed formatting allocates only the resulting string.
 
 ### Standard feature events and grouping
 
-Ordinary output answers whether a feature is enabled, ready, paused or resumed; what meaningful result it observed; or what problem needs attention. Use concise readable counts, an honest outcome and a useful action where available. Do not promote polling snapshots, ownership bookkeeping, eligibility traces, unchanged votes or heartbeat counters into Info. Runtime results remain independent of DebugMode and hidden debug suppression.
+Normal output reports configuration, enabled state, one player-independent server Ready, shared active/inactive presence, meaningful observed results and actionable failures. Disabled or unknown scope remains distinct from empty observed scope. Ready does not establish successful gameplay effects. Runtime results and requested administration remain independent of DebugMode.
 
 | Source | Standard output | Keep in Debug |
 | --- | --- | --- |
-| Every feature | Enabled/Disabled; one player-independent server Ready; shared active/inactive presence status; actionable warnings and failures | Configuration/hook details, per-feature processing activation/pause reasons and unchanged readiness checks |
-| PlayerActivity | Named AFK entry/exit with current counts and tracking-loss reasons | Activity signals and observation evidence |
-| InfiniteTorches | One observed-fuel-update count per reconciliation pass; one grouped unsupported-prefab warning per lookup | Individual requests/results, object IDs, positions and skip counters |
-| AFKNightWatch | One confirmed sleep start permitted by configured rules while some players were not in bed | Configured threshold and grace delay, observed/required sleeper counts, exclusions, repeated votes and native start/end timing gates |
-| AFKRaidWatch | One count of excluded automatic raid candidates per outer native selection pass | Individual candidate reasons/locations, retained candidates, chance/schedule checks and native setter traces |
-| WeatherGuard | One confirmed weather-contribution prevention notice per completed native wear sweep across frames: piece identity for one, combined count for multiple; capacity-limit warning/recovery and requested coverage reports | Startup settings once in Detailed; observed processing, explicitly labeled roof samples, grouped acquisition/release evidence, wear and ownership evidence in recurring output |
+| Every feature | Enabled/Disabled, one server Ready, shared presence status and actionable failures | Configuration details, activation/pause reasons and unchanged readiness checks |
+| PlayerActivity | Named AFK entry/exit, counts and tracking-loss reasons | Activity signals and inference evidence |
+| InfiniteTorches | One observed fuel-update count per reconciliation pass and grouped unsupported-prefab warnings | Individual refill requests and results |
+| AFKNightWatch | Confirmed sleep starts permitted by configured rules | Quorum, exclusions, native timing and gate evidence |
+| AFKRaidWatch | One excluded-candidate count per outer native selection pass | Candidate reasons, population and native schedule/setter evidence |
+| WeatherGuard | At most one nonempty prevention roll-up per ten-minute window, plus a pending-window flush on controller disposal; capacity state changes and requested coverage reports | Protection, ownership, wear and rain observations |
 
-Group records at the producer's logical-operation boundary using operational results, not by comparing already-formatted lines. A batch of torch updates or raid candidate exclusions produces one count; an unsupported-prefab lookup produces one warning with grouped reason counts. Emit nothing for empty or unchanged batches. Flush only completed operations, clear batches on failure/pause/shutdown, and keep new passes separate. Nested native raid scopes share the outer batch. Actual time-skip transitions are naturally single events regardless of the number of sleepers or repeated votes. Do not delay a first failure, a lifecycle transition or a requested report to wait for unrelated messages. Different failures, feature states and named players retain their identities; they are not interchangeable merely because they occur consecutively.
-
-Log results must name the observed operation/outcome and preserve native execution/exception behavior. Shared interpretation and causality limits belong in [server observations and logs](limitations.md#server-observations-and-logs).
+Group at the producer's logical operation boundary. Empty and unchanged operations emit nothing. Keep first failures, lifecycle transitions, requested reports, distinct failures and named players identifiable. WeatherGuard commits only completed successful native sweeps to its roll-up. The roll-up counts each distinct piece once per window with a bounded native-ID set; the owning [specification](specs/weather-guard.md) describes overflow and flush behavior. Ownership acquisition, roof geometry or unchanged health alone cannot report prevention. See [observation limits](limitations.md#server-observations-and-logs).
 
 ### Debug policy startup declaration
 
-Each module emits one Debug LIFECYCLE policy declaration during Initialize when global DebugMode, its own DebugMode or hidden suppression is requested, including disabled modules. DebugLoggingPolicy reports source (global, feature, global_and_feature or hidden_override), both switches, effective configured eligibility, hidden suppression, feature enablement and configuration section. All-off configurations remain quiet. A suppression declaration is the one explicit exception to per-feature debug suppression: it explains why recurring diagnostics and expensive evidence are disabled. It does not enable them or alter loader filters. Ordinary automatic Debug grace still applies. Feature DebugMode false inherits global debug; only DisableDebugLogging suppresses it. BepInEx Console/Disk severity filters must include Debug to display any of these records.
+Each module emits one `config` declaration when global/feature debugging or hidden suppression is requested, including disabled modules. It records policy source, both switches, suppression, effective configured eligibility, feature enablement, configuration section and `log_schema=2`. All-off configurations are quiet. The suppression declaration is the sole exception to that feature's suppression gate and does not enable recurring evidence. Preserve loader Debug filters and the empty-server grace gate. Settings declarations use `config`; fixed settings are not repeated in recurring summaries.
 
 ### Empty-server debug pause
 
-`Shared/ServerDebugActivity` supplies one application-wide five-minute grace period for automatic Debug output. It begins at plugin startup and restarts when the last connected peer leaves. `Plugin.Update` refreshes the shared PlayerServices presence snapshot before ticking modules; connecting/loading peers count as present. A connection immediately permits Debug output again, subject to the configured global/feature policy, hidden suppression and ordinary sample budgets. Unknown population does not start a new empty interval, but unavailable server context does not extend the initial startup grace indefinitely. Elapsed time is monotonic; clock rollback resets the grace safely.
+The shared ServerDebugActivity gate permits an initial five-minute startup grace and restarts grace when the last connected peer leaves. Plugin refreshes presence before modules; loading connections count as present. A connection immediately permits Debug again, subject to feature policy and budgets. Unknown population does not start a new empty interval. Monotonic rollback safely resets grace.
 
-`DebugLoggingPolicy.ConfiguredEnabled` represents the loaded debug switches and hidden override; `Enabled` additionally applies the shared activity gate. Diagnostics constructed while paused retain configured eligibility and resume without reinitializing gameplay. Feature diagnostics gate optional snapshots and history collection, and `DiagnosticLog` rejects Debug records before formatting as a final shared safeguard. The pause does not emit recurring suppression notices, change configuration, stop modules or suppress Info, Warning, Error or explicitly requested reports. Existing empty-scope and per-stream limits may already prevent output during the grace period; it is permission for useful startup diagnostics, not a requirement to emit them.
+`DebugLoggingPolicy.ConfiguredEnabled` combines global OR feature DebugMode with the manual-only hidden DisableDebugLogging override. `Enabled` also applies the shared activity gate. Suppression skips optional snapshots, histories and probes while required ownership, support, inference and gameplay continue. Missing hidden keys are not generated; supplied values are preserved. Invalid values suppress that feature and warn once per section/configuration. See [configuration](server-setup.md#hidden-per-feature-debug-suppression). Verbosity does not acquire activity leases or bypass suppression. DiagnosticLog applies a final gate before formatting.
 
 ### Repetition and volume limits
 
-These are the target logging requirements. Existing per-stream budgets are retained, but alone do not prevent an unchanged message from filling a log for hours.
-
 | Output | Emission rule |
 | --- | --- |
-| Routine Info | Once on startup or a meaningful state transition. Do not repeat enabled, ready, waiting or configuration-loaded messages on polls. |
-| Recurring Debug summary | At most once per 60 seconds when meaningful state or activity changes. An unchanged, relevant state may emit one compact heartbeat per five minutes; omit unchanged full snapshots. |
-| Empty or inactive scope | No routine summary or heartbeat when there are no relevant players/objects or the feature is inactive. A change into or out of that scope can be recorded once at Debug. Unknown scope is distinct from an observed empty scope. |
-| Repeated Debug sample | Emit meaningful changes within the existing feature stream caps. Aggregate identical reasons; do not rotate unchanged items indefinitely just to fill the allowance. |
-| Warning incident | Report the first occurrence immediately. For the same unresolved issue, emit at most one concise reminder per five minutes, including the number of repeats suppressed. Report recovery once if it changes a user-visible degraded state. |
-| Error or exception incident | Report the first failure and its structured evidence immediately, independently of debug settings. For the same unresolved failure, emit at most one compact structured reminder per 60 seconds with repeat counts; include a full stack again only when the failure changes or recurs after recovery. |
-| Explicit operator report | Respond to each consumed request regardless of automatic log budgets. At Info, express essential counts, scope and limitations in readable sentences; optional supporting technical details use Debug. |
+| Routine Info | Startup or meaningful transitions; no repeated polling status. |
+| Debug summary | At most once per minute on semantic change; one compact unchanged heartbeat per five minutes when relevant. |
+| Empty or inactive scope | No routine summary or heartbeat; a transition may be recorded once. |
+| Debug samples | Preserve each existing stream cap and semantic deduplication, within the overall feature ceiling. |
+| Warning incident | First occurrence immediately; at most one concise reminder per five minutes with suppressed repeats. Report meaningful recovery once. |
+| Error incident | First occurrence with exception fields immediately; compact reminders at most once per minute. Full stack returns for changed failures or recovery followed by recurrence. |
+| Requested report | Respond to every consumed request, independently of automatic budgets and debugging. |
 
-A meaningful change includes player population or inferred-idle changes, protection/waiting status changes, refill requests or observed outcomes, a new sleep vote/time skip, or a raid evaluation/outcome. Advancing clocks, sample ages, automatic-update invocation counts and identical rejection/no-change results alone do not qualify. Compare semantic state and relevant interval activity, not the fully formatted message or raw lifetime counters. Repeated polling with no new result is neither a new failure nor a new observation. Heartbeats summarize the current state and aggregated repetitions without replaying all metrics.
+Deduplication uses stable operation, exception type and throw location, plus relevant actor/object identity. Ignore timestamps, advancing counters and variable exception messages. Bound retained identities, clear them at lifecycle boundaries and retain distinct failures. Timer expiry alone is not a changed failure. Optional Debug output has one ceiling of sixty records per feature per minute, including Verbose evidence, summaries and heartbeats. Suppressed log attempts do not suppress gameplay counters or processing.
 
-Retain the per-stream sample caps below and add an overall ceiling of 60 optional Debug records per feature per 60 seconds, including summaries and heartbeats. Within that allowance prioritize new states, changed outcomes and useful blockers over unchanged samples. Warning/Error incidents and requested reports do not consume this Debug allowance. Include capped sample counts in the next permitted Debug summary; do not generate extra lines solely to announce suppression. This caps output only: gameplay state, operational counters and required processing continue.
+WeatherGuard retains its existing per-stream bounds: twelve compact protection samples, six object/loading/acquisition samples per stream, six command observations and at most three distinct candidates per protected/exposed wear subgroup per minute. Detailed diagnostics retain their existing level gate; Verbose controls the additional field evidence. InfiniteTorches retains four requests and six outcomes per minute. AFK sleep and raid streams retain their independent six-sample native/candidate limits and existing semantic caches. Summaries identify omitted log attempts; they do not imply lost gameplay measurements.
 
-Deduplication uses stable feature/event/reason identities and relevant object or actor identity where needed, excluding timestamps, volatile counters and raw exception messages containing changing values. Incident identity includes the operation, exception type and stable failure location. Keep retained identities bounded and clear them on feature shutdown; never allow unique object IDs or formatted message text to grow an unbounded cache. Cache churn must still respect output budgets. A changed failure or recovery starts a new incident; a timer expiring alone does not. Feature guides and specifications describe their relevant semantic changes and retained limits.
-
-Each feature emits at most one SUMMARY per 60 seconds. WeatherGuard Medium output contains up to twelve compact qualifying-item protection RESULT samples per summary, prioritizing new/changed status under the semantic deduplication rules above. Its level and optional world-created inclusion are defined in WeatherGuardSettings; global OR feature DebugMode enables diagnostics. Medium skips detailed evidence collection. In Detailed mode, WeatherGuard reserves one processing-counter DETAIL alongside that summary and at most six watched-object RESULT records. OBJECT, ACTION and additional DETAIL categories each allow six samples per 60 seconds; native command RESULT samples have a separate six-message allowance. Wear DETAIL selection also limits each protected/unprotected and exposed/covered group to three distinct candidates per window. InfiniteTorches emits one ordinary Info count per reconciliation pass with observed sufficient fuel updates, never one Info entry per torch; empty/unconfirmed passes stay quiet. InfiniteTorches allows four request ACTION records and six outcome RESULT records per 60 seconds. All pending refill outcomes use its Diagnostics formatter; per-pass output cannot bypass the shared limits. Summaries report `omitted_messages_interval` when event samples exceed their allowance. These are omitted log attempts, not lost gameplay measurements.
-
-Explicit operator reports use Info independently of automatic budgets and Debug settings. Report observed blockers with supporting metadata; feature-specific fields belong in the current specification.
+ProcessingTiming emits at most once per minute for relevant scope: `N passes in the last minute, avg X ms, max Y ms. scope=S`. Measurements cover the synchronous controller operation only; [measurement limitations](limitations.md) remain unchanged.
 
 ## Player activity
 
@@ -314,3 +305,47 @@ Shared ServerObjectAuthority resolves its complete native patch set using exact 
 ## Record-driven candidate discovery
 
 Occupied controllers share one leased set of native ZDO postfixes for successful deserialization, prefab assignment, position, rotation, ownership, typed field writes and removals. Callbacks enqueue bounded, deduplicated identities only. Classification runs in controllers; confirmed destruction enqueues an identity before native record release. The final consumer removes the hooks. Candidate indexes retain IDs in spatial sector cells and resolve current records on use, including identity checks for pooled ZDOs. New player areas receive native discovery; overflow or exhausted area capacity invalidates coverage and re-enters discovery, with broad fallback while candidate capacity is exceeded. World replacement and controller disposal discard coverage. PlayerWorldScope separates actor/clearance sampling, indexed candidate discovery and lazily queried full safety context. Action context remains fresh for each processing pass and rejects oversized scopes.
+
+## Core layer and anti-duplication
+
+The HeimKit performance rebuild lives temporarily under `src/HeimKit2/`; legacy `src/HeimKit/` remains the behavioral reference until cutover. Both implementations retain the HeimKit product name, `HeimKit.dll`, `HeimKit` namespaces and `heimkit` loader/patch identities; deploy only one implementation. Directory renaming does not change application identity. The [performance rebuild specification](ai/heimkit-rebuild-spec.md) defines its placement and shared ownership. Existing lifecycle, configuration, compatibility, logging and player-service contracts apply to both implementations.
+
+Core owns shared scheduling/isolation, world discovery, prefab metadata, native member delegates, ownership/packets, players, diagnostics and cleanup. Feature controllers consume subscriptions and filtered registry catalogs; the catalogs retain selection membership while metadata lives on the registry's single prefab record. World discovery composes native cell results across requested near/far/classic geometry, sharing overlapping cells and a single record-change index. Core owns actor sampling and per-consumer movement/rotation views. Feature rules retain eligibility policy.
+
+| A feature needs to… | It uses… | It must NOT… |
+| --- | --- | --- |
+| Find world objects near players | `Core/World/WorldObjectProvider` via a `CandidateSubscription` | call `ZDOMan.FindSectorObjects`, build a `WorldCandidateIndex`, or keep its own sector lists |
+| Know player positions / proximity / movement | `WorldObjectProvider.Scope` (`PlayerWorldScope`) | re-sample peers or re-derive movement segments |
+| Classify a prefab (components, category, health, colliders) | `Core/Prefabs/PrefabRegistry` | call `GetComponent`/`GetComponentsInChildren` on a prefab, or keep a prefab→metadata dictionary |
+| Read/write a native private field or call a native private method | `Core/Native/NativeAccess` (FieldRef/delegate) | declare `FieldInfo`/`MethodInfo` fields or call `GetValue`/`Invoke` in hot paths |
+| Retain/release ZDO ownership, parse/fence packets | `Core/Ownership/ObjectAuthority` + `ZdoPackets` | re-implement packet parsing, ownership transfer, or destruction fencing |
+| Prepare terrain / create persistent world objects | `Core/World/TerrainContext` + `NativeWorldObject` | re-resolve terrain compiler reflection or re-implement zone creation |
+| Check living/dead/finite actor health | `Core/Native/NativeCharacterHealth` | read health fields directly for eligibility |
+| Know who is connected / joined / AFK; get presence events | `Core/Players/PlayerServices` (injected) | take a peer census, parse logs, or infer population |
+| Observe authenticated routed RPCs (chat, emote, damage, container) | `Core/Players/PlayerRoutedMessages` + `RoutedActivityReader` | install its own routed observer |
+| Schedule periodic work | `Core/Scheduling/ModuleScheduler` (declared interval + phase) | store its own `_next` float and compare `now` |
+| Gate on world-service readiness | shared readiness from `WorldObjectProvider`/`WorldServices` | re-null-check `ZNet`/`ZNetScene`/`ZDOMan`/`ZRoutedRpc` in its own Tick |
+| Emit logs / summaries / debug evidence | `Core/Diagnostics/FeatureDiagnostics` base + `DiagnosticLog` | invent its own log formatting or budgeting |
+| Load/define settings | own `Settings` class bound through `Core`/`Configuration/ConfigurationLoader` | create a second config file or its own loader |
+| Clean up on failure/shutdown | `Core/Lifecycle/ModuleCleanup` | swallow cleanup errors or skip remaining steps |
+| Drain and hand off an existing native object with ordered replication | `Core/Ownership/ObjectTransferAuthority`, `OwnershipLease` and `ZdoReplication` | duplicate source-drain, owner fencing or native peer bookkeeping |
+| Compare native object identities without allocating strings | `Core/Native/NativeIdentity` | create object-ID strings inside repeated sorting/comparison loops |
+
+
+New features must consume these services. Do not create a second scanner, prefab metadata cache, reflection cache, packet/ownership manager, presence hub or config loader in a feature folder. Add a shared capability under Core and extend this table when needed. The plugin owns the shared service lifetime; each controller releases only its own views and resources. Configuration remains under `Configuration/`, with the same existing keys, defaults, config filename and persistent data paths.
+
+The shared change feed classifies objects into per-subscription ID sets at discovery and on changes; normal targeted reads visit only matching IDs. Each selection retains at most 131,072 matches, then uses shared broad views without invalidating other selections.
+
+While targeted subscriptions exist, broad native cell snapshots and composed near/far views are shared within a frame. Broad views preserve native centre-outward ring order, native sector deduplication and near-before-distant delivery; targeted reads retain row ordering. With only broad consumers, requests use fresh native scans without the candidate index, change hooks or frame caches. The last targeted subscription releases the index and its hooks. Same-cell changes re-evaluate eligibility without replacing retained membership sets or reordering cached native records.
+
+Seeded coverage and frame caches admit at least 8,192 cells, scale to 512 cells per joined player up to 32,768, and evict the least-recently-used individual entries at capacity rather than clearing all discovery or disabling a module. Reads refresh recency without allocating; removed cache nodes are reused. Record-change queue overflow invalidates coverage for rediscovery. The shared prefab registry admits 65,536 entries, with existing feature catalog limits preserved.
+
+Actor sampling runs lazily at most once per frame after presence refresh; consumer movement segments retain their own observation cadence. Inactive module ticks remain available for explicit administration after gameplay shutdown.
+
+The host reports changed failure identities (operation, exception types and stable throw location) immediately, suppresses volatile-message repeats, and permits a compact repeat-count reminder once per minute. Incident state is bounded to one current failure per module and resets on reinitialization or active recovery.
+
+Consumer-specific native capabilities resolve in that consumer's compatibility check: live scene-instance access resolves only for WeatherGuard, so its failure cannot prevent unrelated modules from initializing. Live components use direct component access; PrefabRegistry is reserved for prefab definitions.
+
+Native identity ordering preserves culture-sensitive tame selection and ordinal portal ordering. Nearby candidate views are read-only, borrowed until the next query, and must be consumed immediately.
+
+Existing per-feature candidate, action and geometry limits still apply. Ownership leases retain feature policy separately from native packet handling. Player activity reuses sampling buffers and separate retained anchor/previous observations, preserving movement, equipment and grace decisions when input objects are reused.

@@ -29,8 +29,15 @@ Existing configured ranges are preserved. Set ScanRangeMeters=128 explicitly to 
 
 ## Diagnostics
 
-Normal output groups confirmed results per completed pass and preserves failures and lifecycle notices. Optional Debug summaries describe changed current scope and result counts at most once per minute. `scope_now` counts settling sources; `results_pass` counts completed operations in the latest pass; `results_total` counts them during the current controller lifetime. Counts restart when the controller is recreated. Empty unchanged scopes are quiet. Eligibility summaries report client_owned_pass, player_near_pass, settling_pass, terrain_wait_pass, depth_excluded_pass and invalid_items_pass. Bounded transfer samples pair source and cargo ZDO IDs.
+Normal output groups confirmed results per completed pass and preserves failures and lifecycle notices. Optional Debug summaries describe changed current scope and result counts at most once per minute. `scope` counts settling sources; `results` counts completed operations in the latest pass; `lifetime_results` counts them during the current controller lifetime. Counts restart when the controller is recreated. Empty unchanged scopes are quiet. Eligibility summaries report client_owned, player_near, settling, terrain_wait, depth_excluded and invalid_items. Bounded transfer samples pair source and cargo ZDO IDs.
 
 See [shared safety and delivery limitations](../limitations.md#new-world-features) and [server setup](../server-setup.md).
 
 Discovery reuses nearby candidate records and accepts native record changes. Entering another area seeds discovery again; action eligibility and timing retain the configured rules. See the [shared discovery design](../architecture.md#record-driven-candidate-discovery).
+
+
+## HeimKit log topics
+
+- `salvage`: Sunken-item selection and cargo transfer.
+
+Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.

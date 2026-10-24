@@ -7,7 +7,8 @@ Install HeimKit on a Windows Valheim dedicated server. Players use unmodified cl
 | Item | Current baseline |
 | --- | --- |
 | HeimKit release baseline | 0.1.55 |
-| HeimKit development build | 0.1.56-world-features.23 |
+| HeimKit legacy development build | 0.1.56-world-features.23 |
+| HeimKit performance rebuild | 0.2.0-rebuild.7 |
 | Valheim Dedicated Server | 1.0.20; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
@@ -71,6 +72,9 @@ Shared sections `[Diagnostics]` and `[PlayerActivity]` precede feature sections.
 Feature controls are documented in their guides: [InfiniteTorches](features/infinite-torches.md#configuration), [WeatherGuard](features/weather-guard.md#scope-and-configuration), [AFKNightWatch](features/afk-night-watch.md#configuration), [AFKRaidWatch](features/afk-raid-watch.md#configuration), [SharedMap](features/shared-map.md#configuration), [TameTravel](features/tame-travel.md#configuration), [DoorKeeper](features/door-keeper.md#configuration), [ForestRenewal](features/forest-renewal.md#configuration) and [SeaSalvage](features/sea-salvage.md#configuration). Stop the server before configuration edits and restart afterward.
 
 ### Diagnostics
+
+`[Diagnostics] DebugVerbosity = Normal` selects the shared evidence tier in the performance rebuild. `Verbose` adds detailed topic records when the feature's effective DebugMode permits them; it does not enable debugging or bypass hidden suppression, budgets or the empty-server pause. The legacy implementation ignores and preserves this unbound setting. Restart applies changes. HeimKit prefixes every line with local `HH:mm:ss`; startup also includes the full date. Shared player topics are `presence` and `afk`; see the [logging contract](architecture.md#logging).
+
 
 `[Diagnostics] DebugMode` enables optional diagnostics across features. Each feature and PlayerActivity has its own DebugMode, default false, for selective output. A false feature switch inherits global Debug. Startup adds missing keys even for disabled features.
 

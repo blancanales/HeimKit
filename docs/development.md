@@ -30,6 +30,14 @@ Install only one `HeimKit.dll` at a time; the adjacent example config is optiona
 
 Use Release unless Debug is requested. Keep local DLLs in the standard configuration-specific source bin directory.
 
+The performance rebuild remains in the temporary `src/HeimKit2/` directory until cutover. Select its project explicitly:
+
+```powershell
+.\build.ps1 -ProjectPath 'src\HeimKit2\HeimKit.csproj' -ServerPath 'C:\path\to\Valheim dedicated server' -BepInExCore 'C:\path\to\BepInEx\core'
+```
+
+Its output is `src/HeimKit2/bin/<configuration>/<target-framework>/HeimKit.dll`. Both source trees identify as HeimKit and share the `heimkit` loader identity, configuration and persistent data paths; deploy only one implementation. After the legacy source is retired and the rebuild folder becomes `src/HeimKit/`, the default build command selects that project without changing the application identity. The [rebuild specification](ai/heimkit-rebuild-spec.md) defines Core ownership. Current build identities appear in [supported environment](server-setup.md#supported-environment).
+
 ## Release build command
 
 After integrating the intended source into main, preparing a plain release version and committing the reviewed release metadata, use:

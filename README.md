@@ -6,6 +6,8 @@ Quality-of-life features for Windows Valheim dedicated servers: infinite torches
 
 Install on the server. Players use unmodified Valheim clients. Choose each feature independently in `heimkit.cfg`.
 
+The HeimKit performance rebuild shares world discovery, prefab metadata and scheduling through a common Core. It retains the same features, settings and data paths. See the [rebuild specification](docs/ai/heimkit-rebuild-spec.md) and [development guide](docs/development.md) for its temporary source layout. Run only one implementation on a server.
+
 Before enabling HeimKit, follow [world backups](docs/world-backups.md) and read [safety and limitations](docs/limitations.md).
 
 ## Features

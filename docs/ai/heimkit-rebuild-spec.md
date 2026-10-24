@@ -1,4 +1,4 @@
-# HeimKit2 performance rebuild — implementation specification
+# HeimKit performance rebuild — implementation specification
 
 > **Status:** authorized design specification for a from-scratch rebuild of HeimKit into a
 > new `src/HeimKit2/` tree. This document is the single source of truth for *where code lives*
@@ -13,7 +13,7 @@ plugin in `src/HeimKit2/`.
 
 The central goal is **de-duplication for performance**: today each feature independently scans
 the world, classifies prefabs, caches native reflection, and re-runs world-readiness checks.
-In HeimKit2 those responsibilities move into one **Core** layer that every feature consumes.
+In the rebuild those responsibilities move into one **Core** layer that every feature consumes.
 A feature must never re-implement a Core responsibility.
 
 Read, in order, before writing any code:
@@ -26,9 +26,9 @@ Read, in order, before writing any code:
 4. The feature spec under `docs/specs/<feature>.md` for whichever feature you are porting.
 5. The current implementation under `src/HeimKit/Features/<feature>/` for exact behavior.
 
-**Behavioral rule:** HeimKit2 must be functionally identical to HeimKit from a player/operator
+**Behavioral rule:** The rebuilt HeimKit must be functionally identical to the legacy implementation from a player/operator
 point of view. Same features, same settings keys, same config file name (`heimkit.cfg`), same
-log messages and the same gameplay effects. Performance and internal structure change; observable
+gameplay effects. Approved logging exceptions are timestamped topic-based output, rewritten Debug/Error records, the shared DebugVerbosity setting (Normal by default), and WeatherGuard ten-minute prevention roll-ups; other Info/Warning wording remains unchanged. Performance and internal structure change; observable
 behavior does not. Where current behavior is subtle (ZDO ownership transfer, Harmony IL
 transpilers, replication fences), preserve it exactly — port, do not reinvent the logic.
 
@@ -38,10 +38,7 @@ transpilers, replication fences), preserve it exactly — port, do not reinvent 
 - **Do not build or publish.** Per `AGENTS.md`, do not compile, package, bump versions, or create
   release artifacts unless Trevor explicitly asks. Leave all edits local and reviewable.
 - **Do not touch `src/HeimKit/`.** It remains the live, working plugin and your reference. No edits there.
-- **One plugin at a time runs on a server.** HeimKit and HeimKit2 must never be loaded together
-  (they would double-patch native methods). HeimKit2 uses a **distinct BepInEx GUID**
-  (`heimkit2`) and distinct Harmony instance IDs (`heimkit2.<feature>`) so the two can coexist on
-  disk and in source without colliding, but only one is deployed.
+- **One HeimKit implementation runs on a server.** The rebuild replaces the legacy plugin and retains the `HeimKit` product name, `heimkit` BepInEx GUID, `HeimKit.dll` assembly, `HeimKit` namespaces and `heimkit.<feature>` Harmony IDs. Temporary source/test directories distinguish the implementations in the repository; only one DLL is deployed. Do not declare incompatibility with the plugin's own GUID or reject its own loader registration.
 - **Server-only compatibility discipline** from `docs/architecture.md#server-only-compatibility`
   applies unchanged. Do not change the audited game version.
 - **Testing stays in chat.** Do not write test results, validation status, or testing instructions
@@ -49,12 +46,12 @@ transpilers, replication fences), preserve it exactly — port, do not reinvent 
 
 ## 2. Target directory layout
 
-Create exactly this tree. Namespaces mirror folders: `HeimKit2`, `HeimKit2.Core.<Area>`,
-`HeimKit2.Features.<Name>`.
+The temporary source directory is `src/HeimKit2/`; it becomes `src/HeimKit/` when Trevor authorizes the cutover. Product, project and namespace identity already remains HeimKit. Create this tree with namespaces rooted at: `HeimKit`, `HeimKit.Core.<Area>`,
+`HeimKit.Features.<Name>`.
 
 ```text
 src/HeimKit2/
-  HeimKit2.csproj                 # new project; mirror HeimKit.csproj references (BepInEx, Harmony, game asms)
+  HeimKit.csproj                 # new project; mirror HeimKit.csproj references (BepInEx, Harmony, game asms)
   Plugin.cs                       # entry point: config load, module registration, tick dispatch, shutdown
   Core/
     Scheduling/
@@ -82,7 +79,7 @@ src/HeimKit2/
       ...
     Diagnostics/
       DiagnosticLog.cs            # ported from Shared/DiagnosticLog.cs
-      DiagnosticEvent.cs
+      LogTopic.cs
       DiagnosticBudget.cs
       SummaryCadence.cs
       ProcessingTiming.cs
@@ -124,7 +121,7 @@ Rules for this tree:
   Those are Core.
 - **Naming** follows `docs/architecture.md#naming` unchanged: no class/interface contains the word
   `Feature`; feature-owned classes are `<FeatureName><Responsibility>`; namespaces are
-  `HeimKit2.Features.<Name>`, `HeimKit2.Core.<Area>`, `HeimKit2.Configuration`.
+  `HeimKit.Features.<Name>`, `HeimKit.Core.<Area>`, `HeimKit.Configuration`.
 
 ## 3. Performance requirements (the reason for the rebuild)
 
@@ -179,7 +176,7 @@ redesign ported logic beyond the namespace move and the de-duplication wiring na
 **`IServerModule`** (ported contract, unchanged shape):
 
 ```csharp
-namespace HeimKit2.Core.Scheduling;
+namespace HeimKit.Core.Scheduling;
 public interface IServerModule
 {
     string Name { get; }
@@ -222,7 +219,7 @@ Responsibilities it owns:
 Public surface (shape, not final signatures — refine against the ported index):
 
 ```csharp
-namespace HeimKit2.Core.World;
+namespace HeimKit.Core.World;
 internal sealed class WorldObjectProvider : IDisposable
 {
     bool Ready { get; }                 // native services present + dedicated server + world loaded
@@ -257,7 +254,7 @@ Rules for features:
   not duplicate the segment math.
 - `WeatherGuard` is the key migration: today it owns a bespoke per-second rescan
   (`_near`/`_distant`/`_regions`, its own `FindSectorObjects`, its own `AddInstances` reflection on
-  `ZNetScene.m_instances`). In HeimKit2 it consumes a `CandidateSubscription` like every other
+  `ZNetScene.m_instances`). In HeimKit it consumes a `CandidateSubscription` like every other
   feature. Its instance-retention trick (keeping live nonpersistent drops between scans via
   `m_instances`) becomes a Core capability on the provider (an "include live instances in active
   area" option on the subscription), because it is a general concern, not a WeatherGuard one.
@@ -272,7 +269,7 @@ The registry exposes the union of what features need today. Model it as a single
 prefab, lazily computed:
 
 ```csharp
-namespace HeimKit2.Core.Prefabs;
+namespace HeimKit.Core.Prefabs;
 internal readonly struct PrefabInfo
 {
     string Name { get; }
@@ -327,7 +324,7 @@ member not yet in `NativeAccess`, it adds it to `NativeAccess`.
 `ObjectAuthority` (from `ServerObjectAuthority`) and `ZdoPackets` (from `NativeZdoPackets`) become
 the single owner of: retained native-record ownership, packet provenance/parsing, stale-data and
 destruction fencing, and release. Today DoorKeeper and SeaSalvage share these, but WeatherGuard and
-TameTravel carry parallel ownership/packet logic. In HeimKit2:
+TameTravel carry parallel ownership/packet logic. In HeimKit:
 
 - All four (WeatherGuard, TameTravel, DoorKeeper, SeaSalvage) use `ObjectAuthority`/`ZdoPackets`.
 - Where a feature has a genuinely distinct fence (TameTravel's traversal/animal transaction fence
@@ -353,15 +350,14 @@ Rules (unchanged from current architecture, restated so they are not lost):
 
 ### 4.7 Diagnostics — `Core/Diagnostics/`
 
-Port `DiagnosticLog`, `DiagnosticEvent`, `DiagnosticBudget`, `SummaryCadence`, `ProcessingTiming`,
+Port `DiagnosticLog`, `LogTopic`, `DiagnosticBudget`, `SummaryCadence`, `ProcessingTiming`,
 `DebugLoggingDelivery`. Add **`FeatureDiagnostics`**, a shared base that captures the pattern every
 feature's `Diagnostics` class repeats: debug-policy gating, the `Report`/`Record` deferred-lambda
 entry points, budget/cadence wiring, and the §3.7 "build the status object only when it will emit"
 discipline. Each feature's `Diagnostics` class derives from it and adds only feature-specific
 message selection and evidence formatting.
 
-The logging contract in `docs/architecture.md#logging` (formats, severities, grouping, repetition
-limits, empty-server pause) is unchanged and must be honored by `FeatureDiagnostics`.
+The logging contract in `docs/architecture.md#logging` governs timestamped topic output, grouping, repetition limits and the empty-server pause. `FeatureDiagnostics` preserves the existing gates, stream budgets and incident identities.
 
 ## 5. The anti-duplication decision table
 
@@ -384,6 +380,8 @@ named here. It must not implement its own.
 | Emit logs / summaries / debug evidence | `Core/Diagnostics/FeatureDiagnostics` base + `DiagnosticLog` | invent its own log formatting or budgeting |
 | Load/define settings | own `Settings` class bound through `Core`/`Configuration/ConfigurationLoader` | create a second config file or its own loader |
 | Clean up on failure/shutdown | `Core/Lifecycle/ModuleCleanup` | swallow cleanup errors or skip remaining steps |
+| Drain and hand off an existing native object with ordered replication | `Core/Ownership/ObjectTransferAuthority`, `OwnershipLease` and `ZdoReplication` | duplicate source-drain, owner fencing or native peer bookkeeping |
+| Compare native object identities without allocating strings | `Core/Native/NativeIdentity` | create object-ID strings inside repeated sorting/comparison loops |
 
 **Rule for new capabilities:** if a feature needs something not in this table and it is plausibly
 useful to a second feature, add it to Core and extend this table in the same change. If it is truly
@@ -416,7 +414,7 @@ Port in the order in §8. For each feature: read its `docs/specs/<feature>.md` a
 `src/HeimKit/Features/<feature>/`, reproduce behavior exactly, and route every capability in §5
 through Core. Feature-specific notes:
 
-- **InfiniteTorches** — already uses `WorldCandidateIndex`; in HeimKit2 it uses a
+- **InfiniteTorches** — already uses `WorldCandidateIndex`; in HeimKit it uses a
   `CandidateSubscription` instead. Keep `InfiniteTorchesRefillRules`, pending-refill tracking,
   per-pass message cap, and the `RPC_SetFuelAmount` routed request. Fireplace component lookups go
   through `PrefabRegistry`.
@@ -452,8 +450,8 @@ through Core. Feature-specific notes:
 Do these as separate, reviewable steps. Do **not** compile/build unless Trevor asks; "milestone
 complete" means the code is written and self-consistent, with behavior verified in chat with Trevor.
 
-1. **M0 — Project skeleton.** `HeimKit2.csproj`, `Plugin.cs` shell, `Core/Scheduling/` (IServerModule,
-   ModuleHost, ModuleScheduler), `Configuration/` ported, GUID `heimkit2`. No features yet.
+1. **M0 — Project skeleton.** `HeimKit.csproj`, `Plugin.cs` shell, `Core/Scheduling/` (IServerModule,
+   ModuleHost, ModuleScheduler), `Configuration/` ported, GUID `heimkit`. No features yet.
 2. **M1 — Core foundation.** Port `Core/Players/`, `Core/Diagnostics/`, `Core/Lifecycle/`,
    `Core/Native/`, `Core/Prefabs/`, `Core/World/` (including `WorldObjectProvider`,
    `CandidateSubscription`, ported index/changes/scope/terrain), `Core/Ownership/`. This is the bulk
@@ -476,7 +474,7 @@ the ported feature, and report to Trevor in chat.
 So the *next* feature does not re-duplicate, documentation must make Core ownership explicit. In the
 M7 step:
 
-- **New `docs/architecture.md` section "Core layer and anti-duplication"** (or a HeimKit2-specific
+- **New `docs/architecture.md` section "Core layer and anti-duplication"** (or a HeimKit-specific
   architecture doc if Trevor wants the two plugins documented separately): state that all shared
   responsibilities live under `Core/`, reproduce the §5 decision table, and state the rule that a
   new feature must consume Core services and may not re-implement one. Reference this spec.
@@ -494,11 +492,11 @@ checklists to committed docs.
 
 ## 10. Definition of done (acceptance criteria)
 
-HeimKit2 is complete when all hold. These are behavioral/structural contracts, verifiable by reading
+The rebuild is complete when all hold. These are behavioral/structural contracts, verifiable by reading
 the code and by in-chat testing with Trevor (no test artifacts committed).
 
-1. **Feature parity.** Every HeimKit feature exists in HeimKit2 with identical settings keys, config
-   file name, log messages and gameplay effects.
+1. **Feature parity.** Every legacy feature exists in the rebuild with identical settings keys, config
+   file name and gameplay effects, subject to the approved logging exceptions in section 0.
 2. **Single scan.** `ZDOMan.FindSectorObjects` is called in exactly one place (`WorldObjectProvider`).
    No feature constructs `WorldCandidateIndex` or calls `FindSectorObjects`. (Grep proves it.)
 3. **Single prefab cache.** `GetComponent`/`GetComponentsInChildren` against prefabs appears only in
@@ -516,11 +514,10 @@ the code and by in-chat testing with Trevor (no test artifacts committed).
 
 ## 11. Out of scope / non-goals
 
-- No new features, no new gameplay behavior, no settings changes.
+- No new features or gameplay changes. The approved shared DebugVerbosity setting is the only settings exception.
 - No change to the audited game version or server-only compatibility posture.
-- No change to the logging format/severity contract or the player-activity contracts (only their
-  *location* moves to `Core/`).
-- No removal of `src/HeimKit/`. HeimKit2 is additive until Trevor decides to retire HeimKit.
+- Approved logging exceptions permit timestamped topics, rewritten Debug/Error records, the shared DebugVerbosity setting and WeatherGuard ten-minute prevention roll-ups; other Info/Warning wording, severities and existing gates remain unchanged. Player-activity contracts retain their behavior when moved to `Core/`.
+- No removal of the legacy `src/HeimKit/` tree or rename of the temporary source/test directories until Trevor authorizes the cutover.
 - No deployment, server install, or world changes.
 
 ## 12. When you are blocked

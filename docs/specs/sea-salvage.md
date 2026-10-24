@@ -39,3 +39,7 @@ Use the [supported environment](../server-setup.md#supported-environment) and sh
 Optional controller-pass timing reports duration_avg_ms and duration_max_ms at most once per minute for nonempty scope. Collection follows effective debug policy and includes synchronous controller processing only; see [shared measurement limitations](../limitations.md).
 
 Loose-drop discovery uses the shared spatial candidate index, seeded on activation and entry into another player sector. Successful replicated/local changes update it, including ownership release and movement of shallow drops. Client-owned and shallow drops remain indexed. Once seeded, an unchanged area without candidates performs no repeated broad discovery or terrain query. Settling, depth, native item validation and transfer fencing retain their existing cadence. Full terrain context is queried only for a candidate reaching the terrain stage.
+
+## HeimKit Core integration
+
+The performance rebuild in `src/HeimKit2/Features/` consumes CandidateSubscription for loose drops and terrain context, PrefabRegistry item/crate metadata, TerrainContext, NativeWorldObject, ObjectAuthority/ZdoPackets and ModuleScheduler. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.

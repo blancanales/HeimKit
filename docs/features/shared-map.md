@@ -207,3 +207,16 @@ Debug adds native radius/cadence, supported dungeon prefab/gateway counts, disco
 Discovery/publication details are capped at six per stream per minute; the [specification](../specs/shared-map.md#logging) owns the full limits. Shared debug configuration, loader filters and presence notices are described in [server setup](../server-setup.md#configuration).
 
 Unchanged table payloads and published community inputs reuse their successful reconciliation. Terrain-map disk work runs on one background writer; later exploration remains pending until its own snapshot is saved. Orderly shutdown flushes outstanding exploration.
+
+
+## HeimKit log topics
+
+- `exploration`: Community exploration capture.
+- `portals`: Portal marker publication.
+- `resources`: Outdoor resource discovery and retirement.
+- `dungeons`: Entrance discovery and pickup progress.
+- `landmarks`: Runestone and recurring-spawner observations.
+- `tables`: Cartography table and pin reconciliation.
+- `save`: Persistent state loading and saving.
+
+Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.

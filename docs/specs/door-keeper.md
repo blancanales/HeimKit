@@ -41,3 +41,7 @@ Static retained-door positions use a spatial cell index for native active-area q
 Optional controller-pass timing reports duration_avg_ms and duration_max_ms at most once per minute for nonempty scope. Collection follows effective debug policy and includes synchronous controller processing only; see [shared measurement limitations](../limitations.md).
 
 Door discovery uses the shared spatial candidate index with activation/area-entry seeding and replicated/local change intake. Indexed doors still have live state, creator, delay and clearance checked at the configured interval. Full surrounding safety context is queried only for the selected due, clear door; native synchronous closing and immediate authority release remain unchanged.
+
+## HeimKit Core integration
+
+The performance rebuild in `src/HeimKit2/Features/` consumes CandidateSubscription for doors and context, PrefabRegistry door/collision metadata, NativeAccess delegates, TerrainContext, ObjectAuthority and ModuleScheduler. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.

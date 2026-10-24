@@ -19,3 +19,10 @@ Shared thresholds live under [PlayerActivity](../server-setup.md#playeractivity)
 ## Diagnostics
 
 Info groups excluded candidates once per native automatic selection pass. Debug explains local population, eligibility reasons, native gates and observed event transitions. Shared PlayerActivity owns named AFK entry/exit notices, visible with debugging off. Raid debugging does not enable sleep diagnostics.
+
+
+## HeimKit log topics
+
+- `raids`: Automatic raid candidate and setter observations.
+
+Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.

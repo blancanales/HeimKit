@@ -30,19 +30,30 @@ Use the [local request file](../server-setup.md#requested-weatherguard-coverage)
 
 | Field | Meaning |
 | --- | --- |
-| eligible_now | Records selected by current policy. |
-| protected_now | Eligible records with a loaded server instance, support context and current server ownership. |
-| waiting_now | Eligible records awaiting instance, terrain, surrounding objects, capacity or ownership. |
-| skipped_now | Other nearby records, grouped by exclusion reason. |
+| eligible | Records selected by current policy. |
+| protected | Eligible records with a loaded server instance, support context and current server ownership. |
+| waiting | Eligible records awaiting instance, terrain, surrounding objects, capacity or ownership. |
+| skipped | Other nearby records, grouped by exclusion reason. |
 
 Eligible equals protected plus waiting within the reported scope. The report includes scan age, capacity and configured channels.
 
 ## Diagnostics
 
-Info reports confirmed weather-contribution prevention once per completed native wear sweep. A single affected piece is identified; multiple pieces produce one count. Capacity reduction and recovery are separate notices.
+Info combines confirmed weather-contribution prevention into one nonempty ten-minute roll-up. One distinct affected piece is named; several pieces produce a combined count. Pausing, failure or shutdown flushes pending prevention once with the window start time. Capacity reduction and recovery remain separate notices.
 
 Medium Debug explains eligibility, management and native processing gates. Detailed adds startup settings, ownership/loading/network counters, representative wetness/roof/timer/health observations and acquisition/release totals. Changed health loss and errors remain visible; unchanged health stays quiet.
 
 Roof fields describe their sample size, age and unchecked/stale counts. Piece/player biomes and server wetness provide context. The [specification](../specs/weather-guard.md#exposure-counts-and-biome-evidence) defines these fields and budgets.
 
 Cached prefab eligibility and native method delegates reduce repeated lookups. Weather protection still reads current saved creator and health, and retains the same surrounding scene and terrain refresh.
+
+
+## HeimKit log topics
+
+- `protection`: Eligibility, context and protection processing.
+- `ownership`: Observed ownership and release.
+- `wear`: Native wear and command outcomes.
+- `rain`: Sampled wetness and health observations.
+- `coverage`: Explicitly requested coverage evidence.
+
+Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.

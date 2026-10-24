@@ -64,3 +64,12 @@ Normal output distinguishes recorded relocation from confirmed destination owner
 Portal selection reuses working buffers. Players without travel consent or an active journey retain lightweight command observation; active traversal keeps its existing sampling and readiness checks.
 
 Destination snapshots preserve native per-client replication bookkeeping. Unconfirmed handoffs receive a limited number of refreshes, then release ownership to normal native assignment; they do not leave an indefinite reservation. Debug reservation endings report whether follow permission continues, refresh count, placement attempts and candidates, rejection counts, the last landing probe and accepted support height, synchronous context/search timings and actual moved position and forward/right offsets from the portal. Access rejections distinguish missing/blocked navigation, endpoint snapping, excessive detours and physical wall collisions. Placement waits retain their bounded, deduplicated evidence stream; final transaction evidence has a separate allowance.
+
+
+## HeimKit log topics
+
+- `command`: Command receipt, selection and rejection.
+- `follow`: Native following and spacing observations.
+- `travel`: Portal entry, transfer progress and completion.
+
+Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.

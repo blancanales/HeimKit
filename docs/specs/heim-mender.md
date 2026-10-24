@@ -41,3 +41,7 @@ Normal output announces lifecycle, accepted/rejected admin requests and one conf
 Optional controller-pass timing reports duration_avg_ms and duration_max_ms at most once per minute for nonempty scope. Collection follows effective debug policy and includes synchronous controller processing only; see [shared measurement limitations](../limitations.md).
 
 Automatic observation uses the shared spatial candidate index for eligible structures and monster records. Accepted local/replicated health and creator changes can add candidates, and threat movement updates spatial coverage. Live health, damage quiet periods, threat checks, cycle timing, random selection and repair confirmation remain unchanged. Administrative requests still query current world scope immediately.
+
+## HeimKit Core integration
+
+The performance rebuild in `src/HeimKit2/Features/` consumes CandidateSubscription for structures/threats and administrative scope, PrefabRegistry structural metadata, PlayerServices presence/routed input and ModuleScheduler; section reload and repair batches stay feature-owned. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.

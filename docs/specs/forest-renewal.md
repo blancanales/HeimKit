@@ -60,3 +60,7 @@ Debug ledger-write timing reports background I/O duration separately, at most on
 Optional controller-pass timing reports duration_avg_ms and duration_max_ms at most once per minute for nonempty scope. Collection follows effective debug policy and includes synchronous controller processing only; see [shared measurement limitations](../limitations.md).
 
 Standing-stump discovery uses the shared spatial candidate index instead of repeatedly discovering unrelated records. Due decisions still rotate fairly at the existing interval, including deferred entries and world-clock rollback. Structure, vegetation and terrain checks query fresh full context only when a due decision or acknowledged placement needs it. Durable acknowledgement, fresh exclusions and confirmed-destruction rules remain unchanged.
+
+## HeimKit Core integration
+
+The performance rebuild in `src/HeimKit2/Features/` consumes CandidateSubscription for stumps and safety context, PrefabRegistry vegetation/structure metadata, TerrainContext, NativeWorldObject, ObjectAuthority and ModuleScheduler; the durable decision ledger stays feature-owned. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.

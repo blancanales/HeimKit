@@ -35,7 +35,7 @@ Ranges and selection rules are in the [specification](../specs/forest-renewal.md
 
 Unknown structure-context samples include the blocking object, prefab and specific missing/unsupported condition. Unchanged blockers combine across affected stumps and repeat at most once per five minutes. Stage timings distinguish scope scanning and structure checks from terrain preparation, ledger serialization and world mutation. Known distant structure footprints use a conservative early distance check; unsupported geometry continues to postpone renewal.
 
-Normal output groups confirmed results per completed pass and preserves failures and lifecycle notices. Optional Debug summaries describe changed current scope and result counts at most once per minute. `scope_now` counts pending renewals; `results_pass` counts completed operations in the latest pass; `results_total` counts them during the current controller lifetime. Counts restart when the controller is recreated. Empty unchanged scopes are quiet. Bounded decision samples identify standing-stump replacement, cleared-position planting, structure buffers, plant/tree/terrain/cooldown exclusion and unknown structure context.
+Normal output groups confirmed results per completed pass and preserves failures and lifecycle notices. Optional Debug summaries describe changed current scope and result counts at most once per minute. `scope` counts pending renewals; `results` counts completed operations in the latest pass; `lifetime_results` counts them during the current controller lifetime. Counts restart when the controller is recreated. Empty unchanged scopes are quiet. Bounded decision samples identify standing-stump replacement, cleared-position planting, structure buffers, plant/tree/terrain/cooldown exclusion and unknown structure context.
 
 See [shared safety and delivery limitations](../limitations.md#new-world-features) and [server setup](../server-setup.md).
 
@@ -44,3 +44,10 @@ Ledger writes run on one background worker. Sapling placement waits for durable 
 Pending and cooldown indexes limit repeated ledger searches; cached vegetation definitions reduce repeated prefab component lookups. Renewal rules and saved decisions remain unchanged.
 
 Discovery reuses nearby candidate records and accepts native record changes. Entering another area seeds discovery again; action eligibility and timing retain the configured rules. See the [shared discovery design](../architecture.md#record-driven-candidate-discovery).
+
+
+## HeimKit log topics
+
+- `renewal`: Renewal decisions and durable ledger work.
+
+Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.

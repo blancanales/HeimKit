@@ -126,3 +126,7 @@ Optional controller-pass timing reports duration_avg_ms and duration_max_ms at m
 Reservation-end diagnostics capture a controller-owned snapshot before cleanup, then format that snapshot after release. Include exact validation/cancellation reason, record identity, owner/revisions, position, saved following, health, tame/rider state, phase age and ordering-echo result. Owner-after-release is not used as failure evidence. Missing/replaced records remain unknown.
 
 Source portal selection reuses a bounded portal buffer and counts trigger matches without temporary selection arrays. Follower ordering reuses a buffer and cached native-ID strings with the existing ordering. Authenticated command/emote observation remains active for usable players; traversal position queues are retained for bindings, journeys and fresh command observations. Active traversal sampling and current destination collision checks retain their cadence.
+
+## HeimKit Core integration
+
+The performance rebuild in `src/HeimKit2/Features/` consumes CandidateSubscription for portals, animals and placement context, PrefabRegistry native animal/portal geometry, NativeAccess FieldRefs/delegates, ObjectAuthority/ZdoPackets/ZdoReplication, PlayerServices routed/position observations and ModuleScheduler. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
