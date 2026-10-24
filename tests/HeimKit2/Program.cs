@@ -11,6 +11,7 @@ void Run(string name, Action action)
     try { action(); }
     catch (Exception error) { failures.Add(new Exception(name, error)); System.Console.WriteLine("FAIL: " + name + ": " + error.Message); }
 }
+Run("NativeAccessTests", NativeAccessTests.Run);
 Run("ApplicationIdentityTests", ApplicationIdentityTests.Run);
 Run("CoreRebuildTests", CoreRebuildTests.Run);
 Run("GameCompatibilityTests", GameCompatibilityTests.Run);

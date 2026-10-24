@@ -23,6 +23,8 @@ public static class DiagnosticLog
     public static bool VerboseConfigured => DiagnosticsSettings.Verbosity == DebugVerbosity.Verbose;
     public static LogField Field(string key, object? value) => new(key, value);
     public static LogField FieldAlways(string key, object? value) => new(key, value, true);
+    // For dictionary and tuple sources: a value whose zero, false or empty form is the answer.
+    public static object Kept(object? value) => new LogField("", value, true);
     public static void StartSession() { Clock.Restart(); ServerActivity.Reset(); _budgets = new(); }
     public static void ObservePlayers(bool? hasConnectedPlayers) => ServerActivity.Observe(Clock.Elapsed.TotalSeconds, hasConnectedPlayers);
     private static DiagnosticBudget Budget(ManualLogSource logger, string feature)
@@ -59,17 +61,19 @@ public static class DiagnosticLog
         foreach (var field in fields)
         {
             if (field.Key == "omitted_fields" || error != null && (field.Key == "error_type" || field.Key == "error" || field.Key == "stack")) continue;
-            if (!LogTopic.Valid(field.Key) || (!field.Always && Empty(field.Value)) || Duplicate(names, used, field.Key)) continue;
+            object? value = field.Value; bool always = field.Always;
+            if (value is LogField kept) { value = kept.Value; always |= kept.Always; }
+            if (!LogTopic.Valid(field.Key) || (!always && Empty(value)) || value == null || Duplicate(names, used, field.Key)) continue;
             if (used == names.Length) { Array.Resize(ref names, names.Length * 2); _names = names; }
             names[used++] = field.Key;
             if (emitted >= cap) { omitted++; continue; }
-            AppendField(builder, field.Key, field.Value, text); emitted++;
+            AppendField(builder, field.Key, value, text); emitted++;
         }
         if (error != null)
         {
             AppendField(builder, "error_type", error.GetType().FullName, text);
             AppendField(builder, "error", error.Message, text);
-            var stack = error.StackTrace;
+            var stack = error.InnerException == null ? error.StackTrace : error.ToString();
             if (!string.IsNullOrEmpty(stack)) AppendField(builder, "stack", stack, text);
         }
         if (omitted > 0) { builder.Append(" omitted_fields="); omitted.TryFormat(text, out length, provider: CultureInfo.InvariantCulture); builder.Append(text.Slice(0, length)); }

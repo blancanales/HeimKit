@@ -8,7 +8,7 @@ Install HeimKit on a Windows Valheim dedicated server. Players use unmodified cl
 | --- | --- |
 | HeimKit release baseline | 0.1.55 |
 | HeimKit legacy development build | 0.1.56-world-features.23 |
-| HeimKit performance rebuild | 0.2.0-rebuild.7 |
+| HeimKit performance rebuild | 0.2.0-rebuild.9 |
 | Valheim Dedicated Server | 1.0.20; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |

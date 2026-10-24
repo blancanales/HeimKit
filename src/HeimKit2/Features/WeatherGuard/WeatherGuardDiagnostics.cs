@@ -194,7 +194,7 @@ public sealed class WeatherGuardDiagnostics : FeatureDiagnostics, IDisposable
         if (!Enabled) return;
         var fields = new Dictionary<string, object?>(watch.Identity)
         {
-            ["managed"] = watch.Protected, ["health_before"] = previous.Health, ["health_after"] = watch.Health,
+            ["managed"] = watch.Protected, ["health_before"] = previous.Health, ["health_after"] = DiagnosticLog.Kept(watch.Health),
             ["health_lost"] = watch.HealthLost - previous.Lost, ["weather_cause"] = "unconfirmed"
         };
         Write(WeatherGuardLogTopics.Rain, "Observed health loss since the previous sample; weather cause is unconfirmed.", fields);
@@ -228,16 +228,20 @@ public sealed class WeatherGuardDiagnostics : FeatureDiagnostics, IDisposable
     public void Command(WearObservation observation, float? after, bool failed, Exception? error = null)
     {
         if (!DebugEnabled && !failed) return;
+        // Name the receiver: a damage, repair or removal handler is not weather wear.
+        string command = observation.Fields.TryGetValue("command", out var name) ? name as string ?? "" : "";
+        string handler = command == "RPC_Damage" ? "damage handler" : command == "RPC_Repair" ? "repair handler" : command == "RPC_Remove" ? "removal handler" : "receiver";
         var fields = new Dictionary<string, object?>(observation.Identity)
-        { ["health_before"] = observation.Before, ["health_after"] = after, ["object_available_after"] = after.HasValue,
-          ["protection"] = observation.Protected ? "active" : "unknown", ["weather_damage"] = "unconfirmed" };
-        Write(WeatherGuardLogTopics.Wear, failed ? "Native receiver raised an exception." : "Native receiver executed; its health outcome was observed.", fields, failed ? LogLevel.Error : LogLevel.Debug, error);
+        { ["command"] = command, ["health_before"] = DiagnosticLog.Kept(observation.Before), ["health_after"] = after.HasValue ? DiagnosticLog.Kept(after.Value) : "unavailable",
+          ["protection"] = observation.Protected ? "active" : "unknown", ["weather_damage"] = "unconfirmed", ["object_available_after"] = after.HasValue };
+        Write(WeatherGuardLogTopics.Wear, failed ? $"Native {handler} raised an exception." : $"Native {handler} ran on a protected piece; its health outcome was observed.", fields, failed ? LogLevel.Error : LogLevel.Debug, error);
         if (VerboseEnabled)
         {
             var evidence = new Dictionary<string, object?>(observation.Fields)
             { ["action"] = failed ? "native_command_failed" : "native_command_executed",
               ["health_change"] = !after.HasValue ? "unavailable" : after.Value < observation.Before ? "loss_observed" : after.Value > observation.Before ? "increase_observed" : "unchanged",
               ["damage_context"] = "native_command" };
+            evidence.Remove("command");
             DiagnosticLog.Write(_logger, "WeatherGuard", WeatherGuardLogTopics.Wear, Subject(observation.Identity, "Native command evidence"), evidence, LogLevel.Debug, verbose: true);
         }
     }
@@ -262,7 +266,7 @@ public sealed class WeatherGuardDiagnostics : FeatureDiagnostics, IDisposable
         var fields = new Dictionary<string, object?>(observation.Identity)
         {
             ["blockers"] = blockers, ["protection"] = observation.Protected ? "active" : Equals(reason, "eligible") ? "waiting" : "excluded",
-            ["health_before"] = observation.Before, ["health_after"] = after, ["weather_damage"] = "unconfirmed"
+            ["health_before"] = DiagnosticLog.Kept(observation.Before), ["health_after"] = after.HasValue ? DiagnosticLog.Kept(after.Value) : null, ["weather_damage"] = "unconfirmed"
         };
         string message = failed ? "Native wear calculation failed." : !observation.Owner ? "Wear calculation remained with another owner or was unassigned." :
             observation.Warmup ? "Native wear calculation waited for loading warmup." : !observation.GateReached ? "Native weather contribution was not due." :

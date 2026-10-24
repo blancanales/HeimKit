@@ -10,6 +10,7 @@ namespace HeimKit.Core.Native;
 // Resolution belongs here; consumers retain typed accessors, never reflection metadata.
 internal static class NativeAccess
 {
+    private static readonly bool IsMono = Type.GetType("Mono.Runtime") != null;
     private static readonly Dictionary<(Type, string, Type), object> Fields = new();
     private static readonly Dictionary<(Type, string, Type), Delegate> Methods = new();
     internal static AccessTools.FieldRef<T, V> Field<T, V>(string name)
@@ -19,9 +20,16 @@ internal static class NativeAccess
         {
             var field = ResolveField(typeof(T), name);
             if (field.FieldType != typeof(V)) throw new MissingFieldException(typeof(T).FullName, name + " has an incompatible type");
-            var getter = new DynamicMethod("fieldref_" + name, typeof(V).MakeByRefType(), new[] { typeof(T) }, typeof(NativeAccess).Module, true);
-            var il = getter.GetILGenerator(); il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldflda, field); il.Emit(OpCodes.Ret);
-            Fields[key] = value = getter.CreateDelegate(typeof(AccessTools.FieldRef<T, V>));
+            // Unity Mono rejects raw DynamicMethod ref returns. Harmony uses its Mono-compatible
+            // generator there; modern .NET supports the direct emitter without Harmony's legacy runtime helpers.
+            if (IsMono) value = AccessTools.FieldRefAccess<T, V>(field);
+            else
+            {
+                var getter = new DynamicMethod("fieldref_" + name, typeof(V).MakeByRefType(), new[] { typeof(T) }, typeof(NativeAccess).Module, true);
+                var il = getter.GetILGenerator(); il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldflda, field); il.Emit(OpCodes.Ret);
+                value = getter.CreateDelegate(typeof(AccessTools.FieldRef<T, V>));
+            }
+            Fields[key] = value;
         }
         return (AccessTools.FieldRef<T, V>)value;
     }

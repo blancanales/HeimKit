@@ -66,7 +66,7 @@ public sealed class InfiniteTorchesDiagnostics : FeatureDiagnostics
     {
         if (!IsDebugEnabled || !_budget.Reserve(now, "refill_requests", RefillDetailLimit)) return;
         Write(InfiniteTorchesLogTopics.Refill, "Refill request sent; client application unconfirmed", new()
-        { ["object"] = id, ["prefab"] = prefab, ["pos"] = position, ["fuel_before"] = before, ["fuel_target"] = target });
+        { ["object"] = id, ["prefab"] = prefab, ["pos"] = position, ["fuel_before"] = DiagnosticLog.Kept(before), ["fuel_target"] = target });
     }
     public void UnsupportedPrefabs(int count, IReadOnlyDictionary<string, int> reasons)
     {
@@ -86,8 +86,8 @@ public sealed class InfiniteTorchesDiagnostics : FeatureDiagnostics
             result.Outcome == "timeout" ? "Sufficient fuel increase not observed; retry permitted if eligible" :
             result.Outcome == "owner_changed" ? "Owner changed; prior request tracking cleared" : "Object unavailable; request tracking cleared";
         var fields = new Dictionary<string, object?> { ["object"] = result.Object, ["outcome"] = result.Outcome,
-            ["wait_s"] = result.WaitSeconds, ["fuel_before"] = result.Before,
-            ["fuel_target"] = result.Target, ["fuel_observed"] = result.Fuel };
+            ["wait_s"] = result.WaitSeconds, ["fuel_before"] = DiagnosticLog.Kept(result.Before),
+            ["fuel_target"] = result.Target, ["fuel_observed"] = DiagnosticLog.Kept(result.Fuel) };
         if (result.Outcome == "owner_changed") { fields["requested_owner"] = result.RequestedOwner; fields["observed_owner"] = result.ObservedOwner; }
         Write(InfiniteTorchesLogTopics.Refill, message, fields);
     }

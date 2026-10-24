@@ -32,6 +32,9 @@ internal static class DiagnosticLogTests
             Check(lines[2].Text == "21:14:32 WeatherGuard.scope: Observed protection. health=237.989 managed=true", "Debug grammar or invariant rounding changed.");
             Check(lines[3].Level == LogLevel.Error && lines[3].Text.StartsWith("21:14:32 WeatherGuard.lifecycle: Operation failed. error_type=System.InvalidOperationException error=\"bad\\ninput\" stack="), "Exception fields or Error grammar changed.");
             Check(lines.All(line => !line.Text.Contains('\n') && !line.Text.Contains('\r') && !line.Text.Contains("elapsed_s=")), "A record spans physical lines or contains elapsed time.");
+            var nested = new TypeInitializationException("Placement", new MissingFieldException("Native field lookup failed."));
+            string nestedLine = DiagnosticLog.Format("TameTravel", CoreLogTopics.Lifecycle, "Placement initialization failed.", level: LogLevel.Error, error: nested);
+            Check(nestedLine.Contains("System.TypeInitializationException") && nestedLine.Contains("System.MissingFieldException") && nestedLine.Contains("Native field lookup failed.") && !nestedLine.Contains('\n'), "First-failure evidence lost or split an inner exception.");
             foreach (string invalid in new[] { "", "Scope", "1scope", "scope.bad", "bad-key", "bad key" })
             { bool rejected = false; try { _ = new LogTopic(invalid); } catch (ArgumentException) { rejected = true; } Check(rejected, "Invalid topic accepted: " + invalid); }
             Check(new LogTopic("scope_2").Name == "scope_2", "Valid topic rejected.");
@@ -45,6 +48,10 @@ internal static class DiagnosticLogTests
                 !rounded.Contains(" missing_object=") && !rounded.Contains(" dropped="), "Default omission changed or kept an absent identity or empty drop count.");
             var budget = new DiagnosticBudget(); budget.Reserve(0, "refill_results", 0);
             Check(budget.TakeOmitted() == "refill_results:1" && budget.TakeOmitted() == "", "Drop counts lost their stream name or were not cleared.");
+            string keptDictionary = DiagnosticLog.Format("SharedMap", new LogTopic("dungeons"), "Observed pickups.", new Dictionary<string, object?> {
+                ["remaining_percent"] = DiagnosticLog.Kept(0), ["changed"] = DiagnosticLog.Kept(false), ["picked_pickups"] = 0, ["missing"] = null });
+            string keptTuple = DiagnosticLog.Format("InfiniteTorches", new LogTopic("refill"), "Observed fuel.", new (string, object?)[] { ("fuel_before", DiagnosticLog.Kept(0f)), ("wait_s", 0f) });
+            Check(keptDictionary.EndsWith("remaining_percent=0 changed=false") && keptTuple.EndsWith("fuel_before=0"), "Kept zero values were omitted from dictionary or tuple fields: " + keptDictionary + " | " + keptTuple);
             string escaped = DiagnosticLog.Format("HeimKit", CoreLogTopics.Config, "Read configuration.", new (string, object?)[] {
                 ("name", "Onem Hlodvirsso"), ("path", "C:\\logs\\x=1\".txt\nnext\r\ttab"), ("simple", "abc:123"), ("bad|key", 1), ("simple", "duplicate") });
             Check(escaped.Contains("name=\"Onem Hlodvirsso\"") && escaped.Contains("path=\"C:\\\\logs\\\\x=1\\\".txt\\nnext\\r\\ttab\"") && escaped.Contains("simple=abc:123") && !escaped.Contains("duplicate") && !escaped.Contains("bad|key"), "Logfmt escaping, key validation or uniqueness changed: " + escaped);

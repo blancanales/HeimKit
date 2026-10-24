@@ -130,3 +130,5 @@ Source portal selection reuses a bounded portal buffer and counts trigger matche
 ## HeimKit Core integration
 
 The performance rebuild in `src/HeimKit2/Features/` consumes CandidateSubscription for portals, animals and placement context, PrefabRegistry native animal/portal geometry, NativeAccess FieldRefs/delegates, ObjectAuthority/ZdoPackets/ZdoReplication, PlayerServices routed/position observations and ModuleScheduler. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
+
+Native field access is supplied by Core NativeAccess through runtime-compatible cached ref-getters; feature controllers retain the existing field types and gameplay operations.

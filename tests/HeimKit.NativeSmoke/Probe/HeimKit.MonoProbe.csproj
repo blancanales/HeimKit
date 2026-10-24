@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>HeimKit.Tests</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GameManaged>$(ServerPath)\valheim_server_Data\Managed</GameManaged>
+    <BepInExCore Condition="'$(BepInExCore)' == ''">$(ServerPath)\BepInEx\core</BepInExCore>
+    <HeimKitProject Condition="'$(HeimKitProject)' == '' and Exists('..\..\..\src\HeimKit2\HeimKit.csproj')">..\..\..\src\HeimKit2\HeimKit.csproj</HeimKitProject>
+    <HeimKitProject Condition="'$(HeimKitProject)' == ''">..\..\..\src\HeimKit\HeimKit.csproj</HeimKitProject>
+    <NativeAccessChecks Condition="Exists('..\..\HeimKit2\NativeAccessTests.cs')">..\..\HeimKit2\NativeAccessTests.cs</NativeAccessChecks>
+    <NativeAccessChecks Condition="'$(NativeAccessChecks)' == ''">..\..\HeimKit\NativeAccessTests.cs</NativeAccessChecks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(HeimKitProject)" />
+    <Compile Include="$(NativeAccessChecks)" Link="NativeAccessTests.cs" />
+    <Reference Include="0Harmony"><HintPath>$(BepInExCore)\0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="assembly_valheim"><HintPath>$(GameManaged)\assembly_valheim.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(GameManaged)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

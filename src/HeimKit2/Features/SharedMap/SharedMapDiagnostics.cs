@@ -23,6 +23,8 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
     private int _lastDungeonCount = -1;
     private bool? _lastDungeonRetrospective;
     private (int Sources, int Pins)? _lastDungeonCleanup;
+    private readonly Dictionary<string, (int Total, int Picked, string Reason)> _dungeonLoot = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (int Bytes, int Rooms, bool Valid, string Reason)> _dungeonLayouts = new(StringComparer.Ordinal);
     public SharedMapDiagnostics(ManualLogSource logger, DebugLoggingPolicy policy, Func<string>? pinNameFilter = null)
     { _logger = logger; _policy = policy; ConfigureDiagnostics(() => policy.Enabled, logger, "SharedMap"); _pinNameFilter = pinNameFilter ?? (() => ""); }
 
@@ -273,10 +275,20 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
         if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Tables, "Rejected table map-field changes under the player-write policy.", new (string, object?)[] { ("rejected_fields", count), ("allow_player_map_writes", false), ("writer_confirmed", false), ("client_read_confirmed", false) }, LogLevel.Debug);
     }
 
-    public void DungeonLoot(float now, string identity, int total, int picked, bool changed, string reason)
+    // Dungeon scans repeat every pass; only a changed result for an entrance is new evidence.
+    private static bool NewResult<T>(Dictionary<string, T> seen, string key, T value)
     {
-        if (!DiagnosticsEnabled || !_budget.Reserve(now, "dungeon_loot", 6)) return;
-        if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Dungeons, $"Dungeon {identity} pickup observation: {reason.Replace('_', ' ')}.", new (string, object?)[] { ("gateway", identity), ("total_pickups", total), ("picked_pickups", picked), ("remaining_percent", picked < 0 ? -1 : total == 0 ? 0 : (int)Math.Ceiling(100d * (total - picked) / total)), ("changed", changed), ("reason", reason) }, LogLevel.Debug);
+        if (seen.TryGetValue(key, out var previous) && EqualityComparer<T>.Default.Equals(previous, value)) return false;
+        if (seen.Count >= 8192 && !seen.ContainsKey(key)) seen.Clear();
+        seen[key] = value; return true;
+    }
+    private static string Dungeon(string location) =>
+        SharedMapDungeonPrefab.Labels.TryGetValue(location, out var label) ? $"{label} ({location})" : location;
+    public void DungeonLoot(float now, string identity, string location, UnityEngine.Vector3 position, int total, int picked, bool changed, string reason)
+    {
+        if (!DiagnosticsEnabled || !NewResult(_dungeonLoot, identity, (total, picked, reason)) || !_budget.Reserve(now, "dungeon_loot", 6)) return;
+        bool known = picked >= 0;
+        if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Dungeons, $"{Dungeon(location)} pickups: {reason.Replace('_', ' ')}.", new LogField[] { ("location", location), ("gateway", identity), ("pos", position), DiagnosticLog.FieldAlways("total_pickups", total), ("picked_pickups", known ? DiagnosticLog.Kept(picked) : null), ("remaining_percent", known ? DiagnosticLog.Kept(total == 0 ? 0 : (int)Math.Ceiling(100d * (total - picked) / total)) : null), DiagnosticLog.FieldAlways("changed", changed), ("reason", reason) }, LogLevel.Debug);
     }
     public void DungeonVisited(float now, string location, long peer, int gateways)
     {
@@ -288,10 +300,10 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
         if (!DiagnosticsEnabled || !_budget.Reserve(now, "dungeon_visit", 6)) return;
         if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Dungeons, "Inferred a prior dungeon visit from saved pickup evidence.", new (string, object?)[] { ("gateway", gateway), ("total_pickups", total), ("picked_pickups", picked), ("evidence", "matched_saved_pickup_flags") }, LogLevel.Debug);
     }
-    public void DungeonLayout(float now, string gateway, string location, int bytes, int rooms, bool valid, string reason)
+    public void DungeonLayout(float now, string gateway, string location, UnityEngine.Vector3 position, int bytes, int rooms, bool valid, string reason)
     {
-        if (!DiagnosticsEnabled || !_budget.Reserve(now, "dungeon_layout", 6)) return;
-        if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Dungeons, $"Dungeon {gateway} layout {(valid ? "is ready" : "was rejected")} — {reason.Replace('_', ' ')}.", new (string, object?)[] { ("gateway", gateway), ("location", location), ("layout_bytes", bytes), ("room_count", rooms), ("native_room_bytes", SharedMapDungeonLayout.RoomBytes), ("expected_layout_bytes", 4L + (long)rooms * SharedMapDungeonLayout.RoomBytes), ("layout_valid", valid), ("reason", reason) }, LogLevel.Debug);
+        if (!DiagnosticsEnabled || !NewResult(_dungeonLayouts, gateway, (bytes, rooms, valid, reason)) || !_budget.Reserve(now, "dungeon_layout", 6)) return;
+        if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Dungeons, $"{Dungeon(location)} layout {(valid ? "is ready" : "was rejected")} — {reason.Replace('_', ' ')}.", new LogField[] { ("location", location), ("gateway", gateway), ("pos", position), DiagnosticLog.FieldAlways("layout_bytes", bytes), DiagnosticLog.FieldAlways("room_count", rooms), ("expected_layout_bytes", 4L + (long)rooms * SharedMapDungeonLayout.RoomBytes), DiagnosticLog.FieldAlways("layout_valid", valid), ("reason", reason) }, LogLevel.Debug);
     }
     public void DungeonLootResults(int count)
     {

@@ -116,7 +116,7 @@ internal sealed class SharedMapDungeonLoot
             if (generatorCount != 1) { Unknown(target, now, "layout_not_unique_or_unavailable"); return; }
             byte[]? data = generator!.GetByteArray(ZDOVars.s_roomData);
             bool valid = SharedMapDungeonLayout.TryRead(data, out var rooms, out string reason);
-            _diagnostics.DungeonLayout(now, target.Gateways.First(), target.Prefab.Name, data?.Length ?? 0,
+            _diagnostics.DungeonLayout(now, target.Gateways.First(), target.Prefab.Name, target.Root, data?.Length ?? 0,
                 data != null && data.Length >= 4 ? BitConverter.ToInt32(data, 0) : 0, valid, reason);
             if (!valid) { Unknown(target, now, reason); return; }
             foreach (var placement in rooms)
@@ -181,7 +181,7 @@ internal sealed class SharedMapDungeonLoot
             { Record(target, now, 0, 0, "unvisited_empty_inventory"); return; }
             if (target.EmptySince < 0) target.EmptySince = now;
             if (now - target.EmptySince < 30)
-            { Record(target, now, 0, 0, "empty_inventory_pending"); return; }
+            { Pending(target, now); return; }
         }
         else target.EmptySince = -1;
         Record(target, now, total, picked, total == 0 ? "observed_empty_inventory" : "saved_pickup_flags", verifiedEmpty: total == 0);
@@ -194,8 +194,17 @@ internal sealed class SharedMapDungeonLoot
             if (_store.VisitFromPickups(gateway, total, picked))
                 _diagnostics.DungeonPriorVisit(now, gateway, total, picked);
             var accepted = _store.ProgressState(gateway);
-            _diagnostics.DungeonLoot(now, gateway, accepted.Total, accepted.Picked, changed,
-                accepted.Picked < 0 && reason != "empty_inventory_pending" ? "missing_or_unestablished_pickups" : reason);
+            _diagnostics.DungeonLoot(now, gateway, target.Prefab.Name, target.Root, accepted.Total, accepted.Picked, changed,
+                accepted.Picked < 0 ? "missing_or_unestablished_pickups" : reason);
+        }
+    }
+    // An empty scan inside the wait is inconclusive, so established progress and its label stay published.
+    private void Pending(Target target, float now)
+    {
+        foreach (string gateway in target.Gateways)
+        {
+            var accepted = _store.ProgressState(gateway);
+            _diagnostics.DungeonLoot(now, gateway, target.Prefab.Name, target.Root, accepted.Total, accepted.Picked, false, "empty_inventory_pending");
         }
     }
     internal static int FindSite(IReadOnlyDictionary<(int Hash, int X, int Y, int Z), List<Vector3>> cells,
@@ -223,7 +232,8 @@ internal sealed class SharedMapDungeonLoot
         foreach (string gateway in target.Gateways)
         {
             bool changed = _store.Progress(gateway, 0, 0); if (changed) _changed++;
-            _diagnostics.DungeonLoot(now, gateway, 0, -1, changed, reason);
+            var accepted = _store.ProgressState(gateway);
+            _diagnostics.DungeonLoot(now, gateway, target.Prefab.Name, target.Root, accepted.Total, -1, changed, reason);
         }
     }
     public int TakeChanges() { int count = _changed; _changed = 0; return count; }

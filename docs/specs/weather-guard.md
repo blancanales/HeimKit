@@ -173,3 +173,5 @@ Immutable prefab eligibility is cached per controller, while creator, persistenc
 ## HeimKit Core integration
 
 The performance rebuild in `src/HeimKit2/Features/` consumes server-simulation CandidateSubscription with Core live-instance retention, PrefabRegistry structural/context metadata, NativeAccess wear/creator FieldRefs, ObjectAuthority/ZdoPackets protection fencing and ModuleScheduler processing/terrain cadence. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
+
+Native field access is supplied by Core NativeAccess through runtime-compatible cached ref-getters; feature controllers retain the existing field types and gameplay operations.

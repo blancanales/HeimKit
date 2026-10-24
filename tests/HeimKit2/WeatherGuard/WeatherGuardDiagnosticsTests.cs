@@ -55,6 +55,10 @@ internal static class WeatherGuardDiagnosticsTests
         Check(failure.Contains("field_5=5") && !failure.Contains("field_6=") && failure.Contains("error_type=System.InvalidOperationException"), "Error wear exceeded its five evidence fields or lost the exception.");
         Check(continued.Contains("field_6=6 field_7=7 field_8=8") && !continued.Contains("field_5="), "Verbose did not continue exactly where the Error record stopped.");
         Check(messages.Exists(m => m.Text.Contains("Native wear evidence for wood_floor (piece 1:5).")), "Verbose wear evidence did not name its piece.");
+        messages.Clear();
+        detailed.Command(new WearObservation { Protected = true, Identity = new() { ["object"] = "1:7", ["prefab"] = "wood_pole2" }, Fields = new() { ["command"] = "RPC_Damage" }, Before = 400 }, 0, false);
+        Check(messages[0].Text.Contains(": Native damage handler ran on a protected piece;") && messages[0].Text.Contains("command=RPC_Damage") && messages[0].Text.Contains("health_after=0"), "Native receiver record hid its handler or a destroyed piece's zero health: " + messages[0].Text);
+        Check(!messages[1].Text.Contains("command="), "Verbose command evidence repeated the handler.");
         verbosity.Value = DebugVerbosity.Normal; detailed.Reset(); messages.Clear(); int formatted = 0;
         for (int i = 0; i < 32; i++) detailed.Sample(0, () => { formatted++; return "Observed ownership."; });
         Check(formatted == WeatherGuardDiagnostics.SampleLimit && messages.Count == WeatherGuardDiagnostics.SampleLimit, "Existing sample cap or lazy formatting changed.");

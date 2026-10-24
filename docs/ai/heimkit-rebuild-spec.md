@@ -304,6 +304,7 @@ One place that resolves and caches native fields and methods as fast delegates. 
 startup; validated once (fail fast with a clear `MissingMemberException` if a member is absent,
 exactly as `WeatherGuardController.Install` does today).
 
+- Resolve fields through Core's runtime-compatible cached generator: Harmony field references on Unity Mono, and direct DynamicMethod emission on modern .NET. Never use raw ref-return DynamicMethod construction on Mono.
 - Fields become `AccessTools.FieldRefAccess<TInstance,TField>` ref-getters (direct access, no
   boxing), **not** `FieldInfo`. This covers every `FieldInfo` currently held by WeatherGuard
   (`m_rainWet`, `m_haveRoof`, `m_shieldChangeID`, `m_rainTimer`, `m_createTime`,
