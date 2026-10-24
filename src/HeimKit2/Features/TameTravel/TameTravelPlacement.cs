@@ -34,12 +34,18 @@ internal sealed class TameTravelPlacement : IDisposable
     public ZDOID? BlockingObject { get; private set; }
     private readonly int _solid = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "terrain", "vehicle", "character", "character_net", "character_ghost");
     private readonly int _building = LayerMask.GetMask("piece");
+    // Padding applies to buildings and objects, not to terrain or creatures, which have their own checks.
+    private readonly int _obstacles = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "vehicle");
+    private readonly Collider[] _overlaps = new Collider[32];
+    private CapsuleCollider? _padding;
     private readonly Func<Vector3, Vector3?> _groundProbe;
     private readonly Func<Vector3, Vector3, bool> _clearProbe;
     private AnimalTransfer _probeTransfer = null!;
     private bool _probeEvidence;
-    private Vector3 _probeForward, _probeCenterOffset, _probeAxis;
-    private float _probeFrontClearance, _probeExtent, _probeHorizontalExtent, _probeHalfLine, _probeRadius;
+    private Vector3 _probeCenterOffset, _probeAxis;
+    private Quaternion _probeRotation;
+    private int _probeDirection;
+    private float _probeExtent, _probeHorizontalExtent, _probeHalfLine, _probeRadius;
     public TameTravelPlacement(TameTravelRules rules) { _rules = rules; _groundProbe = ProbeGround; _clearProbe = ProbeClear; }
     public bool Find(AnimalTransfer t, Dictionary<ZDOID, AnimalTransfer>.ValueCollection transfers, IReadOnlyList<ZNetPeer> peers, float now, bool evidence, out Vector3 position)
     {
@@ -101,8 +107,8 @@ internal sealed class TameTravelPlacement : IDisposable
         forward.y = 0;
         if (forward.sqrMagnitude < .001f) { WaitReason = "destination_facing_unsupported"; return false; }
         forward = forward.normalized;
-        float frontClearance = horizontalExtent + new Vector2(centerOffset.x, centerOffset.z).magnitude + 1;
-        _probeTransfer = t; _probeEvidence = evidence; _probeForward = forward; _probeFrontClearance = frontClearance; _probeExtent = extent; _probeCenterOffset = centerOffset; _probeHorizontalExtent = horizontalExtent; _probeAxis = axis; _probeHalfLine = halfLine; _probeRadius = radius;
+        _probeTransfer = t; _probeEvidence = evidence; _probeExtent = extent; _probeCenterOffset = centerOffset; _probeHorizontalExtent = horizontalExtent; _probeAxis = axis; _probeHalfLine = halfLine; _probeRadius = radius;
+        _probeRotation = t.Journey.DestinationRotation; _probeDirection = capsule.direction;
         for (int index = 0; index < peers.Count && peers[index] is var peer; index++)
             if (peer.IsReady() && ZDOMan.instance.GetZDO(peer.m_characterID) is ZDO player) _players.Add(player.GetPosition());
         foreach (var other in transfers) if (!ReferenceEquals(other, t) && other.Moved) _placements.Add(other.Placement);
@@ -112,23 +118,23 @@ internal sealed class TameTravelPlacement : IDisposable
         int escapeProbes = 0, accessProbes = 0;
         var traveller = ZDOMan.instance.GetZDO(t.Journey.Character);
         if (traveller == null) { WaitReason = "traveller_unavailable"; return false; }
+        // The sweep is centred where the traveller stands; once they move a metre it starts again beside them.
+        var standing = traveller.GetPosition();
+        if (!t.PlacementAnchor.HasValue || (standing - t.PlacementAnchor.Value).sqrMagnitude > 1) { t.PlacementAnchor = standing; t.PlacementCursor = 0; }
+        var anchor = t.PlacementAnchor.Value;
         int count = TameTravelPlacementRules.CandidateCount(horizontalExtent);
-        int variation = unchecked(t.Id.GetHashCode() * 397 ^ (int)(t.Journey.Entered * 1000));
         int start = t.PlacementCursor % count;
         for (int visited = 0; visited < TameTravelPlacementRules.MaximumCandidatesPerPass; visited++)
         {
             int index = (start + visited) % count;
             t.PlacementCursor = (index + 1) % count;
             if (evidence) t.PlacementCandidates++;
-            var candidate = TameTravelPlacementRules.Candidate(index, horizontalExtent, t.Journey.Exit, traveller.GetPosition(), forward, variation);
+            var candidate = TameTravelPlacementRules.Candidate(index, horizontalExtent, t.Journey.Exit, anchor, forward);
             if (evidence) { t.PlacementLastProbe = candidate; t.PlacementSupportHeight = null; }
-            var delta = candidate - t.Journey.Exit;
-            if (delta.x * delta.x + delta.z * delta.z > TameTravelPlacementRules.LandingRadius * TameTravelPlacementRules.LandingRadius)
-            { if (evidence) Reject(t, "landing_range"); continue; }
-            var direction = candidate - t.Journey.DestinationPosition; direction.y = 0;
-            if (direction.sqrMagnitude < .001f) direction = forward;
-            var point = ProbeGround(candidate);
+            var point = ProbeLanding(candidate);
             if (!point.HasValue) continue;
+            var direction = point.Value - anchor; direction.y = 0;
+            if (direction.sqrMagnitude < .001f) direction = forward;
             if (evidence) t.PlacementSupportHeight = point.Value.y - extent + centerOffset.y - .15f;
             if (TameTravelPlacementRules.HasEscape(point.Value, direction, Math.Max(3, horizontalExtent + 2), groundProbe, clearProbe, ref escapeProbes))
             {
@@ -155,10 +161,62 @@ internal sealed class TameTravelPlacement : IDisposable
         return false;
     }
 
+    // A landing that crowds a building or object is pushed clear by the measured overlap and checked again.
+    private Vector3? ProbeLanding(Vector3 candidate)
+    {
+        for (int push = 0; ; push++)
+        {
+            var delta = candidate - _probeTransfer.Journey.Exit;
+            if (delta.x * delta.x + delta.z * delta.z > TameTravelPlacementRules.LandingRadius * TameTravelPlacementRules.LandingRadius)
+            { if (_probeEvidence) Reject(_probeTransfer, "landing_range"); return null; }
+            var point = ProbeGround(candidate);
+            if (!point.HasValue) return null;
+            if (!Crowded(point.Value, out var away)) return point;
+            if (_probeEvidence) Reject(_probeTransfer, "obstacle_padding");
+            if (push == TameTravelPlacementRules.MaximumPushes || away.sqrMagnitude < .0001f) return null;
+            candidate = point.Value + away.normalized * (away.magnitude + .05f);
+            if (_probeEvidence) _probeTransfer.PlacementLastProbe = candidate;
+        }
+    }
+    // The padded body is raised so its underside stays where the unpadded body's was: only its sides and top grow.
+    // Overlapping objects report the direction and distance that clear them; only the horizontal part is used.
+    private bool Crowded(Vector3 root, out Vector3 away)
+    {
+        away = Vector3.zero;
+        float padding = TameTravelPlacementRules.ObstaclePadding, radius = _probeRadius + padding;
+        var center = root + _probeCenterOffset + Vector3.up * (padding - .05f);
+        int count = Physics.OverlapCapsuleNonAlloc(center + _probeAxis * _probeHalfLine, center - _probeAxis * _probeHalfLine, radius,
+            _overlaps, _obstacles, QueryTriggerInteraction.Ignore);
+        if (count == 0) return false;
+        if (count == _overlaps.Length) return true;
+        var probe = PaddingProbe();
+        probe.radius = radius; probe.height = 2 * (_probeHalfLine + radius); probe.direction = _probeDirection;
+        // Penetration needs an enabled collider; it stays enabled only for these synchronous queries.
+        probe.enabled = true;
+        try
+        {
+            for (int i = 0; i < count; i++)
+            {
+                var other = _overlaps[i]; _overlaps[i] = null!;
+                if (other != null && Physics.ComputePenetration(probe, center, _probeRotation, other, other.transform.position, other.transform.rotation, out var direction, out float distance))
+                    away += direction * distance;
+            }
+        }
+        finally { probe.enabled = false; }
+        away.y = 0;
+        return true;
+    }
+    private CapsuleCollider PaddingProbe()
+    {
+        if (_padding != null) return _padding;
+        var probe = new GameObject("HeimKit TameTravel padding probe") { hideFlags = HideFlags.HideAndDontSave, layer = 2 };
+        _padding = probe.AddComponent<CapsuleCollider>();
+        _padding.isTrigger = true; _padding.enabled = false; _padding.center = Vector3.zero;
+        return _padding;
+    }
     private Vector3? ProbeGround(Vector3 p)
         {
             Vector3? Rejected(string reason) { if (_probeEvidence) Reject(_probeTransfer, reason); return null; }
-            if (!TameTravelPlacementRules.InFront(p, _probeTransfer.Journey.DestinationPosition, _probeForward, _probeFrontClearance)) return Rejected("portal_front_clearance");
             if (!_surfaces.Probe(p, out float height, out var normal, out string surfaceReason)) return Rejected(surfaceReason);
             if (Math.Abs(height - _probeTransfer.Journey.Exit.y) > 24) return Rejected("vertical_range");
             p.y = height + _probeExtent - _probeCenterOffset.y + .15f;
@@ -229,5 +287,9 @@ internal sealed class TameTravelPlacement : IDisposable
         if (body == null || !TameTravelRules.Scale(z, out var scale)) return 32;
         return (body.radius + (body.direction == 1 ? 0 : body.height * 0.5f)) * scale.x + 1;
     }
-    public void Dispose() => _context.Dispose();
+    public void Dispose()
+    {
+        _context.Dispose();
+        if (_padding != null) { UnityEngine.Object.Destroy(_padding.gameObject); _padding = null; }
+    }
 }

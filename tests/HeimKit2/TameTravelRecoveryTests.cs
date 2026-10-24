@@ -178,12 +178,12 @@ internal static class TameTravelRecoveryTests
         Check(TameTravelPlacementSurfaces.LowSlab(new Vector3(2, .5f, 2), 1) &&
             !TameTravelPlacementSurfaces.LowSlab(new Vector3(.3f, 2, 2), 1) &&
             !TameTravelPlacementSurfaces.LowSlab(new Vector3(2, .5f, 2), 4), "Low paving geometry was confused with walls or raised construction.");
-        // A narrow landing opening between sparse old ring angles must be visited locally.
-        var local = Enumerable.Range(0, TameTravelPlacementRules.PreferredCandidates)
-            .Select(i => TameTravelPlacementRules.Candidate(i, 3, Vector3.zero, Vector3.zero, Vector3.forward, 17)).ToArray();
+        // A narrow landing opening between arc spots must be visited locally.
+        var local = Enumerable.Range(0, TameTravelPlacementRules.ArcCandidates(1))
+            .Select(i => TameTravelPlacementRules.Candidate(i, 1, Vector3.zero, Vector3.zero, Vector3.forward)).ToArray();
         var opening = new Vector3(2.2f, 0, 7.5f);
-        Check(local.Any(p => Vector3.Distance(p, opening) < .5f) && local.All(p => p.magnitude < 15),
-            "Dense local search missed a half-metre opening or searched far ground first.");
+        Check(local.Any(p => Vector3.Distance(p, opening) < .5f) && local.All(p => p.magnitude <= TameTravelPlacementRules.SweepLimit + .001f),
+            "Dense local search missed a half-metre opening or searched beyond the sweep limit.");
         System.Console.WriteLine("PASS: courtyard placement validates table detours and doorway routes, rejects wall crossings, distant detours and navigation snapping, and densely samples nearby paving.");
     }
     private static void PlacementRoutes()
@@ -193,16 +193,27 @@ internal static class TameTravelRecoveryTests
             var portal = new Vector3(100, 12, 200);
             var right = new Vector3(forward.z, 0, -forward.x);
             var exit = portal + forward * 3;
-            var traveller = portal - forward * 18 + right * 6;
-            int count = TameTravelPlacementRules.CandidateCount(3);
-            var candidates = Enumerable.Range(0, count).Select(i => TameTravelPlacementRules.Candidate(i, 3, exit, traveller, forward, 17)).ToArray();
-            Check(candidates.Take(TameTravelPlacementRules.PreferredCandidates).All(p => TameTravelPlacementRules.InFront(p, portal, forward, 4)),
-                "A preferred landing was behind the rotated portal or lacked body clearance.");
-            var firstPoints = Enumerable.Range(0, 8).Select(seed => TameTravelPlacementRules.Candidate(0, 3, exit, traveller, forward, seed)).ToArray();
-            Check(firstPoints.Distinct().Count() == 8 && firstPoints.Any(p => Vector3.Dot(p - exit, right) < 0) &&
-                firstPoints.Any(p => Vector3.Dot(p - exit, right) > 0), "Trip variation did not use both sides of the portal.");
-            Check(TameTravelPlacementRules.Candidate(0, 3, exit, traveller, forward, 17) == candidates[0],
-                "Candidate variation changed while retrying the same trip.");
+            var traveller = exit + forward * 2;
+            int count = TameTravelPlacementRules.CandidateCount(3), arcCount = TameTravelPlacementRules.ArcCandidates(3);
+            var candidates = Enumerable.Range(0, count).Select(i => TameTravelPlacementRules.Candidate(i, 3, exit, traveller, forward)).ToArray();
+            float first = TameTravelPlacementRules.ArcStart(3);
+            Check(Vector3.Distance(candidates[0], traveller + right * first) < .001f, "The sweep did not start on the traveller's right side.");
+            var firstArc = candidates.TakeWhile(p => Math.Abs(Vector3.Distance(p, traveller) - first) < .001f).ToArray();
+            Check(firstArc.Length > 2 && Vector3.Distance(firstArc[^1], traveller - right * first) < .001f &&
+                firstArc.All(p => Vector3.Dot(p - traveller, forward) >= -.001f) &&
+                firstArc.Zip(firstArc.Skip(1), (a, b) => Vector3.Dot(a - b, right) >= -.001f).All(x => x),
+                "The first arc did not sweep from the right side across the front to the left side.");
+            Check(firstArc.Zip(firstArc.Skip(1), Vector3.Distance).All(d => d <= TameTravelPlacementRules.ArcSpacing(3) + .001f),
+                "Spots on an arc were further apart than a quarter of the animal's width.");
+            var arcs = candidates.Take(arcCount).ToArray();
+            Check(arcs.Select(p => Math.Round((Vector3.Distance(p, traveller) - first) / TameTravelPlacementRules.ArcStep)).Distinct().Count() == TameTravelPlacementRules.Arcs(3) &&
+                arcs.Max(p => Vector3.Distance(p, traveller)) <= TameTravelPlacementRules.SweepLimit + .001f,
+                "Arcs did not step out a quarter metre at a time up to the sweep limit.");
+            var last = Enumerable.Reverse(arcs).TakeWhile(p => Math.Abs(Vector3.Distance(p, traveller) - Vector3.Distance(arcs[^1], traveller)) < .001f).ToArray();
+            Check(last.Any(p => Vector3.Dot((p - traveller).normalized, forward) < -.99f) && last.Distinct().Count() == last.Length,
+                "The last arc did not close a full circle behind the traveller without repeating a spot.");
+            Check(arcs.Any(p => Vector3.Dot(p - portal, forward) < 0), "The sweep did not reach ground behind the portal.");
+            Check(TameTravelPlacementRules.Candidate(0, 3, exit, traveller, forward) == candidates[0], "Candidate order changed while retrying the same trip.");
             foreach (var target in new[] { portal + forward * 24 + right * 24, portal + forward * 9 - right * 24, portal + forward * 18 + right * 6 })
             {
                 bool found = false; int cursor = 0, passes = 0;
@@ -210,21 +221,12 @@ internal static class TameTravelRecoveryTests
                 {
                     int budget = Math.Min(TameTravelPlacementRules.MaximumCandidatesPerPass, count - cursor);
                     for (int i = 0; i < budget; i++)
-                        if (candidates[cursor + i] == target && TameTravelPlacementRules.InFront(target, portal, forward, 4)) found = true;
+                        if (candidates[cursor + i] == target) found = true;
                     cursor += budget; passes++;
                 }
-                Check(found && passes <= 120, "Front-side building/traveller fallbacks lost coverage within the placement window.");
+                Check(found && passes <= 120, "Building/traveller fallback grids lost coverage within the placement window.");
             }
-            var rear = portal - forward * 24;
-            Check(!TameTravelPlacementRules.InFront(rear, portal, forward, 4) &&
-                !TameTravelPlacementRules.InFront(portal + forward * 3, portal, forward, 4) &&
-                TameTravelPlacementRules.InFront(portal + forward * 4, portal, forward, 4),
-                "Rear/straddling placement was accepted or exact forward clearance was rejected.");
-            Check(!candidates.Any(p => p == rear && TameTravelPlacementRules.InFront(p, portal, forward, 4)),
-                "A rear-only opening remained an eligible landing fallback.");
         }
-        Check(!TameTravelPlacementRules.InFront(new Vector3(float.NaN, 0, 0), Vector3.zero, Vector3.forward, 1) &&
-            !TameTravelPlacementRules.InFront(Vector3.forward, Vector3.zero, Vector3.zero, 1), "Unknown placement/facing passed the front gate.");
         var slope = new Vector3(-.3f, 1, 0).normalized;
         Check(TameTravelPlacementRules.SupportedFootprint(10, 10.9f, new Vector3(3, 0, 0), slope) &&
             !TameTravelPlacementRules.SupportedFootprint(10, 12, new Vector3(3, 0, 0), slope),
@@ -245,6 +247,6 @@ internal static class TameTravelRecoveryTests
             probes == TameTravelPlacementRules.MaximumEscapeProbes, "Escape-route work exceeded its per-search budget.");
         probes = 0;
         Check(TameTravelPlacementRules.HasEscape(Vector3.zero, Vector3.forward, 5, Flat, (_, _) => true, ref probes), "An open flat walkout was rejected.");
-        System.Console.WriteLine("PASS: portal-oriented candidates vary left/right, retain forward building/traveller fallbacks and reject rear/straddling landings across four portal rotations; footprint checks accept steady slopes and reject ledges; escape checks reject blocked routes and enforce the shared probe budget.");
+        System.Console.WriteLine("PASS: traveller-centred arcs sweep right to left in quarter-metre steps, widen to a full circle at the sweep limit, reach ground behind the portal and retain building/traveller fallbacks across four portal rotations; footprint checks accept steady slopes and reject ledges; escape checks reject blocked routes and enforce the shared probe budget.");
     }
 }

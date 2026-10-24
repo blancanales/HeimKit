@@ -14,6 +14,7 @@ internal sealed class AnimalTransfer : OwnershipLease
     // 0 drains source; 1 waits for placement; 2 drains destination; 3 awaits new-owner state; 4 confirmed.
     public float Started, PhaseTime;
     public int PlacementCursor;
+    public Vector3? PlacementAnchor;
     public int PlacementAttempts, PlacementCandidates;
     public Vector3? PlacementLastProbe;
     public float? PlacementSupportHeight;
