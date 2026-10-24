@@ -40,3 +40,7 @@ Normal output groups confirmed results per completed pass and preserves failures
 See [shared safety and delivery limitations](../limitations.md#new-world-features) and [server setup](../server-setup.md).
 
 Ledger writes run on one background worker. Sapling placement waits for durable acknowledgement and another main-thread exclusion check. Native growth still determines when the sapling becomes a tree. Debug separates background ledger I/O duration from controller processing time and reports snapshot, terrain-context and world-mutation stages.
+
+Pending and cooldown indexes limit repeated ledger searches; cached vegetation definitions reduce repeated prefab component lookups. Renewal rules and saved decisions remain unchanged.
+
+Discovery reuses nearby candidate records and accepts native record changes. Entering another area seeds discovery again; action eligibility and timing retain the configured rules. See the [shared discovery design](../architecture.md#record-driven-candidate-discovery).

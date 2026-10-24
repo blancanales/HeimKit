@@ -23,6 +23,10 @@ internal sealed class ForestRenewalController : IDisposable
     private readonly ForestRenewalReplacement _replacement;
     private readonly Dictionary<int, GameObject> _saplings = new();
     private readonly Dictionary<int, int> _mappings = new();
+    private readonly HashSet<RenewalRecord> _pending = new();
+    private readonly List<RenewalRecord> _due = new();
+    private readonly Dictionary<(int X, int Z), HashSet<RenewalRecord>> _cooldowns = new();
+    private readonly Dictionary<int, (GameObject Prefab, Plant? Plant, bool Tree)> _vegetation = new();
     private float _next, _scopeAt = -1000;
     private long _placed;
     private int _pendingCursor;
@@ -52,9 +56,15 @@ internal sealed class ForestRenewalController : IDisposable
         if (_mappings.Count == 0) throw new InvalidOperationException("No supported native saplings are available.");
         _store = new(directory, ZNet.instance.GetWorldUID());
         _pendingCount = _store.Records.Values.Count(Pending);
+        foreach (var record in _store.Records.Values)
+        {
+            if (Pending(record)) _pending.Add(record);
+            if (record.State == 2) IndexCooldown(record, true);
+        }
         _terrain = new();
         try { _replacement = new(module.Fail, log, players.Presence); } catch { _terrain.Dispose(); throw; }
         _world.m_onZDODestroyed += Destroyed;
+        try { _scope.Index(z => _mappings.ContainsKey(z.GetPrefab())); } catch { Dispose(); throw; }
     }
     private void Destroyed(ZDO source)
     {
@@ -103,13 +113,14 @@ internal sealed class ForestRenewalController : IDisposable
         if (observed > 0) MarkDirty();
         bool hadPlacement = _placement != null;
         if (hadPlacement) placed += CompletePlacement(now, ticks);
-        var due = hadPlacement ? Array.Empty<RenewalRecord>() : _store.Records.Values.Where(r => Pending(r) && r.DueTicks <= ticks).ToArray();
-        int start = due.Length == 0 ? 0 : _pendingCursor % due.Length;
-        for (int visited = 0; !hadPlacement && visited < due.Length; visited++)
+        var due = _due; due.Clear();
+        if (!hadPlacement) foreach (var pending in _pending) if (pending.DueTicks <= ticks) due.Add(pending);
+        int start = due.Count == 0 ? 0 : _pendingCursor % due.Count;
+        for (int visited = 0; !hadPlacement && visited < due.Count; visited++)
         {
-            int index = (start + visited) % due.Length;
+            int index = (start + visited) % due.Count;
             var record = due[index];
-            _pendingCursor = (index + 1) % due.Length;
+            _pendingCursor = (index + 1) % due.Count;
             if (!_scope.InRange(record.Position, _settings.ScanRangeMeters.Value)) continue;
             var source = _world.GetZDO(record.Source);
             if (record.State == 3 && source == null) continue; // Absence is not a destruction event.
@@ -151,7 +162,7 @@ internal sealed class ForestRenewalController : IDisposable
         var record = new RenewalRecord { Source = source.m_uid, Position = source.GetPosition(), Sapling = sapling,
             DueTicks = ticks + TimeSpan.FromSeconds(_settings.DelaySeconds.Value).Ticks, DecisionTicks = ticks,
             State = (byte)(UnityEngine.Random.Range(0, 100) < _settings.ChancePercent.Value ? (standing ? 3 : 0) : 1) };
-        _store.Records.Add(record.Source, record); if (Pending(record)) _pendingCount++; return true;
+        _store.Records.Add(record.Source, record); if (Pending(record)) { _pendingCount++; _pending.Add(record); } return true;
     }
     private void MarkDirty() { _dirty = true; _revision++; }
     private void Flush()
@@ -171,7 +182,11 @@ internal sealed class ForestRenewalController : IDisposable
     }
     private void Consume(RenewalRecord record, long ticks, byte state)
     {
-        bool pending = Pending(record); record.State = state;
+        bool pending = Pending(record);
+        if (record.State == 2) IndexCooldown(record, false);
+        record.State = state;
+        if (record.State == 2) IndexCooldown(record, true);
+        if (Pending(record)) _pending.Add(record); else _pending.Remove(record);
         if (pending && !Pending(record)) _pendingCount--;
         else if (!pending && Pending(record)) _pendingCount++;
         record.DecisionTicks = ticks; MarkDirty();
@@ -209,7 +224,9 @@ internal sealed class ForestRenewalController : IDisposable
     private void RetryPlacement(float now, string reason)
     {
         var placement = _placement!;
+        IndexCooldown(placement.Decision, false);
         ForestRenewalCommitRules.RestorePending(placement);
+        _pending.Add(placement.Decision);
         _pendingCount++;
         MarkDirty(); _placement = null;
         _diagnostics.Decision(now, placement.Decision.Source, reason);
@@ -217,7 +234,7 @@ internal sealed class ForestRenewalController : IDisposable
     private bool PrepareTerrain(Vector3 position, float now)
     {
         long started = _diagnostics.BeginStage();
-        try { return _terrain.Prepare(position, _scope.Records, now, _settings.ExclusionRadiusMeters.Value + 2); }
+        try { return _scope.ContextReady() && _terrain.Prepare(position, _scope.Context, now, _settings.ExclusionRadiusMeters.Value + 2); }
         finally { _diagnostics.EndStage(now, "terrain_context", started); }
     }
     private bool StructureKnown(RenewalRecord record, float now, out bool blocked)
@@ -225,7 +242,8 @@ internal sealed class ForestRenewalController : IDisposable
         long started = _diagnostics.BeginStage();
         try
         {
-            bool known = _structures.TryExcluded(_scope.Records, record.Position, _settings.StructureExclusionMeters.Value, out blocked, out var blocker, out string? reason);
+            if (!_scope.ContextReady()) { blocked = false; return false; }
+            bool known = _structures.TryExcluded(_scope.Context, record.Position, _settings.StructureExclusionMeters.Value, out blocked, out var blocker, out string? reason);
             if (!known) _diagnostics.Decision(now, record.Source, "structure_context_unknown", blocker, reason);
             return known;
         }
@@ -233,41 +251,42 @@ internal sealed class ForestRenewalController : IDisposable
     }
     private bool ContextKnown(RenewalRecord record, GameObject sapling)
     {
+        float growRadius = sapling.GetComponent<Plant>().m_growRadius;
         float radius = _settings.ExclusionRadiusMeters.Value;
         for (float x = -radius; x <= radius; x++)
             for (float z = -radius; z <= radius; z++)
             { var map = Heightmap.FindHeightmap(record.Position + new Vector3(x, 0, z)); if (map == null || map.HaveQueuedRebuild()) return false; }
-        foreach (var zdo in _scope.Records)
+        foreach (var zdo in _scope.Context)
         {
             if (!zdo.IsValid()) continue;
-            if (Utils.DistanceXZ(zdo.GetPosition(), record.Position) <= Math.Max(sapling.GetComponent<Plant>().m_growRadius, Math.Max(_settings.PlantExclusionMeters.Value, _settings.StructureExclusionMeters.Value)) && ZNetScene.instance.GetPrefab(zdo.GetPrefab()) == null) return false;
-            var plant = ZNetScene.instance.GetPrefab(zdo.GetPrefab())?.GetComponent<Plant>();
+            var definition = Vegetation(zdo.GetPrefab());
+            if (Utils.DistanceXZ(zdo.GetPosition(), record.Position) <= Math.Max(growRadius, Math.Max(_settings.PlantExclusionMeters.Value, _settings.StructureExclusionMeters.Value)) && definition.Prefab == null) return false;
+            var plant = definition.Plant;
             if (plant != null && (!PlayerWorldScope.Finite(plant.m_growRadius) || !PlantScale(zdo, plant.gameObject, out _))) return false;
         }
         return true;
     }
     private bool Excluded(RenewalRecord record, long ticks, GameObject sapling)
     {
-        foreach (var other in _store.Records.Values)
-            if (other.State == 2 && other.Source != record.Source && ticks - other.DecisionTicks < TimeSpan.FromHours(_settings.LocationCooldownHours.Value).Ticks &&
-                Utils.DistanceXZ(other.Position, record.Position) < 5) return true;
-        foreach (var zdo in _scope.Records)
+        if (CoolingDown(record, ticks, TimeSpan.FromHours(_settings.LocationCooldownHours.Value).Ticks)) return true;
+        float growRadius = sapling.GetComponent<Plant>().m_growRadius;
+        foreach (var zdo in _scope.Context)
         {
             if (!zdo.IsValid()) continue;
             if (zdo.m_uid == record.Source) continue;
-            var prefab = ZNetScene.instance.GetPrefab(zdo.GetPrefab());
+            var definition = Vegetation(zdo.GetPrefab()); var prefab = definition.Prefab;
             if (prefab == null) continue;
             float distance = Utils.DistanceXZ(zdo.GetPosition(), record.Position);
-            var plant = prefab.GetComponent<Plant>();
+            var plant = definition.Plant;
             if (plant != null)
             {
                 // Preserve all planted vegetation, even unhealthy/ownerless plants. Both
                 // native growth radii remain minimums beneath the configured plant buffer.
                 if (!PlantScale(zdo, prefab, out float scale)) return true;
-                float clearance = Math.Max(_settings.PlantExclusionMeters.Value, Math.Max(sapling.GetComponent<Plant>().m_growRadius, plant.m_growRadius * scale));
+                float clearance = Math.Max(_settings.PlantExclusionMeters.Value, Math.Max(growRadius, plant.m_growRadius * scale));
                 if (distance <= clearance) return true;
             }
-            if (distance <= 2 && (prefab.GetComponent<TreeBase>() != null || _mappings.ContainsKey(zdo.GetPrefab()))) return true;
+            if (distance <= 2 && (definition.Tree || _mappings.ContainsKey(zdo.GetPrefab()))) return true;
         }
         if (!_settings.ExcludeClearedGround.Value) return false;
         float radius = _settings.ExclusionRadiusMeters.Value;
@@ -280,6 +299,41 @@ internal sealed class ForestRenewalController : IDisposable
                 if (map.IsCleared(point) || map.IsCultivated(point)) return true;
             }
         return false;
+    }
+    private bool CoolingDown(RenewalRecord record, long ticks, long cooldown)
+    {
+        var cell = CooldownCell(record.Position);
+        for (int x = -1; x <= 1; x++)
+            for (int z = -1; z <= 1; z++)
+                if (_cooldowns.TryGetValue((cell.X + x, cell.Z + z), out var nearby))
+                    foreach (var other in nearby)
+                        if (other.Source != record.Source && ticks - other.DecisionTicks < cooldown)
+                        {
+                            var delta = other.Position - record.Position;
+                            if (delta.x * delta.x + delta.z * delta.z < 25) return true;
+                        }
+        return false;
+    }
+    private (GameObject? Prefab, Plant? Plant, bool Tree) Vegetation(int hash)
+    {
+        if (_vegetation.TryGetValue(hash, out var definition)) return definition;
+        var prefab = ZNetScene.instance.GetPrefab(hash);
+        if (prefab == null) return (null, null, false);
+        definition = (prefab, prefab.GetComponent<Plant>(), prefab.GetComponent<TreeBase>() != null);
+        if (_vegetation.Count < 4096) _vegetation[hash] = definition;
+        return definition;
+    }
+    private static (int X, int Z) CooldownCell(Vector3 point) => ((int)Math.Floor(point.x / 5), (int)Math.Floor(point.z / 5));
+    private void IndexCooldown(RenewalRecord record, bool add)
+    {
+        var cell = CooldownCell(record.Position);
+        if (add)
+        {
+            if (!_cooldowns.TryGetValue(cell, out var records)) _cooldowns[cell] = records = new();
+            records.Add(record);
+        }
+        else if (_cooldowns.TryGetValue(cell, out var records))
+        { records.Remove(record); if (records.Count == 0) _cooldowns.Remove(cell); }
     }
     private static bool PlantScale(ZDO record, GameObject prefab, out float maximum)
     {
@@ -303,6 +357,6 @@ internal sealed class ForestRenewalController : IDisposable
             if (_dirty) { _store.Save(); _dirty = false; }
             _placement = null;
         }
-        finally { try { _replacement.Dispose(); } finally { _terrain.Dispose(); } }
+        finally { try { _replacement.Dispose(); } finally { try { _scope.Dispose(); } finally { _terrain.Dispose(); } } }
     }
 }

@@ -19,6 +19,7 @@ internal sealed class InfiniteTorchesController : IDisposable
     private readonly InfiniteTorchesPendingRefills _pending = new();
     private readonly Dictionary<int, Fireplace> _torches = new();
     private readonly List<ZDO> _sector = new();
+    private WorldCandidateIndex? _index;
     private readonly List<ZDO> _distant = new();
     private readonly List<ZDO> _candidates = new();
     private readonly HashSet<ZDOID> _seen = new();
@@ -100,7 +101,7 @@ internal sealed class InfiniteTorchesController : IDisposable
                 operation = $"scanning sectors for owner {peer.m_uid} at {peer.m_refPos}";
                 _sector.Clear();
                 _distant.Clear();
-                manager.FindSectorObjects(ZoneSystem.GetZone(peer.m_refPos), peer.m_simulationDistance, _sector, _distant);
+                _index!.Read(peer.m_refPos, peer.m_simulationDistance.NearSimulationDistance, _sector, peer.m_simulationDistance.IsClassic, includeDistant: false);
                 sectorRecords += _sector.Count;
                 foreach (var zdo in _sector)
                 {
@@ -170,6 +171,7 @@ internal sealed class InfiniteTorchesController : IDisposable
 
     private void LoadPrefabs(ZNetScene scene)
     {
+        _index?.Dispose(); _index = null;
         _torches.Clear();
         var rejected = new Dictionary<string, int>();
         int rejectionCount = 0;
@@ -196,6 +198,7 @@ internal sealed class InfiniteTorchesController : IDisposable
             _torches[scene.GetPrefabHash(go!)] = fire!;
         }
         _diagnostics.UnsupportedPrefabs(rejectionCount, rejected);
+        _index = new(z => _torches.ContainsKey(z.GetPrefab()));
         _scene = scene;
         _configuredNames = _settings.Prefabs.Value;
         _configuredFireplaces = _settings.FireplaceSelection;
@@ -211,6 +214,7 @@ internal sealed class InfiniteTorchesController : IDisposable
     }
     public void Dispose()
     {
+        _index?.Dispose(); _index = null;
         _torches.Clear();
         _sector.Clear();
         _distant.Clear();

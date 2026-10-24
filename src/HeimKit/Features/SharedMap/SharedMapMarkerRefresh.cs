@@ -24,6 +24,7 @@ public sealed class SharedMapMarkerRefresh
     private float _nextSave;
     public string FilePath { get; }
     public int Count => _states.Count;
+    public long Revision => _revision;
 
     public SharedMapMarkerRefresh(string directory, long world,
         Action<MapMarker?, MapMarker, MapMarker, int>? published = null,

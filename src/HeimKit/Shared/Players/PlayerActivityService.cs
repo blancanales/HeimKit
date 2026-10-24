@@ -29,6 +29,11 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
     private IDisposable? _routedSubscription;
     private readonly Dictionary<long, (ZDOID Target, float Requested)> _containers = new();
     private int _craftingKey;
+    private readonly List<PlayerActivityObservation> _actors = new();
+    private readonly HashSet<long> _connected = new();
+    private readonly List<long> _expiredPeers = new();
+    private readonly List<string> _recovered = new();
+    private readonly Dictionary<long, PlayerEquipment> _equipment = new();
     private readonly Dictionary<Lease, Func<bool>> _consumers = new();
     private readonly IPlayerPresence _presence;
     private readonly Func<bool> _ready;
@@ -74,7 +79,7 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
         PlayerRoutedMessages? routedMessages = null)
     {
         _logName = "PlayerActivity"; _options = options; _tracker = new(options); _logger = logger;
-        _presence = presence; _ready = ready ?? (() => Ready); _readActors = readActors ?? (() => ReadActors(_presence, _craftingKey));
+        _presence = presence; _ready = ready ?? (() => Ready); _readActors = readActors ?? (() => ReadActorsInto(_presence, _craftingKey, _actors, _equipment));
         _notices = new(logger);
         _observer = observer ?? SetObserver;
         _routedMessages = routedMessages;
@@ -105,7 +110,7 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
     }
     private void Reset(string reason = "activity tracking stopped")
     {
-        Reliable = false; _tracker.Clear(); _containers.Clear(); _views = Array.Empty<PlayerActivityView>(); _last = -1;
+        Reliable = false; _actors.Clear(); _equipment.Clear(); _connected.Clear(); _expiredPeers.Clear(); _recovered.Clear(); _tracker.Clear(); _containers.Clear(); _views = Array.Empty<PlayerActivityView>(); _last = -1;
         _diagnostics.Reset();
         try { _notices.Reset(reason, _presence.JoinedCount); }
         catch (Exception error) { Incident(0, "diagnostics:afk_notices", error); }
@@ -147,8 +152,12 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
         _last = now;
         var observations = _readActors(); Samples++;
         if (observations.Count > 4096) Warn(now, "Connected-player capacity exceeded; native behavior retained");
-        var connected = new HashSet<long>(observations.Select(p => p.Peer));
-        foreach (long peer in _containers.Keys.Where(peer => !connected.Contains(peer)).ToArray()) _containers.Remove(peer);
+        var connected = _connected; connected.Clear();
+        foreach (var player in observations) connected.Add(player.Peer);
+        _expiredPeers.Clear(); foreach (long peer in _containers.Keys) if (!connected.Contains(peer)) _expiredPeers.Add(peer);
+        foreach (long peer in _expiredPeers) _containers.Remove(peer);
+        _expiredPeers.Clear(); foreach (long peer in _equipment.Keys) if (!connected.Contains(peer)) _expiredPeers.Add(peer);
+        foreach (long peer in _expiredPeers) _equipment.Remove(peer);
         foreach (var player in observations)
         {
             if (!_containers.TryGetValue(player.Peer, out var container)) continue;
@@ -158,8 +167,9 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
             else _containers.Remove(player.Peer);
         }
         _views = _tracker.Update(now, observations); Reliable = true;
-        var recovered = _incidents.Keys.Where(key => !key.StartsWith("diagnostics:", StringComparison.Ordinal)).ToArray();
-        if (recovered.Length > 0)
+        var recovered = _recovered; recovered.Clear();
+        foreach (string key in _incidents.Keys) if (!key.StartsWith("diagnostics:", StringComparison.Ordinal)) recovered.Add(key);
+        if (recovered.Count > 0)
         {
             foreach (string identity in recovered) _incidents.Remove(identity);
             DiagnosticLog.Write(_logger, _logName, DiagnosticEvent.Lifecycle, "Activity observations recovered; idle grace restarted.");
@@ -168,8 +178,11 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
         return _views;
     }
     public static List<PlayerActivityObservation> ReadActors(IPlayerPresence presence, int craftingKey = 0)
+        => ReadActorsInto(presence, craftingKey, new List<PlayerActivityObservation>(), null);
+    internal static List<PlayerActivityObservation> ReadActorsInto(IPlayerPresence presence, int craftingKey,
+        List<PlayerActivityObservation> result, Dictionary<long, PlayerEquipment>? equipment)
     {
-        var result = new List<PlayerActivityObservation>();
+        result.Clear();
         if (!Ready) return result;
         foreach (var peer in presence.Peers)
         {
@@ -188,6 +201,12 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
             actor.Alive = actor.Health > 0 && !zdo.GetBool(ZDOVars.s_dead);
             actor.InBed = zdo.GetBool(ZDOVars.s_inBed);
             actor.Busy = craftingKey != 0 && zdo.GetInt(craftingKey) != 0;
+            if (equipment != null)
+            {
+                if (!equipment.TryGetValue(peer.m_uid, out var cached)) equipment[peer.m_uid] = cached = new();
+                actor.Equipment = cached.Read(zdo);
+            }
+            else
             actor.Equipment = $"{zdo.GetInt(ZDOVars.s_rightItem)}:{zdo.GetInt(ZDOVars.s_leftItem)}:{zdo.GetInt(ZDOVars.s_chestItem)}:{zdo.GetInt(ZDOVars.s_helmetItem)}:{zdo.GetInt(ZDOVars.s_legItem)}:{zdo.GetInt(ZDOVars.s_shoulderItem)}:{zdo.GetInt(ZDOVars.s_utilityItem)}:{zdo.GetInt(ZDOVars.s_rightBackItem)}:{zdo.GetInt(ZDOVars.s_leftBackItem)}";
             actor.Emote = zdo.GetInt(ZDOVars.s_emoteID);
         }

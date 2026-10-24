@@ -95,3 +95,5 @@ Prefab lookup combines all unsupported entries into one Warning containing the t
 ## Game-version compatibility
 
 Use the shared [compatibility contract](../architecture.md#configuration) before activation.
+
+Supported light-source discovery uses the shared spatial candidate index with native ready-owner sector geometry, activation/area-entry seeding and local/replicated updates. Fuel, state and owner are checked live at the existing refill interval. Pending requests reconcile independently of discovery; ownership changes do not discard eligible light definitions.

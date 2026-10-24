@@ -15,6 +15,9 @@ internal sealed class WorldTerrainContext : IDisposable
     private const BindingFlags NativeFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
     private static MethodInfo NativeMethod(Type type, string name, params Type[] args) => type.GetMethod(name, NativeFlags, null, args, null)!;
     private static readonly MethodInfo CreateZones = NativeMethod(typeof(ZoneSystem), "CreateLocalZones", typeof(Vector3));
+    private static readonly Func<ZoneSystem, Vector3, bool> PopulateZones =
+        (Func<ZoneSystem, Vector3, bool>)CreateZones.CreateDelegate(typeof(Func<ZoneSystem, Vector3, bool>));
+    private static readonly HashSet<ZDOID> InstanceIds = new();
     private static readonly MethodInfo CreateObject = NativeMethod(typeof(ZNetScene), "CreateObject", typeof(ZDO));
     private static readonly MethodInfo CheckLoad = NativeMethod(typeof(TerrainComp), "CheckLoad");
     private static readonly MethodInfo CompilerAwake = NativeMethod(typeof(TerrainComp), "Awake");
@@ -24,6 +27,8 @@ internal sealed class WorldTerrainContext : IDisposable
         .Select(name => typeof(TerrainComp).GetField(name, NativeFlags)!).ToArray();
     private readonly Dictionary<ZDOID, (ZDO Record, float Seen)> _retained = new();
     private readonly ZDOMan _world = ZDOMan.instance;
+    private readonly Dictionary<int, bool> _terrainDefinitions = new();
+    private readonly List<ZDOID> _expired = new();
     private float _nextPrune;
     public string? WaitReason { get; private set; }
     public ZDOID WaitObject { get; private set; }
@@ -47,15 +52,22 @@ internal sealed class WorldTerrainContext : IDisposable
         WaitReason = null; WaitObject = ZDOID.None;
         Prune(now);
         if (!ZoneSystem.instance.LocationsGenerated || Character.InInterior(point)) return false;
-        CreateZones.Invoke(ZoneSystem.instance, new object[] { point });
+        PopulateZones(ZoneSystem.instance, point);
         var hmap = Heightmap.FindHeightmap(point);
         if (hmap == null || !ZoneSystem.instance.IsZoneLoaded(point)) return false;
         foreach (var record in scope)
         {
             var position = record.GetPosition();
             if (Math.Abs(position.x - point.x) > 64 + radius || Math.Abs(position.z - point.z) > 64 + radius) continue;
-            var prefab = ZNetScene.instance.GetPrefab(record.GetPrefab());
-            if (prefab == null || prefab.GetComponent<TerrainComp>() == null && prefab.GetComponent<TerrainModifier>() == null) continue;
+            int hash = record.GetPrefab();
+            if (!_terrainDefinitions.TryGetValue(hash, out bool terrain))
+            {
+                var prefab = ZNetScene.instance.GetPrefab(hash);
+                if (prefab == null) continue;
+                terrain = prefab.GetComponent<TerrainComp>() != null || prefab.GetComponent<TerrainModifier>() != null;
+                if (_terrainDefinitions.Count < 4096) _terrainDefinitions[hash] = terrain;
+            }
+            if (!terrain) continue;
             var compilerMap = Heightmap.FindHeightmap(position);
             if (compilerMap == null || compilerMap.GetPaintMask() == null || compilerMap.HaveQueuedRebuild()) return Wait(record, "terrain_heightmap_unavailable");
             if (!Include(record, now)) return false;
@@ -96,15 +108,22 @@ internal sealed class WorldTerrainContext : IDisposable
             any |= consumer._retained.Count > 0;
         }
         if (!any) return;
-        var seen = new HashSet<ZDOID>(currentNearObjects.Select(z => z.m_uid));
-        foreach (var c in Consumers.Where(c => ReferenceEquals(c._world, ZDOMan.instance)))
+        var seen = InstanceIds; seen.Clear();
+        foreach (var record in currentNearObjects) seen.Add(record.m_uid);
+        foreach (var c in Consumers)
+            if (ReferenceEquals(c._world, ZDOMan.instance))
             foreach (var pair in c._retained)
                 if (pair.Value.Record.IsValid() && pair.Value.Record.m_uid == pair.Key && seen.Add(pair.Key)) currentNearObjects.Add(pair.Value.Record);
+        seen.Clear();
     }
     private void Prune(float now)
     {
         if (now < _nextPrune) return; _nextPrune = now + 1;
-        foreach (var id in _retained.Where(p => now - p.Value.Seen > 10 || !p.Value.Record.IsValid() || p.Value.Record.m_uid != p.Key).Select(p => p.Key).ToArray()) _retained.Remove(id);
+        _expired.Clear();
+        foreach (var pair in _retained)
+            if (now - pair.Value.Seen > 10 || !pair.Value.Record.IsValid() || pair.Value.Record.m_uid != pair.Key) _expired.Add(pair.Key);
+        foreach (var id in _expired) _retained.Remove(id);
+        _expired.Clear();
     }
     public void Clear() => _retained.Clear();
     public void Dispose() { Consumers.Remove(this); _retained.Clear(); if (Consumers.Count == 0) Hooks.UnpatchSelf(); }

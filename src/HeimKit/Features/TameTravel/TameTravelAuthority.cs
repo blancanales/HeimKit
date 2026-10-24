@@ -18,15 +18,19 @@ internal sealed class TameTravelAuthority : IDisposable
     private readonly Harmony _hooks = new("heimkit.tametravel.authority");
     private readonly IPlayerPresence _presence;
     private readonly Action<Exception> _failed;
+    private readonly Func<ZDOID, bool> _contains;
     private readonly ZDOMan _world = ZDOMan.instance;
     private readonly Dictionary<ZDOID, AnimalTransfer> _leases = new();
     private readonly Dictionary<float, (ZNetPeer Peer, float Sent, bool Echo)> _barriers = new();
     private readonly Dictionary<Rigidbody, (bool Kinematic, bool Gravity)> _bodies = new();
+    private readonly HashSet<ZDOID> _instanceIds = new();
+    private readonly List<float> _expiredBarriers = new();
     private static int _nonce = 10000000;
     private bool _disposed;
     public TameTravelAuthority(IPlayerPresence presence, Action<Exception> failed)
     {
-        _presence = presence; _failed = failed;
+        TameTravelReplication.CheckCompatibility();
+        _presence = presence; _failed = failed; _contains = Contains;
         if (_current != null) throw new InvalidOperationException("TameTravel authority is already active.");
         _current = this;
         try
@@ -56,10 +60,12 @@ internal sealed class TameTravelAuthority : IDisposable
     {
         var current = _current;
         if (current == null || current._leases.Count == 0 || !ReferenceEquals(current._world, ZDOMan.instance)) return;
-        var seen = new HashSet<ZDOID>(currentNearObjects.Select(z => z.m_uid));
+        var seen = current._instanceIds; seen.Clear();
+        foreach (var record in currentNearObjects) seen.Add(record.m_uid);
         foreach (var pair in current._leases)
             if (pair.Value.Record.IsValid() && pair.Value.Record.m_uid == pair.Key &&
                 (pair.Value.Moved || ZNetScene.instance.FindInstance(pair.Value.Record) != null) && seen.Add(pair.Key)) currentNearObjects.Add(pair.Value.Record);
+        seen.Clear();
     }
     public bool Contains(ZDOID id) => _leases.ContainsKey(id);
     public bool RunningFollow(ZDOID id) => _leases.TryGetValue(id, out var t) && t.FollowControl && t.Phase == 5;
@@ -113,7 +119,12 @@ internal sealed class TameTravelAuthority : IDisposable
     }
     public bool Echoed(float nonce) => _barriers.TryGetValue(nonce, out var b) && b.Echo;
     private void Prune(float now)
-    { foreach (var key in _barriers.Where(p => now - p.Value.Sent > 15).Select(p => p.Key).ToArray()) _barriers.Remove(key); }
+    {
+        _expiredBarriers.Clear();
+        foreach (var pair in _barriers) if (now - pair.Value.Sent > 15) _expiredBarriers.Add(pair.Key);
+        foreach (var key in _expiredBarriers) _barriers.Remove(key);
+        _expiredBarriers.Clear();
+    }
     public void Tick(float now)
     {
         Prune(now);
@@ -141,7 +152,14 @@ internal sealed class TameTravelAuthority : IDisposable
         t.Phase = 3;
         t.Record.SetOwner(t.Journey.Peer.m_uid);
         t.PublishedOwnerRevision = t.Record.OwnerRevision; t.PublishedRevision = t.Record.DataRevision;
-        RestoreBody(t.Record); Send(t.Journey.Peer, t.Record); _world.ForceSendZDO(t.Id);
+        RestoreBody(t.Record); _world.ForceSendZDO(t.Id); Send(t.Journey.Peer, t.Record);
+    }
+    public void RefreshDestination(AnimalTransfer t, float now)
+    {
+        if (t.Phase != 3 || t.OwnerObserved || now < t.NextDestinationSend || t.DestinationRetries >= 3) return;
+        t.NextDestinationSend = now + 2; t.DestinationRetries++;
+        Send(t.Journey.Peer, t.Record);
+        ZRoutedRpc.instance.InvokeRoutedRPC(t.Journey.Peer.m_uid, "RequestZDO", t.Id);
     }
     private void RestoreBody(ZDO z)
     {
@@ -149,23 +167,18 @@ internal sealed class TameTravelAuthority : IDisposable
         if (body != null && _bodies.TryGetValue(body, out var b))
         { _bodies.Remove(body); body.isKinematic = b.Kinematic; body.useGravity = b.Gravity; }
     }
-    public void Release(ZDOID id, bool keepServerOwner = false)
+    public void Release(ZDOID id, bool keepServerOwner = false, bool resetDestination = false)
     {
         if (!_leases.TryGetValue(id, out var t)) return;
         _leases.Remove(id);
         if (!ReferenceEquals(_world, ZDOMan.instance) || _world.GetZDO(id) != t.Record || !t.Record.IsValid()) return;
         RestoreBody(t.Record);
-        if (!keepServerOwner && t.Record.GetOwner() == ZDOMan.GetSessionID()) t.Record.SetOwner(0);
+        if (!keepServerOwner && (t.Record.GetOwner() == ZDOMan.GetSessionID() ||
+            resetDestination && t.Moved && !t.FollowControl && t.Record.GetOwner() == t.Journey.Peer.m_uid)) t.Record.SetOwner(0);
         _world.ForceSendZDO(id);
     }
     public static void Send(ZNetPeer peer, ZDO z, uint? wireRevision = null)
-    {
-        // The native ZDOData wire format, sent before the native routed ping on the same reliable connection.
-        var packet = new ZPackage(); packet.Write(0); packet.Write(z.m_uid); packet.Write(z.OwnerRevision);
-        packet.Write(wireRevision ?? z.DataRevision); packet.Write(z.GetOwner()); packet.Write(z.GetPosition());
-        var payload = new ZPackage(); z.Serialize(payload); packet.Write(payload); packet.Write(ZDOID.None);
-        peer.m_rpc.Invoke("ZDOData", packet);
-    }
+        => TameTravelReplication.Send(peer, z, wireRevision);
     private static void CheckRevisions(uint data, ushort owner)
     {
         if (data > uint.MaxValue - 32 || owner > ushort.MaxValue - 8)
@@ -179,6 +192,7 @@ internal sealed class TameTravelAuthority : IDisposable
     }
     private static bool Pause(Component __instance)
     {
+        if (_current == null || _current._leases.Count == 0) return true;
         var z = __instance.GetComponent<ZNetView>()?.GetZDO();
         return z == null || _current == null || !_current._leases.TryGetValue(z.m_uid, out var t) ||
             (t.FollowControl ? t.Phase == 5 : t.Phase >= 3);
@@ -190,11 +204,12 @@ internal sealed class TameTravelAuthority : IDisposable
         __state = null;
         var c = _current;
         if (c == null || c._leases.Count == 0) return true;
-        var peer = c._presence.Peers.FirstOrDefault(p => p.IsReady() && ReferenceEquals(p.m_rpc, rpc));
+        var peer = PlayerPeerLookup.Ready(c._presence.Peers, rpc);
         if (peer == null) return true;
         int cursor = pkg.GetPos();
         try
         {
+            if (!NativeZdoPackets.ContainsData(pkg, c._contains)) return true;
             if (pkg.Size() > NativeZdoPackets.MaximumPacketBytes) throw new InvalidDataException("Oversized ZDO packet.");
             var output = new ZPackage(); var invalid = new List<ZDOID>();
             int count = pkg.ReadInt();
@@ -264,12 +279,13 @@ internal sealed class TameTravelAuthority : IDisposable
     {
         var c = _current;
         if (c == null || c._leases.Count == 0) return true;
-        if (!c._presence.Peers.Any(p => p.IsReady() && ReferenceEquals(p.m_rpc, rpc))) return true;
+        var peer = PlayerPeerLookup.Ready(c._presence.Peers, rpc);
+        if (peer == null) return true;
         try
         {
-            if (!NativeZdoPackets.RelevantRouted(pkg, c.Contains)) return true;
+            if (!NativeZdoPackets.RelevantRouted(pkg, c._contains)) return true;
             var data = NativeZdoPackets.ReadRouted(pkg);
-            if (!c._presence.Peers.Any(p => p.IsReady() && ReferenceEquals(p.m_rpc, rpc) && p.m_uid == data.m_senderPeerID)) return false;
+            if (peer.m_uid != data.m_senderPeerID) return false;
             if (!data.m_targetZDO.IsNone())
             {
                 if (!c._leases.TryGetValue(data.m_targetZDO, out var t) || !t.FollowControl || t.Phase != 5) return false;
@@ -280,7 +296,7 @@ internal sealed class TameTravelAuthority : IDisposable
             }
             var destroyed = NativeZdoPackets.ReadPackage(data.m_parameters);
             if (data.m_parameters.GetPos() != data.m_parameters.Size()) throw new InvalidDataException("Trailing destruction bytes.");
-            var filtered = NativeZdoPackets.FilterDestroyed(destroyed, c.Contains, out int blocked);
+            var filtered = NativeZdoPackets.FilterDestroyed(destroyed, c._contains, out int blocked);
             if (blocked == 0) return true;
             data.m_parameters = new ZPackage(); data.m_parameters.Write(filtered);
             var output = new ZPackage(); data.Serialize(output); output.SetPos(0); pkg = output; return true;

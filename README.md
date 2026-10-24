@@ -60,7 +60,7 @@ Closes eligible player-built doors and gates after a delay once players clear th
 
 ### TameTravel
 
-Brings explicitly following or portal-waiting tamed wolves, boars, lox, asksvin, hens and moose along a validated trip between linked outdoor portals. Preserves the same animal and its saved state. Follow, stay and portal-wait commands have vanilla emote fallbacks. Explicit followers can use configurable stopping distance through bounded server control. Defaults enabled.
+Brings explicitly following or portal-waiting tamed wolves, boars, lox, asksvin, hens and moose along a validated trip between linked outdoor portals. Preserves the same animal and its saved state. One follow command covers successive portal trips and following continues at the destination until stopped. Follow, stay and optional portal-wait commands have vanilla emote fallbacks. Explicit followers can use configurable stopping distance through bounded server control. Defaults enabled.
 
 [Usage and settings](docs/features/tame-travel.md) · [Specification](docs/specs/tame-travel.md)
 

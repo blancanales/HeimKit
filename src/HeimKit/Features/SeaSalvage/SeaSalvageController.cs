@@ -35,6 +35,7 @@ internal sealed class SeaSalvageController : IDisposable
             _container.m_defaultItems.m_drops.Count != 0) throw new InvalidOperationException("Native floating four-slot CargoCrate is unavailable.");
         _terrain = new();
         try { _authority = new(module.Fail, log, players.Presence, false); } catch { _terrain.Dispose(); throw; }
+        try { _scope.Index(z => Definition(z.GetPrefab()) != null); } catch { Dispose(); throw; }
     }
     private ItemDrop? Definition(int hash)
     {
@@ -82,7 +83,7 @@ internal sealed class SeaSalvageController : IDisposable
             observed.Seen = now;
             if (now - observed.Since < _settings.DelaySeconds.Value) { settling++; continue; }
             if (++probes > 4) { _scanCursor = index; break; }
-            if (!_terrain.Prepare(point, _scope.Records, now)) { terrain++; continue; }
+            if (!_scope.ContextReady() || !_terrain.Prepare(point, _scope.Context, now)) { terrain++; continue; }
             var map = Heightmap.FindHeightmap(point);
             if (map == null || map.IsLava(point)) continue;
             float water = Floating.GetLiquidLevel(point, 0, LiquidType.Water), depth = water - point.y;
@@ -161,5 +162,5 @@ internal sealed class SeaSalvageController : IDisposable
             throw;
         }
     }
-    public void Dispose() { try { _authority.Dispose(); } finally { _terrain.Dispose(); _settling.Clear(); _held.Clear(); } }
+    public void Dispose() { try { _authority.Dispose(); } finally { try { _scope.Dispose(); } finally { _terrain.Dispose(); _settling.Clear(); _held.Clear(); } } }
 }

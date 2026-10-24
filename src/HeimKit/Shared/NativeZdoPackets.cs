@@ -9,6 +9,35 @@ internal static class NativeZdoPackets
 {
     public const int MaximumPacketBytes = 2 * 1024 * 1024;
     public const int MaximumRecords = 32768;
+    private static readonly int DestroyMethod = "DestroyZDO".GetStableHashCode();
+    // Inspect boundaries without copying item/character payloads. Callers rebuild
+    // only packets containing one of their retained IDs; malformed data still fails.
+    public static bool ContainsData(ZPackage packet, Func<ZDOID, bool> relevant)
+    {
+        int cursor = packet.GetPos(); bool found = false;
+        try
+        {
+            if (packet.Size() > MaximumPacketBytes) throw new InvalidDataException("Oversized ZDO packet.");
+            int count = packet.ReadInt();
+            if (count < 0 || count > MaximumRecords) throw new InvalidDataException("Invalid sector count.");
+            for (int i = 0; i < count; i++) if (relevant(packet.ReadZDOID())) found = true;
+            int records = 0;
+            while (true)
+            {
+                var id = packet.ReadZDOID(); if (id.IsNone()) break;
+                if (++records > MaximumRecords) throw new InvalidDataException("Too many ZDO records.");
+                if (relevant(id)) found = true;
+                packet.ReadUShort(); packet.ReadUInt(); packet.ReadLong(); packet.ReadVector3();
+                int length = packet.ReadInt();
+                if (length < 0 || length > MaximumPacketBytes || length > packet.Size() - packet.GetPos())
+                    throw new InvalidDataException("Invalid embedded package length.");
+                packet.SetPos(packet.GetPos() + length);
+            }
+            if (packet.GetPos() != packet.Size()) throw new InvalidDataException("Trailing ZDO data.");
+            return found;
+        }
+        finally { packet.SetPos(cursor); }
+    }
     internal static ZPackage ReadPackage(ZPackage packet)
     {
         int length = packet.ReadInt();
@@ -40,7 +69,7 @@ internal static class NativeZdoPackets
         {
             packet.ReadLong(); packet.ReadLong(); packet.ReadLong();
             var id = packet.ReadZDOID(); int method = packet.ReadInt();
-            return protectedId(id) || id.IsNone() && method == "DestroyZDO".GetStableHashCode();
+            return protectedId(id) || id.IsNone() && method == DestroyMethod;
         }
         finally { packet.SetPos(cursor); }
     }

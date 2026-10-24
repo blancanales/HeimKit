@@ -52,7 +52,7 @@ internal static class WorldAdditionsTests
         Check(history.Overflowed && history.Count == 1, "Overflow did not discard incomplete position history within its capacity.");
         history.AcknowledgeOverflow(); Check(!history.Overflowed, "History overflow could not be acknowledged.");
         Check(TameTravelTraversalRules.DestinationRejection(64, 11, 30) == null &&
-            TameTravelTraversalRules.DestinationRejection(65, 11, 30) == "destination_distance_exceeded" &&
+            TameTravelTraversalRules.DestinationRejection(2305, 11, 30) == "destination_distance_exceeded" &&
             TameTravelTraversalRules.DestinationRejection(1, 61, 30) == "traversal_timeout", "Distance and traversal timeout were conflated or the distance boundary changed.");
         Check(TameTravelTraversalRules.ArrivalRejection(true, 1.8f, 1000000) == "arrival_too_early" &&
             TameTravelTraversalRules.ArrivalRejection(true, 2, 1000000) == null &&
@@ -74,17 +74,17 @@ internal static class WorldAdditionsTests
         Check(lines.Count == 1 && lines[0].Contains("player=Trevor") && lines[0].Contains("source=456:1"), "Repeated source misses flooded or lost actor/source identity.");
         diagnostics.Traversal(peer, "source_entry", "portal_pair_unavailable", new ZDOID(456, 1));
         diagnostics.Traversal(peer, "source_entry", "outside_trigger", new ZDOID(456, 1));
-        Check(lines.Count == 3, "A changed gate and later recurrence were hidden as unchanged history.");
+        Check(lines.Count == 2, "A pair failure was hidden or routine source polling bypassed its separate interval.");
         diagnostics.Traversal(peer, "consent_ended", "animal_left_wait_area", animal: new ZDOID(456, 2), transition: true);
         var journey = new PortalJourney { Peer = peer, Name = "Trevor", Entered = 0, Arrived = 3, Exit = Vector3.zero };
         diagnostics.Cancel(journey, "destination_distance_exceeded", new Vector3(9, 0, 0), 11);
-        Check(lines.Count == 5 && lines[^1].Contains("destination_distance_m=9") && lines[^1].Contains("entry_age_s=11"), "Cancellation distance/timing or consent-loss evidence was lost.");
+        Check(lines.Count == 4 && lines[^1].Contains("destination_distance_m=9") && lines[^1].Contains("entry_age_s=11"), "Cancellation distance/timing or consent-loss evidence was lost.");
         for (int i = 0; i < 30; i++) diagnostics.Traversal(peer, "arrival", "linked_exit_observed", transition: true);
-        Check(lines.Count == 16, "Traversal evidence exceeded its independent sixteen-record allowance.");
-        diagnostics.Command(peer, "request_received", "Wait"); Check(lines.Count == 17, "Traversal events consumed the command budget.");
+        Check(lines.Count == 7, "Critical traversal evidence exceeded six records or routine source polling consumed its allowance.");
+        diagnostics.Command(peer, "request_received", "Wait"); Check(lines.Count == 8, "Traversal events consumed the command budget.");
         now = 301; diagnostics.Traversal(peer, "source_entry", "outside_trigger", new ZDOID(456, 1));
-        Check(lines.Count == 18, "Unchanged source-gate heartbeat was lost.");
-        debug.Value = false; diagnostics.Traversal(peer, "source_entry", "no_portal_nearby"); Check(lines.Count == 18, "Suppressed traversal evidence emitted output.");
+        Check(lines.Count == 9, "Unchanged source-gate heartbeat was lost.");
+        debug.Value = false; diagnostics.Traversal(peer, "source_entry", "no_portal_nearby"); Check(lines.Count == 9, "Suppressed traversal evidence emitted output.");
         System.Console.WriteLine("PASS: traversal evidence preserves actor/object identity, distance and time, combines repeated misses, retains consent transitions and has an independent bounded stream with suppression.");
     }
     private static void NativeHealth()
@@ -331,7 +331,15 @@ internal static class WorldAdditionsTests
     private static void FollowSpacing()
     {
         var distances = TameTravelFollowRules.Distances(4, 5, 1.5f, .49f);
-        Check(distances == (4f, 5f), "Normal lox spacing changed configured stop/resume distances.");
+        Check(distances == (4f, 5f), "Smaller-animal spacing changed configured stop/resume distances.");
+        var lox = TameTravelFollowRules.Distances(4, 5, 1.5f, .49f, lox: true);
+        Check(lox == (6f, 8f) && TameTravelFollowRules.Stopped(false, 36, lox.Stop, lox.Resume) &&
+            TameTravelFollowRules.Stopped(true, 64, lox.Stop, lox.Resume) &&
+            !TameTravelFollowRules.Stopped(true, 8.1f * 8.1f, lox.Stop, lox.Resume),
+            "Lox spacing lost its six/eight-metre minimum or two-metre hysteresis.");
+        Check(TameTravelFollowRules.Distances(10, 15, 1.5f, .49f, lox: true) == (10f, 15f) &&
+            TameTravelFollowRules.Distances(4, 5, 9, .5f, lox: true) == (10.5f, 12.5f),
+            "Lox spacing ignored larger configured distances or scaled body clearance.");
         bool stopped = TameTravelFollowRules.Stopped(false, 3.9f * 3.9f, distances.Stop, distances.Resume);
         Check(stopped && TameTravelFollowRules.Stopped(stopped, 4.9f * 4.9f, distances.Stop, distances.Resume) &&
             TameTravelFollowRules.Stopped(stopped, 25, distances.Stop, distances.Resume) &&
@@ -421,6 +429,20 @@ internal static class WorldAdditionsTests
             !TameTravelCommandRules.ConsentValid(TameOrder.Wait, "Another player", "Trevor") &&
             !TameTravelCommandRules.ConsentValid(TameOrder.Stay, "", "Trevor"), "Wait, stay and active following did not keep distinct travel eligibility.");
         System.Console.WriteLine("PASS: follow/stay/wait parsing and native emote fallbacks retain distinct consent rules, exclude ordinary speech, reject foreign following and never turn stay into travel consent.");
+        foreach (float configured in new[] { 2f, 8f, 12f })
+        {
+            float stopRange = TameTravelCommandRules.SelectionRange(TameOrder.Stay, configured);
+            Check(8.2f < stopRange && 16f < stopRange && stopRange == 32 &&
+                TameTravelCommandRules.SelectionRange(TameOrder.Follow, configured) == configured &&
+                TameTravelCommandRules.SelectionRange(TameOrder.Wait, configured) == configured,
+                "Stay cannot reach a following Lox beyond the command radius, or follow/wait selection expanded.");
+        }
+        Check(TameTravelCommandRules.AwaitingEarlierFollow(true, TameOrder.Follow, true) &&
+            !TameTravelCommandRules.AwaitingEarlierFollow(false, TameOrder.Follow, true) &&
+            !TameTravelCommandRules.AwaitingEarlierFollow(true, TameOrder.Wait, true) &&
+            !TameTravelCommandRules.AwaitingEarlierFollow(true, TameOrder.Stay, false),
+            "Queued stay can falsely confirm before an in-flight follow toggle, or waits for unrelated commands.");
+        System.Console.WriteLine("PASS: stay reaches associated followers beyond Lox resume spacing without expanding follow/wait selection, and distinguishes an in-flight follow from confirmed follow or pending stay/wait.");
     }
     private static void TransferDiagnostics()
     {
@@ -438,7 +460,7 @@ internal static class WorldAdditionsTests
         Check(lines.Count == 1 && lines[0].Contains("reason=follow_changed") && lines[0].Contains("owner_before_release=1234") &&
             lines[0].Contains("source_state_observed=true") && lines[0].Contains("barrier_echoed=true") && !lines[0].Contains("owner_now="), "Transfer diagnostics lost the cause or confused pre-release state with cleanup results.");
         for (int i = 0; i < 32; i++) diagnostics.Transfer(transfer, false, snapshot);
-        Check(lines.Count == 16, "Detailed transfer diagnostics exceeded the shared sample budget.");
-        System.Console.WriteLine("PASS: transfer stop reasons and pre-release evidence survive record cleanup without reading the live record, and remain capped at sixteen samples per minute.");
+        Check(lines.Count == 8, "Detailed transfer diagnostics exceeded the independent ending allowance.");
+        System.Console.WriteLine("PASS: transfer stop reasons and pre-release evidence survive record cleanup without reading the live record, and remain capped at eight endings per minute.");
     }
 }

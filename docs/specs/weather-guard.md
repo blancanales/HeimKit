@@ -165,3 +165,5 @@ Piece biomes come from WorldGenerator at each checked piece position; ready play
 ## Game-version compatibility
 
 Use the shared [compatibility contract](../architecture.md#configuration) before activation.
+
+Immutable prefab eligibility is cached per controller, while creator, persistence and health remain live record checks. Native terrain-zone creation and wear methods use cached typed delegates; creator-cache field lookups are cached. Scene coverage, support/shield dependencies and terrain-zone lifetime refreshing remain unchanged.

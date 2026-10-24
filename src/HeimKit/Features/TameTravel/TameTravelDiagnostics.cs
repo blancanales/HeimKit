@@ -2,6 +2,7 @@ using BepInEx.Logging;
 using HeimKit.Configuration;
 using HeimKit.Features.TameTravel.Models;
 using HeimKit.Shared;
+using System.Linq;
 namespace HeimKit.Features.TameTravel;
 internal sealed class TameTravelDiagnostics
 {
@@ -13,6 +14,7 @@ internal sealed class TameTravelDiagnostics
     private readonly DiagnosticBudget _commands = new();
     private readonly DiagnosticBudget _selection = new();
     private readonly DiagnosticBudget _traversal = new();
+    private readonly System.Collections.Generic.Dictionary<ZNetPeer, float> _sourcePollTimes = new();
     private readonly System.Collections.Generic.Dictionary<(long Peer, string Stage, ZDOID Source, ZDOID Animal), (string Reason, float Time)> _gates = new();
     public bool SelectionEnabled => _policy.Enabled;
     private readonly System.Collections.Generic.Dictionary<long, string?> _actorReasons = new();
@@ -31,15 +33,24 @@ internal sealed class TameTravelDiagnostics
         if (now >= _next) { _next = now + 60; _samples = 0; }
         return _samples++ < 2;
     }
-    private bool TravelSample() => _policy.Enabled && _traversal.Reserve(_clock(), "traversal", 16);
+    private bool TravelSample() => _policy.Enabled && _traversal.Reserve(_clock(), "traversal", 6);
     public void Traversal(ZNetPeer peer, string stage, string reason, ZDOID? source = null, ZDOID? animal = null,
         (string, object?)[]? fields = null, bool transition = false)
     {
         if (!_policy.Enabled) return;
+        bool routine = (stage is "source_entry" or "source_observation") &&
+            (reason is "outside_trigger" or "no_portal_nearby" or "awaiting_owner_position" or "source_sample_gap" or "cooldown");
         var key = (peer.m_uid, stage, source ?? ZDOID.None, animal ?? ZDOID.None);
         float now = _clock();
+        if (routine && _sourcePollTimes.TryGetValue(peer, out float last) && now >= last && now - last < 60) return;
         if (!transition && _gates.TryGetValue(key, out var previous) && previous.Reason == reason && now >= previous.Time && now - previous.Time < 300) return;
-        if (!TravelSample()) return;
+        if (routine)
+        {
+            if (_sourcePollTimes.Count >= 64 && !_sourcePollTimes.ContainsKey(peer)) _sourcePollTimes.Clear();
+            _sourcePollTimes[peer] = now;
+            if (!_traversal.Reserve(now, "source_poll", 2)) return;
+        }
+        else if (!TravelSample()) return;
         if (!transition)
         {
             if (_gates.Count >= 256 && !_gates.ContainsKey(key)) _gates.Clear();
@@ -49,6 +60,17 @@ internal sealed class TameTravelDiagnostics
             ("stage", stage), ("reason", reason), ("source", source), ("animal", animal), ("omitted", _traversal.TakeOmitted()) };
         if (fields != null) evidence.AddRange(fields);
         DiagnosticLog.Write(_log, "TameTravel", DiagnosticEvent.Detail, "Portal traversal evidence.", evidence, LogLevel.Debug);
+    }
+    public void PortalPair(ZNetPeer peer, ZDO source, ZDO? destination, string reason)
+    {
+        if (!_policy.Enabled) return;
+        TameTravelRules.Scale(source, out var scale);
+        Traversal(peer, "portal_pair", reason, source.m_uid, fields: new (string, object?)[] {
+            ("source_target", source.GetConnectionZDOID(ZDOExtraData.ConnectionType.Portal)), ("source_tag", source.GetString(ZDOVars.s_tag)),
+            ("source_scale", scale), ("destination", destination?.m_uid),
+            ("destination_target", destination?.GetConnectionZDOID(ZDOExtraData.ConnectionType.Portal)),
+            ("destination_tag", destination?.GetString(ZDOVars.s_tag)), ("destination_creator", destination?.GetLong(ZDOVars.s_creator)),
+            ("separation_m", destination == null ? (float?)null : UnityEngine.Vector3.Distance(source.GetPosition(), destination.GetPosition())) });
     }
     public void Command(ZNetPeer peer, string stage, string? command, string? reason = null, int? counter = null, ZDOID? animal = null)
     {
@@ -91,22 +113,37 @@ internal sealed class TameTravelDiagnostics
     }
     public void Transfer(AnimalTransfer t, bool confirmed, TransferSnapshot? snapshot)
     {
-        if (!TravelSample()) return;
+        // Endings retain their own bounded allowance so repeated placement gates
+        // cannot consume the evidence explaining the final outcome.
+        if (!_policy.Enabled || !_traversal.Reserve(_clock(), "transfer_end", 8)) return;
+        var forward = t.Journey.DestinationRotation * UnityEngine.Vector3.forward;
+        forward.y = 0; forward = forward.normalized;
+        var right = new UnityEngine.Vector3(forward.z, 0, -forward.x);
+        var placementOffset = t.Placement - t.Journey.DestinationPosition;
         DiagnosticLog.Write(_log, "TameTravel", DiagnosticEvent.Detail, "Animal reservation ended.",
             new (string, object?)[] { ("player", t.Journey.Name), ("animal", t.Id), ("phase", t.Phase), ("moved", t.Moved), ("owner_observed", confirmed),
                 ("reason", snapshot?.Reason), ("source_state_observed", t.SourceStateObserved), ("previous_owner", t.PreviousOwner),
+                ("destination_retries", t.DestinationRetries),
+                ("follow_continues", t.FollowContinues),
+                ("placement_attempts", t.PlacementAttempts), ("placement_candidates", t.PlacementCandidates),
+                ("placement_rejections", PlacementReasons(t)), ("placement_last_probe", t.PlacementLastProbe),
+                ("placement_support_y", t.PlacementSupportHeight), ("placement_context_ms", t.PlacementContextMilliseconds),
+                ("placement_search_ms", t.PlacementSearchMilliseconds), ("placement_position", t.Moved ? t.Placement : (UnityEngine.Vector3?)null),
+                ("placement_forward_m", t.Moved ? UnityEngine.Vector3.Dot(placementOffset, forward) : (float?)null),
+                ("placement_side_m", t.Moved ? UnityEngine.Vector3.Dot(placementOffset, right) : (float?)null),
                 ("same_record", snapshot?.SameRecord), ("owner_before_release", snapshot?.Owner), ("data_revision_before_release", snapshot?.DataRevision),
                 ("owner_revision_before_release", snapshot?.OwnerRevision), ("position_before_release", snapshot?.Position),
                 ("follow_before_release", snapshot?.Follow), ("health_before_release", snapshot?.Health), ("health_saved", snapshot?.HealthSaved), ("tamed_before_release", snapshot?.Tamed),
                 ("rider_before_release", snapshot?.Rider), ("phase_age_s", snapshot?.PhaseAge), ("barrier_echoed", snapshot?.BarrierEchoed) }, LogLevel.Debug);
     }
+    internal static string PlacementReasons(AnimalTransfer t) => string.Join(",", t.PlacementRejections.OrderBy(p => p.Key).Select(p => p.Key + ":" + p.Value));
     public void Cancel(PortalJourney j, string reason, UnityEngine.Vector3? position = null, float? now = null)
     {
         if (!TravelSample()) return;
         DiagnosticLog.Write(_log, "TameTravel", DiagnosticEvent.Result, "Portal traversal cancelled.",
             new (string, object?)[] { ("player", j.Name), ("source", j.Source), ("destination", j.Destination), ("reason", reason),
                 ("player_position", position), ("expected_exit", j.Exit), ("destination_distance_m", position.HasValue ? (position.Value - j.Exit).magnitude : (float?)null),
-                ("maximum_distance_m", 8), ("entry_age_s", now - j.Entered), ("arrival_age_s", j.Arrived >= 0 ? now - j.Arrived : null), ("ready", j.Ready) }, LogLevel.Debug);
+                ("maximum_distance_m", TameTravelTraversalRules.DestinationLimit(j.Moved > 0)), ("entry_age_s", now - j.Entered), ("arrival_age_s", j.Arrived >= 0 ? now - j.Arrived : null), ("ready", j.Ready) }, LogLevel.Debug);
     }
     public void Following(AnimalTransfer t, string state, float distance, float stop, float resume)
     {

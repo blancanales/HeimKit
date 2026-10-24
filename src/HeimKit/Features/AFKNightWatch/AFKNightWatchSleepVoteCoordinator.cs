@@ -17,6 +17,15 @@ public static class AFKNightWatchSleepVoteCoordinator
     private static readonly Harmony Hooks = new("heimkit.sleep_vote");
     private static readonly Harmony Observers = new("heimkit.sleep_vote.diagnostics");
     private static readonly List<string> Registered = new();
+    private static readonly List<PlayerActivityObservation> FallbackActors = new();
+    private static readonly List<PlayerActivityView> FallbackVotes = new();
+    private static IReadOnlyList<PlayerActivityView> ReadFallback()
+    {
+        PlayerActivityService.ReadActorsInto(_presence!, 0, FallbackActors, null);
+        FallbackVotes.Clear();
+        foreach (var actor in FallbackActors) FallbackVotes.Add(new PlayerActivityView { Peer = actor.Peer, Known = actor.Known, Alive = actor.Alive, InBed = actor.InBed });
+        return FallbackVotes;
+    }
     public static string RegisteredHooks => string.Join(",", Registered);
     private static Func<(int Percentage, bool Strict)>? _majority;
     private static IPlayerActivityObservations? _activity;
@@ -83,7 +92,7 @@ public static class AFKNightWatchSleepVoteCoordinator
         finally
         {
             try { Hooks.UnpatchSelf(); }
-            finally { Registered.Clear(); _logger = null; }
+            finally { Registered.Clear(); FallbackActors.Clear(); FallbackVotes.Clear(); _logger = null; }
         }
     }
     private static bool Vote(ref bool __result)
@@ -93,7 +102,7 @@ public static class AFKNightWatchSleepVoteCoordinator
         try
         {
             var players = _activity != null ? _activity.Snapshot(Time.unscaledTime) :
-                PlayerActivityService.ReadActors(_presence!).Select(p => new PlayerActivityView { Peer = p.Peer, Known = p.Known, Alive = p.Alive, InBed = p.InBed }).ToArray();
+                ReadFallback();
             if (_activity != null && !_activity.Reliable) { SleepDelay.Reset(); _acceptedVote = null; Notify("vote_not_ready_fallback"); return true; }
             if (!players.Any(p => p.Known && p.Alive && p.InBed)) { SleepDelay.Reset(); _acceptedVote = null; Notify("no_living_sleeper_votes"); __result = false; return false; }
             _lastAttemptAt = Time.unscaledTime;

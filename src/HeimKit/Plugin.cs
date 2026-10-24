@@ -19,7 +19,7 @@ using HeimKit.Features.HeimMender;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.1.56-world-features.10")]
+[BepInPlugin("heimkit", "HeimKit", "0.1.56-world-features.23")]
 [BepInProcess("valheim_server.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -31,9 +31,9 @@ public sealed class Plugin : BaseUnityPlugin
     {
         DiagnosticLog.StartSession();
 #if DEBUG
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.56-world-features.10. Build configuration: Debug.");
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.56-world-features.23. Build configuration: Debug.");
 #else
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.56-world-features.10. Build configuration: Release.");
+        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.56-world-features.23. Build configuration: Release.");
 #endif
         try
         {

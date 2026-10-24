@@ -29,6 +29,7 @@ public sealed class SharedMapPinState
     private readonly long _world;
     private readonly Action<string, MapPin, string>? _changed;
     private bool _dirty;
+    public long Revision { get; private set; }
     private float _nextSave;
     public string FilePath { get; }
     public SharedMapPinState(string directory, long world, Action<string, MapPin, string>? changed = null)
@@ -65,7 +66,7 @@ public sealed class SharedMapPinState
             if (_adopted.ContainsKey(fingerprint) || previousIds.Contains(fingerprint) ||
                 !adoptedCandidates.TryGetValue(Shape(pin), out var matches) || matches.Length != 1) continue;
             if (_adopted.Count >= Maximum) throw new InvalidDataException("Shared adopted-pin limit exceeded.");
-            _adopted.Add(fingerprint, matches[0]!); _dirty = true;
+            _adopted.Add(fingerprint, matches[0]!); _dirty = true; Revision++;
             _changed?.Invoke(matches[0]!, pin, "accepted_pin_adoption");
         }
         // Ownership adoption must still suppress duplicate managed copies when shared X marks are off.
@@ -86,7 +87,7 @@ public sealed class SharedMapPinState
                 state = new State(Copy(pin, pin.X, pin.Z, false), false); _states.Add(group.Key, state); Index(group.Key, state, true);
             }
             if (state.Target == pin.Checked) continue;
-            state.Target = pin.Checked; _dirty = true; count++;
+            state.Target = pin.Checked; _dirty = true; Revision++; count++;
             _changed?.Invoke(group.Key, pin, "accepted_checkmark");
         }
         return count;
@@ -100,7 +101,7 @@ public sealed class SharedMapPinState
         {
             if (markerIdentity == null && !shareChecks) return Copy(pin, pin.X, pin.Z, false);
             if (_states.Count >= Maximum) throw new InvalidDataException("Shared pin-state limit exceeded.");
-            state = new State(Copy(pin, pin.X, pin.Z, false), false); _states.Add(key, state); Index(key, state, true); _dirty = true;
+            state = new State(Copy(pin, pin.X, pin.Z, false), false); _states.Add(key, state); Index(key, state, true); _dirty = true; Revision++;
         }
         // Restore a player's original coordinates when their issued offset returns in an upload.
         MapPin source = markerIdentity == null ? new MapPin(pin.Owner, state.Source.Name, state.Source.X, state.Source.Y, state.Source.Z, pin.Icon, false, pin.Author) : pin;
@@ -115,7 +116,7 @@ public sealed class SharedMapPinState
                 double dx = source.X + Slots[state.Slot].X - old.X, dz = source.Z + Slots[state.Slot].Z - old.Z;
                 if (dx * dx + dz * dz > 1.21) break;
             }
-            state.Source = Copy(source, source.X, source.Z, check); Index(key, state, true); _dirty = true;
+            state.Source = Copy(source, source.X, source.Z, check); Index(key, state, true); _dirty = true; Revision++;
             _changed?.Invoke(key, state.Published, "pin_publication");
         }
         var published = state.Published;

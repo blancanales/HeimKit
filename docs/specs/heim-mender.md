@@ -30,6 +30,8 @@ Scans run every two seconds around one rotating player, reuse Plugin's player ce
 
 ## Player-service integration
 
+Automatic selection gathers current player and threat positions once per cycle and reuses candidate/pruning buffers. Request issuance still rechecks live threat, range, damage and owner conditions. Routed administration checks the authenticated method header before reading chat parameters, leaving unrelated RPC payloads untouched.
+
 The module receives Plugin-owned PlayerServices, subscribes to Events with replay, and uses Presence and shared RoutedMessages. It acquires no AFK activity lease. Native readiness requires PlayerServices.Ready, ZDOMan, ZNetScene and ZRoutedRpc. False or unknown presence disposes its controller, routed subscription and batches before pause acknowledgment. World replacement recreates the controller. Shutdown is idempotent. The configuration watcher and trusted local command registration are explicit access-management/operator-request exceptions, separate from gameplay; they may remain installed while empty, but cannot scan or repair without a ready joined player. Enabled=false releases gameplay; configuration monitoring remains available for reactivation. Compatibility failure never activates gameplay.
 
 ## Logging and acceptance contract
@@ -37,3 +39,5 @@ The module receives Plugin-owned PlayerServices, subscribes to Events with repla
 Normal output announces lifecycle, accepted/rejected admin requests and one confirmed repair count at the completed automatic/manual batch boundary. Requests and timeouts are not counted as repairs. Debug summaries own bounded cycle counts, examined scope, damaged/quiet/threat/owner exclusions, queue and confirmed/unconfirmed counts. Object samples carry ZDO ID, prefab, health and owner, limited per minute. Immediate runtime failures disable only HeimMender. Empty, unchanged scopes stay quiet. Acceptance requires independent operation with other modules disabled, bounded requests, preserved creator/support, authenticated administration, observed confirmation, atomic section reload, no work while empty and no restored destroyed or world-created pieces.
 
 Optional controller-pass timing reports duration_avg_ms and duration_max_ms at most once per minute for nonempty scope. Collection follows effective debug policy and includes synchronous controller processing only; see [shared measurement limitations](../limitations.md).
+
+Automatic observation uses the shared spatial candidate index for eligible structures and monster records. Accepted local/replicated health and creator changes can add candidates, and threat movement updates spatial coverage. Live health, damage quiet periods, threat checks, cycle timing, random selection and repair confirmation remain unchanged. Administrative requests still query current world scope immediately.

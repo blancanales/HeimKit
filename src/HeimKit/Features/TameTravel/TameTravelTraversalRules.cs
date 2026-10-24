@@ -6,7 +6,7 @@ internal static class TameTravelTraversalRules
 {
     public static string CancellationMessage(string reason) => reason switch
     {
-        "destination_distance_exceeded" or "traveller_left_destination" => "Portal attempt ended: stay within eight metres of the destination exit.",
+        "destination_distance_exceeded" or "traveller_left_destination" => "Portal attempt ended: stay within 48 metres of the destination exit.",
         "arrival_timeout" or "traversal_timeout" => "Portal attempt ended: the linked arrival did not finish in time.",
         "pair_or_actor_changed" or "portal_pair_changed" => "Portal attempt ended: the portal link or character changed.",
         "stale_position_observation" or "position_history_overflow" => "Portal attempt ended: player position updates were incomplete.",
@@ -20,9 +20,13 @@ internal static class TameTravelTraversalRules
         if (!PlayerWorldScope.Finite(gap) || gap < 0 || gap > 2) return "source_sample_gap";
         return null;
     }
-    public static string? DestinationRejection(float distanceSquared, float age, float window)
+    public static float DestinationLimit(bool relocated) => TameTravelPlacementRules.LandingRadius;
+    public static bool PhaseExpired(int phase, bool placementStarted, float age)
+        => phase == 1 ? placementStarted && age > 30 : age > 10;
+    public static string? DestinationRejection(float distanceSquared, float age, float window, bool relocated = false)
     {
-        if (!PlayerWorldScope.Finite(distanceSquared) || distanceSquared > 64) return "destination_distance_exceeded";
+        float limit = DestinationLimit(relocated);
+        if (!PlayerWorldScope.Finite(distanceSquared) || distanceSquared > limit * limit) return "destination_distance_exceeded";
         return age > window + 30 ? "traversal_timeout" : null;
     }
     public static string? ArrivalRejection(bool atExit, float age, float sourceDistanceSquared)

@@ -24,13 +24,13 @@ public sealed class TameTravelSettings
         const string section = "TameTravel";
         Enabled = config.Bind(section, "Enabled", true, "Enable validated portal travel for explicitly following tames. Restart after edits.");
         DebugMode = config.Bind(section, "DebugMode", false, "Enable feature diagnostics through the shared debug policy.");
-        CommandRangeMeters = config.Bind(section, "CommandRangeMeters", 8f, new ConfigDescription("Maximum distance for vanilla Come Here/No No No follow/stay selection.", new AcceptableValueRange<float>(2, 12)));
+        CommandRangeMeters = config.Bind(section, "CommandRangeMeters", 8f, new ConfigDescription("Maximum follow/wait selection distance. Stay addresses your associated animals within 32 metres.", new AcceptableValueRange<float>(2, 12)));
         FollowSpacingEnabled = config.Bind(section, "FollowSpacingEnabled", true, "Use bounded server ownership to apply follow spacing after an explicit follow command. Restart after edits.");
         FollowStopDistanceMeters = config.Bind(section, "FollowStopDistanceMeters", 4f, new ConfigDescription("Horizontal follow stopping distance; enlarged when needed for animal and player clearance.", new AcceptableValueRange<float>(3, 12)));
         FollowResumeDistanceMeters = config.Bind(section, "FollowResumeDistanceMeters", 5f, new ConfigDescription("Horizontal distance to resume following; effective value is at least the stop distance plus one metre.", new AcceptableValueRange<float>(4, 16)));
         MaxControlledFollowers = config.Bind(section, "MaxControlledFollowers", 8, new ConfigDescription("Global cap on server-controlled followers; native following remains when capacity is unavailable.", new AcceptableValueRange<int>(1, 16)));
         FollowerRangeMeters = config.Bind(section, "FollowerRangeMeters", 20f, new ConfigDescription("Maximum follower distance from player and source portal at entry.", new AcceptableValueRange<float>(5, 32)));
-        FollowConsentSeconds = config.Bind(section, "FollowConsentSeconds", 300f, new ConfigDescription("Fresh following consent lifetime; one traversal consumes it.", new AcceptableValueRange<float>(30, 1800)));
+        FollowConsentSeconds = config.Bind(section, "FollowConsentSeconds", 300f, new ConfigDescription("Optional portal-wait consent lifetime; one traversal consumes it. Active follow permission lasts for the current player session until stopped or invalidated.", new AcceptableValueRange<float>(30, 1800)));
         TravelWindowSeconds = config.Bind(section, "TravelWindowSeconds", 30f, new ConfigDescription("Maximum time to observe corresponding portal arrival.", new AcceptableValueRange<float>(15, 60)));
         MaxFollowersPerTraversal = config.Bind(section, "MaxFollowersPerTraversal", 8, new ConfigDescription("Maximum tames reserved for one traversal.", new AcceptableValueRange<int>(1, 16)));
         foreach (float n in new[] { CommandRangeMeters.Value, FollowStopDistanceMeters.Value, FollowResumeDistanceMeters.Value, FollowerRangeMeters.Value, FollowConsentSeconds.Value, TravelWindowSeconds.Value })

@@ -10,4 +10,6 @@ internal sealed class PlayerSample
     public bool PlayerDataObserved;
     public readonly TameTravelPositionHistory Positions = new();
     public PortalJourney? Journey;
+    public ZDOID ReentryPortal;
+    public PortalWitness? PendingPortal;
 }

@@ -15,6 +15,16 @@ internal sealed class ServerObjectAuthority : IDisposable
 {
     private static readonly List<ServerObjectAuthority> Consumers = new();
     private static readonly Harmony Hooks = new("heimkit.server_object_authority");
+    private static readonly HashSet<ZDOID> InstanceIds = new();
+    private static bool HasRecords
+    {
+        get
+        {
+            foreach (var consumer in Consumers)
+                if (consumer._records.Count != 0 && ReferenceEquals(consumer._world, ZDOMan.instance)) return true;
+            return false;
+        }
+    }
     private readonly Dictionary<ZDOID, ZDO> _records = new();
     private readonly Dictionary<(int X, int Y, int Z), HashSet<ZDOID>> _points = new();
     private readonly Dictionary<ZDOID, (int X, int Y, int Z)> _cells = new();
@@ -83,8 +93,12 @@ internal sealed class ServerObjectAuthority : IDisposable
         if (zdo.GetOwner() == ZDOMan.GetSessionID()) zdo.SetOwner(0);
         _world.ForceSendZDO(id);
     }
-    private static ServerObjectAuthority? For(ZDOID id) => Consumers.FirstOrDefault(c => ReferenceEquals(c._world, ZDOMan.instance) &&
-        c._records.TryGetValue(id, out var record) && record.IsValid() && record.m_uid == id);
+    private static ServerObjectAuthority? For(ZDOID id)
+    {
+        foreach (var consumer in Consumers)
+            if (ReferenceEquals(consumer._world, ZDOMan.instance) && consumer._records.TryGetValue(id, out var record) && record.IsValid() && record.m_uid == id) return consumer;
+        return null;
+    }
     private static bool Protected(ZDOID id) => For(id) != null;
     private static void Owner(ZDO __instance, ref long uid)
     { if (Protected(__instance.m_uid)) uid = ZDOMan.GetSessionID(); }
@@ -104,7 +118,7 @@ internal sealed class ServerObjectAuthority : IDisposable
     }
     private static bool Data(ZRpc rpc, ref ZPackage pkg)
     {
-        if (!Connected(rpc)) return true;
+        if (!HasRecords || !Connected(rpc)) return true;
         try { pkg = NativeZdoPackets.FilterData(pkg, Protected, out _, Reassert); return true; }
         catch (Exception error) { RejectPacket("zdo_data", error); return false; }
     }
@@ -112,12 +126,16 @@ internal sealed class ServerObjectAuthority : IDisposable
     {
         // Authentication uses the existing hub's peer objects via native physical connection identity.
         // This is packet provenance, never a gameplay occupancy census.
-        var peer = Consumers.SelectMany(c => c._presence.Peers).FirstOrDefault(p => ReferenceEquals(p.m_rpc, rpc));
-        return peer != null && peer.IsReady() && (!sender.HasValue || peer.m_uid == sender.Value);
+        foreach (var consumer in Consumers)
+        {
+            var peer = PlayerPeerLookup.Ready(consumer._presence.Peers, rpc);
+            if (peer != null) return !sender.HasValue || peer.m_uid == sender.Value;
+        }
+        return false;
     }
     private static bool Routed(ZRpc rpc, ref ZPackage pkg)
     {
-        if (!Connected(rpc)) return true;
+        if (!HasRecords || !Connected(rpc)) return true;
         try
         {
             if (!NativeZdoPackets.RelevantRouted(pkg, Protected)) return true;
@@ -147,7 +165,7 @@ internal sealed class ServerObjectAuthority : IDisposable
         if (!PlayerWorldScope.Finite(point)) return true;
         var cell = Cell(point);
         foreach (var consumer in Consumers)
-            if (consumer._instances && ReferenceEquals(consumer._world, ZDOMan.instance))
+            if (consumer._points.Count != 0 && consumer._instances && ReferenceEquals(consumer._world, ZDOMan.instance))
                 for (int x = -1; x <= 1; x++)
                     for (int y = -1; y <= 1; y++)
                         for (int z = -1; z <= 1; z++)
@@ -163,12 +181,15 @@ internal sealed class ServerObjectAuthority : IDisposable
         => ((int)Math.Floor(point.x * 8), (int)Math.Floor(point.y * 8), (int)Math.Floor(point.z * 8));
     private static void Instances(List<ZDO> currentNearObjects, List<ZDO> currentDistantObjects)
     {
-        if (!Consumers.Any(c => c._instances && c._records.Count > 0 && ReferenceEquals(c._world, ZDOMan.instance))) return;
-        var seen = new HashSet<ZDOID>(currentNearObjects.Select(z => z.m_uid));
+        if (!HasRecords) return;
+        var seen = InstanceIds;
+        seen.Clear();
+        foreach (var record in currentNearObjects) seen.Add(record.m_uid);
         foreach (var c in Consumers)
             if (c._instances && ReferenceEquals(c._world, ZDOMan.instance))
                 foreach (var pair in c._records)
                     if (pair.Value.IsValid() && pair.Value.m_uid == pair.Key && seen.Add(pair.Key)) currentNearObjects.Add(pair.Value);
+        seen.Clear();
     }
     private static void RejectPacket(string operation, Exception error)
     {

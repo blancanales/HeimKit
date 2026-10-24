@@ -16,6 +16,7 @@ public sealed class SharedMapPinRemovals
     private readonly long _world;
     private HashSet<string> _ids = new(StringComparer.Ordinal);
     public string FilePath { get; }
+    public long Revision { get; private set; }
     public SharedMapPinRemovals(string directory, long world)
     { _world = world; FilePath = Path.Combine(directory, "world-" + world.ToString("X16", CultureInfo.InvariantCulture) + ".pin-removals"); }
 
@@ -88,7 +89,7 @@ public sealed class SharedMapPinRemovals
                 output.Write(checksum, 0, checksum.Length); output.Flush(true);
             }
             if (File.Exists(FilePath)) File.Replace(temporary, FilePath, FilePath + ".bak"); else File.Move(temporary, FilePath);
-            _ids = next; return true;
+            _ids = next; Revision++; return true;
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }

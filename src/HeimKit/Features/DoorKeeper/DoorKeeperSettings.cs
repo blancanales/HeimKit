@@ -20,7 +20,7 @@ public sealed class DoorKeeperSettings
         CloseDelaySeconds = config.Bind("DoorKeeper", "CloseDelaySeconds", 5f, new ConfigDescription("Continuous observed open time before closing. Restart after edits.", new AcceptableValueRange<float>(1f, 300f)));
         ClearanceMeters = config.Bind("DoorKeeper", "ClearanceMeters", 3f, new ConfigDescription("Minimum occupancy sphere radius; native door geometry plus player allowance can enlarge it. Restart after edits.", new AcceptableValueRange<float>(2f, 10f)));
         ScanRangeMeters = config.Bind("DoorKeeper", "ScanRangeMeters", 64f, new ConfigDescription("Range around a rotating ready player. Restart after edits.", new AcceptableValueRange<float>(16f, 128f)));
-        IntervalSeconds = config.Bind("DoorKeeper", "IntervalSeconds", 1f, new ConfigDescription("Processing interval. Restart after edits.", new AcceptableValueRange<float>(0.5f, 10f)));
+        IntervalSeconds = config.Bind("DoorKeeper", "IntervalSeconds", 2f, new ConfigDescription("Processing interval. Restart after edits.", new AcceptableValueRange<float>(0.5f, 10f)));
         foreach (float value in new[] { CloseDelaySeconds.Value, ClearanceMeters.Value, ScanRangeMeters.Value, IntervalSeconds.Value })
             if (float.IsNaN(value) || float.IsInfinity(value)) throw new System.ArgumentException("DoorKeeper settings must be finite.");
         DebugLogging = DebugLoggingResolver.Resolve(config, "DoorKeeper", DiagnosticsSettings.Bind(config), logger, DebugMode);

@@ -28,7 +28,14 @@ internal sealed class TameTravelRules
     public string? ActorRejection(ZNetPeer peer, out ZDO actor)
     {
         actor = null!;
-        if (!peer.IsReady() || !_presence.Peers.Any(p => ReferenceEquals(p, peer))) return "peer_not_ready";
+        bool present = false; int names = 0;
+        var peers = _presence.Peers;
+        for (int i = 0; i < peers.Count; i++)
+        {
+            if (ReferenceEquals(peers[i], peer)) present = true;
+            if (peers[i].IsReady() && string.Equals(peers[i].m_playerName, peer.m_playerName, StringComparison.Ordinal)) names++;
+        }
+        if (!peer.IsReady() || !present) return "peer_not_ready";
         if (peer.m_characterID.IsNone()) return "character_not_ready";
         var z = ZDOMan.instance.GetZDO(peer.m_characterID);
         if (z == null || !z.IsValid()) return "character_missing";
@@ -37,7 +44,7 @@ internal sealed class TameTravelRules
         if (!PlayerWorldScope.Finite(z.GetPosition())) return "character_position_invalid";
         if (Character.InInterior(z.GetPosition())) return "character_interior";
         if (string.IsNullOrEmpty(peer.m_playerName)) return "player_name_unavailable";
-        if (_presence.Peers.Count(p => p.IsReady() && string.Equals(p.m_playerName, peer.m_playerName, StringComparison.Ordinal)) != 1) return "player_name_ambiguous";
+        if (names != 1) return "player_name_ambiguous";
         // Native saved following resolves this character name, not the chat-supplied UserInfo.
         if (z.GetString(ZDOVars.s_playerName) != peer.m_playerName) return "character_name_mismatch";
         actor = z; return null;
@@ -74,9 +81,16 @@ internal sealed class TameTravelRules
     }
     public static TeleportWorld? Portal(ZDO? z)
     {
-        if (z == null || !z.IsValid() || z.GetPrefab() != "portal_wood".GetStableHashCode() && z.GetPrefab() != "portal_stone".GetStableHashCode() || z.GetLong(ZDOVars.s_creator) == 0 || Character.InInterior(z.GetPosition()) || !Scale(z, out var scale) || (scale - Vector3.one).sqrMagnitude > 0.0001f) return null;
-        var p = ZNetScene.instance.GetPrefab(z.GetPrefab());
-        return p?.GetComponent<TeleportWorld>();
+        return PortalRejection(z) == null ? ZNetScene.instance.GetPrefab(z!.GetPrefab()).GetComponent<TeleportWorld>() : null;
+    }
+    public static string? PortalRejection(ZDO? z)
+    {
+        if (z == null || !z.IsValid()) return "record_missing";
+        if (z.GetPrefab() != "portal_wood".GetStableHashCode() && z.GetPrefab() != "portal_stone".GetStableHashCode()) return "prefab_unsupported";
+        if (z.GetLong(ZDOVars.s_creator) == 0) return "not_player_built";
+        if (!PlayerWorldScope.Finite(z.GetPosition()) || Character.InInterior(z.GetPosition())) return "position_unsupported";
+        if (!Scale(z, out var scale) || (scale - Vector3.one).sqrMagnitude > .0001f) return "scale_unsupported";
+        return ZNetScene.instance.GetPrefab(z.GetPrefab())?.GetComponent<TeleportWorld>() == null ? "definition_unavailable" : null;
     }
     public static bool Trigger(ZDO portal, ZDO actor, out Bounds box)
     {

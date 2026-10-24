@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using HeimKit.Features.SharedMap.Models;
+using HeimKit.Shared;
 using UnityEngine;
 
 namespace HeimKit.Features.SharedMap;
@@ -11,6 +12,7 @@ namespace HeimKit.Features.SharedMap;
 internal sealed class SharedMapLandmarks : IDisposable
 {
     private readonly ZDOMan _world;
+    private WorldCandidateIndex? _index;
     private readonly SharedMapLandmarkStore? _runestones, _spawners;
     private readonly SharedMapExploration _map;
     private readonly SharedMapSettings _settings;
@@ -109,7 +111,8 @@ internal sealed class SharedMapLandmarks : IDisposable
         if (!SharedMapExploration.Finite(zoneSize) || zoneSize < 16) throw new InvalidOperationException("Unsupported landmark sector geometry.");
         int radius = (int)Math.Ceiling((_map.Radius + _maximumOffset) / zoneSize) + 1;
         if (radius > 16) throw new InvalidOperationException("Landmark sector extent exceeds supported bounds.");
-        _near.Clear(); _world.FindSectorObjects(ZoneSystem.GetZone(player), new SimulationDistance(radius, 0, true), _near);
+        _index ??= new(z => z.GetPrefab() == _proxyHash || _sources.ContainsKey(z.GetPrefab()));
+        _index.Read(player, radius, _near, classic: true);
         if (_near.Count > 65536) throw new InvalidOperationException("Landmark nearby candidate limit exceeded.");
         _sampleCursors.TryGetValue(peer, out int cursor);
         for (int i = 0; i < Math.Min(256, _near.Count); i++)
@@ -227,6 +230,7 @@ internal sealed class SharedMapLandmarks : IDisposable
     public void Dispose()
     {
         _disposed = true; _world.m_onZDODestroyed -= Destroyed;
+        _index?.Dispose(); _index = null;
         _pending.Clear(); _queued.Clear(); _near.Clear(); _scan.Clear(); _runes.Clear(); _sources.Clear();
         _bindings.Clear(); _ambiguous.Clear(); _sampleCursors.Clear(); _scanNames.Clear(); _inspectedLocations.Clear(); _unavailable.Clear();
         _inspectedSources.Clear();

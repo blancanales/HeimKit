@@ -6,22 +6,46 @@ using UnityEngine;
 namespace HeimKit.Shared;
 
 // Actor observations reuse Plugin's census. One rotating actor's sectors per pass.
-internal sealed class PlayerWorldScope
+internal sealed class PlayerWorldScope : IDisposable
 {
     private readonly IPlayerPresence _presence;
     private int _cursor;
     private readonly Dictionary<long, Vector3> _previous = new();
+    private readonly Dictionary<long, Vector3> _current = new();
     private readonly List<(Vector3 Before, Vector3 After)> _segments = new();
     public readonly List<Vector3> Positions = new();
     public readonly List<ZDO> Records = new();
+    private readonly List<ZDO> _context = new();
+    private WorldCandidateIndex? _index;
+    private bool _contextQueried;
+    private float _range;
+    public void Index(Func<ZDO, bool> accept) => _index = new(accept);
+    public bool ContextReady()
+    {
+        if (_contextQueried) return _context.Count <= 8192;
+        _contextQueried = true; _context.Clear();
+        ZDOMan.instance.FindSectorObjects(ZoneSystem.GetZone(Center), new SimulationDistance((int)Math.Ceiling(_range / 64) + 1, 0), _context);
+        return _context.Count <= 8192;
+    }
+    public List<ZDO> Context => _context;
     public Vector3 Center { get; private set; }
     public PlayerWorldScope(IPlayerPresence presence) => _presence = presence;
     public static bool Finite(float n) => !float.IsNaN(n) && !float.IsInfinity(n);
     public static bool Finite(Vector3 p) => Finite(p.x) && Finite(p.y) && Finite(p.z);
     public bool Refresh(float range)
     {
+        if (!SampleActors()) return false;
+        _range = range;
+        if (_index != null) _index.Read(Center, (int)Math.Ceiling(range / 64) + 1, Records);
+        else ZDOMan.instance.FindSectorObjects(ZoneSystem.GetZone(Center), new SimulationDistance((int)Math.Ceiling(range / 64) + 1, 0), Records);
+        if (Records.Count > 8192) { Records.Clear(); return false; }
+        return true;
+    }
+    public bool SampleActors()
+    {
+        _contextQueried = false; _context.Clear();
         Positions.Clear(); Records.Clear(); _segments.Clear();
-        var current = new Dictionary<long, Vector3>();
+        var current = _current; current.Clear();
         if (_presence.HasJoinedPlayers != true) return false;
         foreach (var peer in _presence.Peers)
         {
@@ -43,8 +67,6 @@ internal sealed class PlayerWorldScope
         Center = Positions[_cursor++ % Positions.Count];
         if (_cursor >= 1000000) _cursor = 0;
         if (Character.InInterior(Center)) return false;
-        ZDOMan.instance.FindSectorObjects(ZoneSystem.GetZone(Center), new SimulationDistance((int)Math.Ceiling(range / 64) + 1, 0), Records);
-        if (Records.Count > 8192) { Records.Clear(); return false; }
         return true;
     }
     public bool InRange(Vector3 point, float range) => Finite(point) && (point - Center).sqrMagnitude <= range * range;
@@ -59,4 +81,5 @@ internal sealed class PlayerWorldScope
         }
         return false;
     }
+    public void Dispose() { _index?.Dispose(); _index = null; }
 }

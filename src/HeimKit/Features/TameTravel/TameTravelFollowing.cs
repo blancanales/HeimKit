@@ -13,6 +13,7 @@ namespace HeimKit.Features.TameTravel;
 internal sealed class TameTravelFollowing : IDisposable
 {
     private static TameTravelFollowing? _current;
+    private static readonly int LoxPrefab = "Lox".GetStableHashCode();
     private readonly Harmony _hooks = new("heimkit.tametravel.following");
     private readonly TameTravelFollowContext _context;
     private readonly TameTravelRules _rules;
@@ -22,6 +23,7 @@ internal sealed class TameTravelFollowing : IDisposable
     private readonly ManualLogSource _log;
     private readonly Action<Exception> _fail;
     private readonly Dictionary<ZDOID, FollowingSession> _sessions = new();
+    private readonly List<KeyValuePair<ZDOID, FollowingSession>> _snapshot = new();
     private readonly Func<BaseAI, float, Vector3, float, bool, bool> _moveTo;
     private int _cursor;
     private bool _disposed;
@@ -83,17 +85,19 @@ internal sealed class TameTravelFollowing : IDisposable
     }
     public void Tick(float now)
     {
-        foreach (var pair in _sessions.ToArray())
+        Snapshot();
+        foreach (var pair in _snapshot)
         {
             var s = pair.Value;
             string? reason = InvalidReason(s, out _);
             if (reason == null && s.Acquired && !_authority.Holds(s.Lease)) reason = "follower_ownership_changed";
             if (reason != null) Stop(pair.Key, reason);
         }
-        var sessions = _sessions.Values.ToArray();
-        if (sessions.Length == 0) return;
+        Snapshot();
+        var sessions = _snapshot;
+        if (sessions.Count == 0) return;
         // Rotate one potentially expensive native context query per controller pass.
-        var selected = sessions[_cursor % sessions.Length]; _cursor = (_cursor + 1) % sessions.Length;
+        var selected = sessions[_cursor % sessions.Count].Value; _cursor = (_cursor + 1) % sessions.Count;
         if (now >= selected.NextContext && Valid(selected, out var actor))
         {
             if (_context.Prepare(selected.Lease.Record, actor, now))
@@ -106,12 +110,13 @@ internal sealed class TameTravelFollowing : IDisposable
                 var playerCapsule = ZNetScene.instance.FindInstance(actor)?.GetComponent<CapsuleCollider>();
                 if (playerCapsule == null) selected.ContextAt = float.NegativeInfinity;
                 else (selected.StopDistance, selected.ResumeDistance) = TameTravelFollowRules.Distances(_settings.FollowStopDistanceMeters.Value,
-                    _settings.FollowResumeDistanceMeters.Value, animalExtent, playerCapsule.radius * Math.Abs(playerCapsule.transform.lossyScale.x));
+                    _settings.FollowResumeDistanceMeters.Value, animalExtent, playerCapsule.radius * Math.Abs(playerCapsule.transform.lossyScale.x),
+                    lox: selected.Lease.Record.GetPrefab() == LoxPrefab);
             }
             else selected.ContextAt = float.NegativeInfinity;
             selected.NextContext = now + (float.IsNegativeInfinity(selected.ContextAt) ? .25f : 1f);
         }
-        foreach (var pair in _sessions.ToArray())
+        foreach (var pair in sessions)
         {
             var s = pair.Value; var t = s.Lease;
             if (s.Acquired && t.Phase == 0 && now - t.PhaseTime > 10) { Stop(pair.Key, "source_drain_timeout", warning: true); continue; }
@@ -165,7 +170,7 @@ internal sealed class TameTravelFollowing : IDisposable
     private static bool Follow(BaseAI __instance, GameObject go, float dt)
     {
         var c = _current;
-        if (c == null || c._disposed) return true;
+        if (c == null || c._disposed || c._sessions.Count == 0) return true;
         try { return c.Apply(__instance, go, dt); }
         catch (Exception error) { c._fail(error); return false; }
     }
@@ -203,6 +208,11 @@ internal sealed class TameTravelFollowing : IDisposable
             DiagnosticLog.Write(_log, "TameTravel", DiagnosticEvent.Result, $"Server follow spacing released for {s.Lease.Journey.Name}.",
                 new (string, object?)[] { ("animal", id), ("reason", reason) }, warning ? LogLevel.Warning : LogLevel.Info);
         if (warning) Feedback(s.Lease.Journey.Peer, "Follow spacing unavailable (" + reason + "); native following remains. Try /comehere again later.");
+    }
+    private void Snapshot()
+    {
+        _snapshot.Clear();
+        foreach (var pair in _sessions) _snapshot.Add(pair);
     }
     private static void Feedback(ZNetPeer peer, string text)
     {

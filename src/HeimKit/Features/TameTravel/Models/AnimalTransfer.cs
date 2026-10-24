@@ -18,7 +18,18 @@ internal sealed class AnimalTransfer
     public bool SourceStateObserved;
     public bool Moved;
     public bool OwnerObserved;
+    public float NextDestinationSend;
+    public int DestinationRetries;
+    public int PlacementCursor;
+    public int PlacementAttempts, PlacementCandidates;
+    public Vector3? PlacementLastProbe;
+    public float? PlacementSupportHeight;
+    public float? PlacementAccessWarmupUntil;
+    public double PlacementContextMilliseconds, PlacementSearchMilliseconds;
+    public readonly System.Collections.Generic.Dictionary<string, int> PlacementRejections = new();
     public bool Waiting;
+    public bool PlacementStarted;
+    public bool FollowContinues;
     // A spacing lease drains through phase 0/1, runs in phase 5 and pauses in phase 6.
     // It never moves an animal or uses the destination-owner phases 2..4.
     public bool FollowControl;

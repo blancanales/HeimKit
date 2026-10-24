@@ -31,6 +31,8 @@ Before standing-stump conversion, acquire a short shared server ownership/data/d
 
 Scene preparation is bounded by native budgets and at most 8192 scoped records; structure footprint definitions are cached for at most 4096 prefab hashes. Scope gaps or unsupported oversized modified pieces remain shared observation limitations. Native sapling space checks continue after planting; the configured structure buffer is evaluated when renewal places the sapling and does not remove an existing tree or continuously enforce a future no-tree zone.
 
+Maintain an in-memory pending-decision index alongside the durable ledger and reuse the due-candidate buffer each pass. Index consumed placement decisions in five-metre horizontal cells for location-cooldown checks, including durable-write waits; update both indexes on consumption and pre-mutation retry. Preserve ledger timestamps and compare native world time at lookup, including after clock rollback. Cache plant/tree prefab classification for at most 4096 definitions per controller. These indexes change neither chance decisions nor durable acknowledgement requirements.
+
 ## Structure processing bounds
 
 Cache piece classification, local collision bounds and default scale for at most 4096 prefab definitions. Before transforming all eight footprint corners, reject known geometry whose conservative pivot-centred bound cannot reach the configured clearance. Offset, replicated scale, rotation and height-separated structures remain covered. Unknown geometry/definitions still defer renewal; no distance-only guess bypasses an unknown footprint.
@@ -56,3 +58,5 @@ Use the [supported environment](../server-setup.md#supported-environment) and sh
 Debug ledger-write timing reports background I/O duration separately, at most once per minute. Main-thread snapshot serialization, terrain preparation and world mutation each report their own bounded average/maximum timing once per minute. It is not gameplay-thread processing time.
 
 Optional controller-pass timing reports duration_avg_ms and duration_max_ms at most once per minute for nonempty scope. Collection follows effective debug policy and includes synchronous controller processing only; see [shared measurement limitations](../limitations.md).
+
+Standing-stump discovery uses the shared spatial candidate index instead of repeatedly discovering unrelated records. Due decisions still rotate fairly at the existing interval, including deferred entries and world-clock rollback. Structure, vegetation and terrain checks query fresh full context only when a due decision or acknowledged placement needs it. Durable acknowledgement, fresh exclusions and confirmed-destruction rules remain unchanged.

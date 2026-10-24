@@ -1,4 +1,6 @@
 GameCompatibilityTests.Run();
+PerformanceRegressionTests.Run();
+TameTravelRecoveryTests.Run();
 GameVersionCompatibilityTests.Run();
 SharedMapTests.Run();
 SharedMapExplorationTests.Run();
@@ -75,3 +77,4 @@ WeatherGuardWearPassTests.Run();
 
 WeatherGuardSettingsLoggingTests.Run();
 WorldAdditionsTests.Run();
+WorldPerformanceTests.Run();

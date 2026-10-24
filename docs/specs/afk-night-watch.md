@@ -52,3 +52,5 @@ Standard Info reports one confirmed sleep start under the configured rules while
 ## Game-version compatibility
 
 Use the shared [compatibility contract](../architecture.md#configuration) before activation.
+
+Fallback sleep votes reuse actor/vote collection buffers. Shared activity sampling reuses temporary collections and caches exact equipment-field snapshots before formatting changed equipment strings. Quorum, uncertainty handling, grace and AFK transitions retain their existing rules.

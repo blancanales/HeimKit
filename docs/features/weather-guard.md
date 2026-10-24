@@ -44,3 +44,5 @@ Info reports confirmed weather-contribution prevention once per completed native
 Medium Debug explains eligibility, management and native processing gates. Detailed adds startup settings, ownership/loading/network counters, representative wetness/roof/timer/health observations and acquisition/release totals. Changed health loss and errors remain visible; unchanged health stays quiet.
 
 Roof fields describe their sample size, age and unchecked/stale counts. Piece/player biomes and server wetness provide context. The [specification](../specs/weather-guard.md#exposure-counts-and-biome-evidence) defines these fields and budgets.
+
+Cached prefab eligibility and native method delegates reduce repeated lookups. Weather protection still reads current saved creator and health, and retains the same surrounding scene and terrain refresh.

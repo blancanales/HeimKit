@@ -10,6 +10,7 @@ using UnityEngine;
 namespace HeimKit.Features.HeimMender;
 internal sealed class HeimMenderController : IDisposable
 {
+    private static readonly int SayMethod = "Say".GetStableHashCode(), ChatMethod = "ChatMessage".GetStableHashCode();
     private readonly HeimMenderSettings _settings;
     private readonly ManualLogSource _log;
     private readonly PlayerServices _players;
@@ -23,6 +24,10 @@ internal sealed class HeimMenderController : IDisposable
     private readonly Dictionary<long, float> _adminRate = new();
     private readonly System.Random _random = new();
     private readonly IDisposable _messages;
+    private readonly List<long> _expiredAdmins = new();
+    private readonly List<ZDOID> _expiredRecords = new();
+    private readonly List<Vector3> _playerPositions = new(), _threatPositions = new();
+    private readonly List<RepairObservation> _candidates = new();
     private float _next;
     private float _cycle;
     private float _interval;
@@ -36,16 +41,28 @@ internal sealed class HeimMenderController : IDisposable
         _settings = settings; _log = log; _players = players; _scope = new(players.Presence);
         _diagnostics = new(log, settings.DebugLogging); _interval = settings.IntervalSeconds.Value; _cycle = Time.unscaledTime + _interval;
         _messages = players.RoutedMessages.Subscribe(Observe, fail);
+        try { _scope.Index(z => _rules.Monster(z.GetPrefab()) || _rules.Eligible(z, out _, out _)); } catch { _messages.Dispose(); throw; }
     }
     public void Tick(float now)
     {
         if (now < _next) return; _next = now + 2;
         using var timing = _settings.DebugLogging.Enabled ? _diagnostics.Measure(now, () => _observations.Count) : null;
         if (_interval != _settings.IntervalSeconds.Value) { _interval = _settings.IntervalSeconds.Value; _cycle = now + _interval; }
-        foreach (var id in _adminRate.Keys.Where(id => !_players.Presence.Peers.Any(p => p.m_uid == id && p.IsReady())).ToArray()) _adminRate.Remove(id);
+        _expiredAdmins.Clear();
+        foreach (var id in _adminRate.Keys)
+        {
+            bool ready = false;
+            foreach (var peer in _players.Presence.Peers) if (peer.m_uid == id && peer.IsReady()) { ready = true; break; }
+            if (!ready) _expiredAdmins.Add(id);
+        }
+        foreach (var id in _expiredAdmins) _adminRate.Remove(id);
         Reconcile(now);
-        foreach (var key in _observations.Where(p => now - p.Value.Seen > 180).Select(p => p.Key).ToArray()) _observations.Remove(key);
-        foreach (var key in _threats.Where(p => now - p.Value.Seen > 180).Select(p => p.Key).ToArray()) _threats.Remove(key);
+        _expiredRecords.Clear();
+        foreach (var pair in _observations) if (now - pair.Value.Seen > 180) _expiredRecords.Add(pair.Key);
+        foreach (var id in _expiredRecords) _observations.Remove(id);
+        _expiredRecords.Clear();
+        foreach (var pair in _threats) if (now - pair.Value.Seen > 180) _expiredRecords.Add(pair.Key);
+        foreach (var id in _expiredRecords) _threats.Remove(id);
         if (_scope.Refresh(_settings.ScanRangeMeters.Value))
         {
             bool omitted = false;
@@ -92,22 +109,35 @@ internal sealed class HeimMenderController : IDisposable
     private void SelectAutomatic(float now)
     {
         int damaged = 0, quiet = 0, threats = 0, owners = 0;
-        var candidates = _observations.Values.ToArray();
-        for (int i = candidates.Length - 1; i > 0; i--) { int j = _random.Next(i + 1); var temp = candidates[i]; candidates[i] = candidates[j]; candidates[j] = temp; }
+        _playerPositions.Clear(); _threatPositions.Clear();
+        foreach (var peer in _players.Presence.Peers)
+            if (peer.IsReady() && !peer.m_characterID.IsNone() && ZDOMan.instance.GetZDO(peer.m_characterID) is ZDO actor &&
+                actor.GetOwner() == peer.m_uid && actor.GetFloat(ZDOVars.s_health, 0) > 0) _playerPositions.Add(actor.GetPosition());
+        foreach (var pair in _threats)
+            if (pair.Key == pair.Value.Record.m_uid && ReferenceEquals(ZDOMan.instance.GetZDO(pair.Key), pair.Value.Record) &&
+                pair.Value.Record.GetFloat(ZDOVars.s_health, 0) > 0 && !pair.Value.Record.GetBool(ZDOVars.s_tamed)) _threatPositions.Add(pair.Value.Record.GetPosition());
+        var candidates = _candidates; candidates.Clear();
+        foreach (var candidate in _observations.Values) candidates.Add(candidate);
+        for (int i = candidates.Count - 1; i > 0; i--) { int j = _random.Next(i + 1); var temp = candidates[i]; candidates[i] = candidates[j]; candidates[j] = temp; }
         foreach (var candidate in candidates)
         {
             if (candidate.Record.m_uid != candidate.Identity) continue;
             var record = ZDOMan.instance.GetZDO(candidate.Identity);
-            if (!ReferenceEquals(record, candidate.Record) || !_rules.Eligible(record!, out float health, out float maximum) || health >= maximum || !Nearby(record!.GetPosition())) continue;
+            if (!ReferenceEquals(record, candidate.Record) || !_rules.Eligible(record!, out float health, out float maximum) || health >= maximum || !NearAny(_playerPositions, record!.GetPosition(), _settings.ScanRangeMeters.Value)) continue;
             damaged++;
             if (now - candidate.Damaged < _settings.DamageQuietSeconds.Value) { quiet++; continue; }
-            if (Threat(record.GetPosition(), now)) { threats++; continue; }
+            if (_settings.HostileClearanceMeters.Value > 0 && (now < _threatUnknownUntil || NearAny(_threatPositions, record.GetPosition(), _settings.HostileClearanceMeters.Value))) { threats++; continue; }
             if (!HeimMenderRules.OwnerReady(record)) { owners++; continue; }
             if (_random.NextDouble() * 100 >= _settings.RepairChancePercent.Value) continue;
             if (_queue.Count < _settings.MaxRepairsPerCycle.Value) _queue.Enqueue(record.m_uid);
         }
-        _diagnostics.Cycle(now, "automatic", candidates.Length, damaged, quiet, threats, owners, _queue.Count);
+        _diagnostics.Cycle(now, "automatic", candidates.Count, damaged, quiet, threats, owners, _queue.Count);
         if (_queue.Count > 0) _kind = "automatic";
+    }
+    private static bool NearAny(List<Vector3> positions, Vector3 point, float radius)
+    {
+        foreach (var position in positions) if ((position - point).sqrMagnitude <= radius * radius) return true;
+        return false;
     }
     public bool Request(string target, float? radius, float now)
     {
@@ -174,8 +204,9 @@ internal sealed class HeimMenderController : IDisposable
     private void ObserveCommand(ZRpc rpc, ZPackage packet)
     {
         if (packet.Size() > 4096) return;
-        var peer = _players.Presence.Peers.FirstOrDefault(p => ReferenceEquals(p.m_rpc, rpc) && p.IsReady());
+        var peer = PlayerPeerLookup.Ready(_players.Presence.Peers, rpc);
         if (peer == null) return;
+        if (!RoutedActivityReader.TryRead(packet, peer.m_uid, out _, out int method) || method != SayMethod && method != ChatMethod) return;
         var data = NativeZdoPackets.ReadRouted(packet);
         if (data.m_senderPeerID != peer.m_uid || data.m_targetPeerID != 0 && data.m_targetPeerID != ZDOMan.GetSessionID()) return;
         bool chat = data.m_methodHash == "ChatMessage".GetStableHashCode() && data.m_targetZDO.IsNone();
@@ -193,5 +224,5 @@ internal sealed class HeimMenderController : IDisposable
         if (!ZNet.instance.IsAdmin(peer.m_socket.GetHostName())) { Reject("Rejected repair request from non-admin " + peer.m_playerName + "."); return; }
         Request(peer.m_uid.ToString(System.Globalization.CultureInfo.InvariantCulture), null, now);
     }
-    public void Dispose() { _messages.Dispose(); _queue.Clear(); _pending.Clear(); _observations.Clear(); _threats.Clear(); _adminRate.Clear(); }
+    public void Dispose() { _scope.Dispose(); _messages.Dispose(); _queue.Clear(); _pending.Clear(); _observations.Clear(); _threats.Clear(); _adminRate.Clear(); }
 }

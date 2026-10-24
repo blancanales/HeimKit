@@ -5,12 +5,14 @@ using System.Linq;
 using SoftReferenceableAssets;
 using UnityEngine;
 using HeimKit.Features.SharedMap.Models;
+using HeimKit.Shared;
 
 namespace HeimKit.Features.SharedMap;
 
 internal sealed class SharedMapDungeons : IDisposable
 {
     private readonly ZDOMan _world;
+    private WorldCandidateIndex? _index;
     private readonly SharedMapDungeonStore _store;
     private readonly SharedMapExploration _map;
     private readonly SharedMapSettings _settings;
@@ -79,7 +81,8 @@ internal sealed class SharedMapDungeons : IDisposable
             throw new InvalidOperationException("Unsupported native dungeon-sector geometry.");
         _near.Clear();
         int radius = (int)Math.Ceiling((_map.Radius + _maximumOffset) / zoneSize) + 1;
-        _world.FindSectorObjects(ZoneSystem.GetZone(player), new SimulationDistance(radius, 0, true), _near);
+        _index ??= new(z => z.GetPrefab() == _proxyHash);
+        _index.Read(player, radius, _near, classic: true);
         foreach (var zdo in _near) Enqueue(zdo, player);
     }
 
@@ -90,7 +93,8 @@ internal sealed class SharedMapDungeons : IDisposable
         if (!SharedMapDungeonPrefab.Finite(player) || !Character.InInterior(player)) return;
         var zone = ZoneSystem.GetZone(player);
         _near.Clear();
-        _world.FindSectorObjects(zone, new SimulationDistance(0, 0, true), _near);
+        _index ??= new(z => z.GetPrefab() == _proxyHash);
+        _index.Read(player, 0, _near, classic: true);
         if (_near.Count > 65536) return;
         ZDO? match = null;
         foreach (var zdo in _near)
@@ -197,5 +201,5 @@ internal sealed class SharedMapDungeons : IDisposable
     }
 
     public void Dispose()
-    { _pending.Clear(); _scan.Clear(); _near.Clear(); _prefabs.Clear(); _added = 0; }
+    { _index?.Dispose(); _index = null; _pending.Clear(); _scan.Clear(); _near.Clear(); _prefabs.Clear(); _added = 0; }
 }

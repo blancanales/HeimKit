@@ -29,3 +29,5 @@ Shared idle thresholds and activity signals are defined under [PlayerActivity](.
 ## Diagnostics
 
 Info reports confirmed sleep starts assisted by these rules while some players were outside bed. Debug explains participants, sleepers, exclusions, required count, grace and native timing. Shared PlayerActivity owns named AFK entry/exit notices, visible with debugging off. Sleep and raid diagnostics remain independent.
+
+Sleep and shared activity sampling reuse working buffers; voting rules and activity timing remain unchanged.

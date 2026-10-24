@@ -53,10 +53,13 @@ internal sealed class WeatherGuardController : IDisposable
     private readonly FieldInfo _rainTimer = AccessTools.Field(typeof(WearNTear), "m_rainTimer");
     private readonly FieldInfo _creationTime = AccessTools.Field(typeof(WearNTear), "m_createTime");
     private readonly FieldInfo _coverTimer = AccessTools.Field(typeof(WearNTear), "m_updateCoverTimer");
-    private readonly MethodInfo _shouldUpdate = AccessTools.Method(typeof(WearNTear), "ShouldUpdate");
-    private readonly MethodInfo _underWater = AccessTools.Method(typeof(WearNTear), "IsUnderWater");
-    private readonly MethodInfo _canBeRemoved = AccessTools.Method(typeof(WearNTear), "CanBeRemoved");
-    private readonly MethodInfo _createZones = typeof(ZoneSystem).GetMethod("CreateLocalZones", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    private readonly Func<WearNTear, float, bool> _shouldUpdate = (Func<WearNTear, float, bool>)AccessTools.Method(typeof(WearNTear), "ShouldUpdate").CreateDelegate(typeof(Func<WearNTear, float, bool>));
+    private readonly Func<WearNTear, bool> _underWater = (Func<WearNTear, bool>)AccessTools.Method(typeof(WearNTear), "IsUnderWater").CreateDelegate(typeof(Func<WearNTear, bool>));
+    private readonly Func<WearNTear, bool> _canBeRemoved = (Func<WearNTear, bool>)AccessTools.Method(typeof(WearNTear), "CanBeRemoved").CreateDelegate(typeof(Func<WearNTear, bool>));
+    private readonly Func<ZoneSystem, Vector3, bool> _createZones = (Func<ZoneSystem, Vector3, bool>)AccessTools.Method(typeof(ZoneSystem), "CreateLocalZones").CreateDelegate(typeof(Func<ZoneSystem, Vector3, bool>));
+    private readonly FieldInfo _creator = AccessTools.Field(typeof(Piece), "m_creator");
+    private readonly FieldInfo _creatorIndex = AccessTools.Field(typeof(Piece), "m_creatorPlatformUserIDIndex");
+    private readonly Dictionary<int, (string Name, bool Wear, bool Static, bool NoRoofWear, float Health, bool Building, bool Container)> _eligibility = new();
     private readonly FieldInfo _instancesField = AccessTools.Field(typeof(ZNetScene), "m_instances");
     private float _nextRefresh, _nextTerrain;
     private bool _announced;
@@ -82,7 +85,7 @@ internal sealed class WeatherGuardController : IDisposable
         _module = module; _log = log; _diagnostics = new WeatherGuardDiagnostics(log, debug, level, logWorldCreated); _manager = ZDOMan.instance; _patches = new WeatherGuardPatches(); }
     public void Install()
     {
-        if (_rainWet == null || _createZones == null || _instancesField == null || _roof == null || _shield == null || _rainTimer == null || _coverTimer == null || _creationTime == null ||
+        if (_creator == null || _creatorIndex == null || _rainWet == null || _createZones == null || _instancesField == null || _roof == null || _shield == null || _rainTimer == null || _coverTimer == null || _creationTime == null ||
             _shouldUpdate == null || _underWater == null || _canBeRemoved == null) throw new MissingMemberException("WeatherGuard terrain/instance/wear evidence APIs unavailable.");
         var unknown = new List<string>();
         foreach (string name in _excludedPrefabs) if (ZNetScene.instance.GetPrefab(name) == null) unknown.Add(name);
@@ -120,11 +123,11 @@ internal sealed class WeatherGuardController : IDisposable
     {
         if (_protectRain && _protectUnderwater) return native;
         return WeatherGuardRules.SuppressWeatherDamage(native, _protectRain, _protectUnderwater,
-            (bool)_rainWet.GetValue(wear), (bool)_underWater.Invoke(wear, Array.Empty<object>()));
+            (bool)_rainWet.GetValue(wear), _underWater(wear));
     }
     internal bool WeatherDamageMayApply(WearNTear wear)
     {
-        bool allowed = (bool)_canBeRemoved.Invoke(wear, Array.Empty<object>()) && !ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoBuildingFall);
+        bool allowed = _canBeRemoved(wear) && !ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoBuildingFall);
         if (!allowed && _diagnostics.StepsEnabled)
         { _decisions.TryGetValue("native_final_damage_disabled", out long count); _decisions["native_final_damage_disabled"] = count + 1; }
         return allowed;
@@ -136,8 +139,8 @@ internal sealed class WeatherGuardController : IDisposable
     {
         if (!_diagnostics.StepsEnabled) return;
         int shield = (int)_shield.GetValue(wear);
-        bool underwater = (bool)_underWater.Invoke(wear, Array.Empty<object>());
-        string stage = !(bool)_shouldUpdate.Invoke(wear, new object[] { time }) ? "waiting_warmup" :
+        bool underwater = _underWater(wear);
+        string stage = !_shouldUpdate(wear, time) ? "waiting_warmup" :
             ShieldGenerator.IsInsideShieldCached(wear.transform.position, ref shield) ? "shielded" :
             wear.GetHealthPercentage() <= 0.5f ? "health_at_or_below_half" :
             !underwater && (bool)_roof.GetValue(wear) ? "native_cached_roof_covered" :
@@ -167,7 +170,7 @@ internal sealed class WeatherGuardController : IDisposable
         // Observe only structural weather-wearing controls, not every world object.
         if (!protectedPiece && reason != "world-created" && reason != "eligible") return null;
         if (reason == "world-created" && !_diagnostics.LogWorldCreatedItems) return null;
-        bool exposed = !(bool)_roof.GetValue(wear) || (bool)_underWater.Invoke(wear, Array.Empty<object>());
+        bool exposed = !(bool)_roof.GetValue(wear) || _underWater(wear);
         if (exposed) TrackRain(zdo, wear, reason);
         if (!_diagnostics.TryWearSample(Time.unscaledTime, zdo.m_uid.ToString(), protectedPiece, exposed)) return null;
         int shield = (int)_shield.GetValue(wear);
@@ -175,7 +178,7 @@ internal sealed class WeatherGuardController : IDisposable
         return new WearObservation
         {
             Identity = Identity(zdo), Protected = protectedPiece, Owner = view.IsOwner(),
-            Warmup = !(bool)_shouldUpdate.Invoke(wear, new object[] { time }),
+            Warmup = !_shouldUpdate(wear, time),
             Before = zdo.GetFloat(ZDOVars.s_health, wear.m_health),
             Fields = new Dictionary<string, object?>
             {
@@ -184,9 +187,9 @@ internal sealed class WeatherGuardController : IDisposable
                 ["server_environment"] = EnvMan.instance?.GetCurrentEnvironment()?.m_name, ["environment_wet"] = EnvMan.IsWet(),
                 ["cached_roof"] = _roof.GetValue(wear), ["fresh_roof"] = WearNTear.RoofCheck(wear.transform, wear.transform.position, out _, wear.m_roofCheckOffset),
                 ["cover_timer"] = _coverTimer.GetValue(wear), ["warmup_remaining_s"] = Math.Max(0, 30 - (time - (float)_creationTime.GetValue(wear))), ["shielded"] = shielded,
-                ["underwater"] = _underWater.Invoke(wear, Array.Empty<object>()), ["native_health_fraction"] = wear.GetHealthPercentage(),
+                ["underwater"] = _underWater(wear), ["native_health_fraction"] = wear.GetHealthPercentage(),
                 ["maximum_health"] = wear.m_health, ["native_rain_timer_start_game_s"] = _rainTimer.GetValue(wear), ["game_time_s"] = time,
-                ["removable"] = _canBeRemoved.Invoke(wear, Array.Empty<object>()), ["no_building_fall"] = ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoBuildingFall)
+                ["removable"] = _canBeRemoved(wear), ["no_building_fall"] = ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoBuildingFall)
             }
 
         };
@@ -276,11 +279,11 @@ internal sealed class WeatherGuardController : IDisposable
             ["cached_roof"] = _roof.GetValue(wear), ["cover_timer"] = _coverTimer.GetValue(wear),
             ["piece_biome"] = Biome(zdo.GetPosition()),
             ["environment_wet"] = EnvMan.IsWet(), ["server_environment"] = EnvMan.instance?.GetCurrentEnvironment()?.m_name,
-            ["underwater"] = _underWater.Invoke(wear, Array.Empty<object>()),
+            ["underwater"] = _underWater(wear),
             ["shielded"] = ShieldGenerator.IsInsideShieldCached(wear.transform.position, ref shield),
-            ["health_above_half"] = wear.GetHealthPercentage() > 0.5f, ["removable"] = _canBeRemoved.Invoke(wear, Array.Empty<object>()),
+            ["health_above_half"] = wear.GetHealthPercentage() > 0.5f, ["removable"] = _canBeRemoved(wear),
             ["no_building_fall"] = ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoBuildingFall),
-            ["warmup"] = !(bool)_shouldUpdate.Invoke(wear, new object[] { Time.time }),
+            ["warmup"] = !_shouldUpdate(wear, Time.time),
             ["warmup_remaining_s"] = Math.Max(0, 30 - (Time.time - (float)_creationTime.GetValue(wear)))
         };
         if (history.LastGateTime >= 0 && Time.time - history.LastGateTime > 10) { history.WetSeconds = 0; history.LastGateTime = -1; }
@@ -356,7 +359,7 @@ internal sealed class WeatherGuardController : IDisposable
                 !view.TryGetComponent<WearNTear>(out var wear)) continue;
             probes++;
             bool roof = WearNTear.RoofCheck(wear.transform, wear.transform.position, out _, wear.m_roofCheckOffset);
-            bool water = (bool)_underWater.Invoke(wear, Array.Empty<object>());
+            bool water = _underWater(wear);
             _exposure.Observe(zdo.m_uid.ToString(), roof, water, managed.Contains(zdo.m_uid.ToString()),
                 (bool)_roof.GetValue(wear), Biome(zdo.GetPosition()), now);
             if (!roof && _diagnostics.DebugEnabled) TrackRain(zdo, wear, "eligible");
@@ -471,8 +474,8 @@ internal sealed class WeatherGuardController : IDisposable
             // A server instance may precede the client's creator-data update. Refresh only
             // the server's cached attribution; never assign or transfer persistent creators.
             var piece = scene.FindInstance(zdo).GetComponent<Piece>();
-            AccessTools.Field(typeof(Piece), "m_creator").SetValue(piece, zdo.GetLong(ZDOVars.s_creator));
-            AccessTools.Field(typeof(Piece), "m_creatorPlatformUserIDIndex").SetValue(piece, zdo.GetInt(ZDOVars.s_creatorIndex, -1));
+            _creator.SetValue(piece, zdo.GetLong(ZDOVars.s_creator));
+            _creatorIndex.SetValue(piece, zdo.GetInt(ZDOVars.s_creatorIndex, -1));
             zdo.SetOwner(ServerId);
             manager.ForceSendZDO(zdo.m_uid);
             _acquired++;
@@ -554,16 +557,24 @@ internal sealed class WeatherGuardController : IDisposable
     private string Eligibility(ZDO zdo, ZNetScene scene)
     {
         if (!zdo.IsValid()) return "invalid world data";
-        var prefab = scene.GetPrefab(zdo.GetPrefab());
-        // Container inventory changes require client ownership and must not be filtered.
-        if (prefab == null) return "missing prefab";
-        if (!prefab.TryGetComponent<Piece>(out var piece) || !prefab.TryGetComponent<WearNTear>(out var wear)) return "not a wear piece";
-        string nativeReason = WeatherGuardRules.Exclusion(zdo.GetLong(ZDOVars.s_creator), zdo.Persistent, wear.m_staticPosition,
-                wear.m_noRoofWear, zdo.GetFloat(ZDOVars.s_health, wear.m_health),
-                piece.m_category == Piece.PieceCategory.BuildingWorkbench || piece.m_category == Piece.PieceCategory.BuildingStonecutter || piece.m_category == Piece.PieceCategory.DeepNorth,
+        int hash = zdo.GetPrefab();
+        if (!_eligibility.TryGetValue(hash, out var definition))
+        {
+            var prefab = scene.GetPrefab(hash);
+            if (prefab == null) return "missing prefab";
+            var piece = prefab.GetComponent<Piece>(); var wear = prefab.GetComponent<WearNTear>();
+            definition = (prefab.name, piece != null && wear != null, wear != null && wear.m_staticPosition,
+                wear != null && wear.m_noRoofWear, wear != null ? wear.m_health : 0,
+                piece != null && (piece.m_category == Piece.PieceCategory.BuildingWorkbench || piece.m_category == Piece.PieceCategory.BuildingStonecutter || piece.m_category == Piece.PieceCategory.DeepNorth),
                 prefab.GetComponent<Container>() != null);
-        return WeatherGuardRules.SelectionReason(nativeReason, prefab.name, _excludedPrefabs, _protectRain, _protectUnderwater);
+            if (_eligibility.Count < 4096) _eligibility[hash] = definition;
+        }
+        if (!definition.Wear) return "not a wear piece";
+        string nativeReason = WeatherGuardRules.Exclusion(zdo.GetLong(ZDOVars.s_creator), zdo.Persistent, definition.Static,
+            definition.NoRoofWear, zdo.GetFloat(ZDOVars.s_health, definition.Health), definition.Building, definition.Container);
+        return WeatherGuardRules.SelectionReason(nativeReason, definition.Name, _excludedPrefabs, _protectRain, _protectUnderwater);
     }
+
     private Dictionary<string, object?> ContextBlocker(ZDO zdo, ZNetScene scene, ZoneSystem zones)
     {
         var sector = zdo.GetSector();
@@ -628,7 +639,7 @@ internal sealed class WeatherGuardController : IDisposable
         float now = Time.unscaledTime;
         if (now < _nextTerrain) return;
         _nextTerrain = now + 0.1f;
-        foreach (var position in _positions) _createZones.Invoke(ZoneSystem.instance, new object[] { position });
+        foreach (var position in _positions) _createZones(ZoneSystem.instance, position);
     }
     internal void AddInstances(List<ZDO> near, List<ZDO> distant)
     {
