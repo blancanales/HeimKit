@@ -29,6 +29,9 @@ public static class MonoSmoke
         TerrainContext.CheckCompatibility();
         RuntimeHelpers.RunClassConstructor(typeof(TameTravelPlacement).TypeHandle);
         RuntimeHelpers.RunClassConstructor(typeof(WeatherGuardPatches).TypeHandle);
+        using (var log = new BepInEx.Logging.ManualLogSource("Follow recovery native checks"))
+        using (var recovery = new TameTravelFollowRecovery(log)) { }
+        System.Console.WriteLine("PASS: installed game Mono installs and removes native disk-load and pre-save follow recovery hooks without loading a world.");
         return "PASS: installed game Mono resolves WeatherGuard, TameTravel placement, live-scene and terrain accessors without starting gameplay or server hooks.";
     }
 }

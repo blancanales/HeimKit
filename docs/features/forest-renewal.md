@@ -2,13 +2,15 @@
 
 Renews supported trees from either a stump left behind or its confirmed-cleared location. It finds existing/new stumps, waits, and has a configurable chance to replace the stump with the corresponding vanilla sapling. Removing a tracked stump keeps the same renewal timer and chance decision. Native biome, sunlight, spacing and growth rules remain.
 
+![ForestRenewal: observe eligible stumps, apply delay and clearance checks, then place a supported sapling](../images/forest-renewal-workflow.jpg)
+
 Supported families are beech, birch, oak, fir, pine and the plantable large fir. Snow, ancient/swamp, Yggdrasil, Ashlands and decorative stumps are excluded. Exact tree/stump/sapling names belong in the [specification](../specs/forest-renewal.md).
 
-Renewal checks for existing saplings and crops immediately before placement, regardless of who planted them. PlantExclusionMeters defaults to ten metres of horizontal clearance and can be increased up to fifty metres, separately from the building buffer. The larger native growth radius of the new sapling and existing plant also remains a minimum. Planting during a pending delay blocks renewal inside that clearance. A blocked renewal leaves both the existing plant and any source stump intact. DelaySeconds controls when HeimKit places a sapling; the sapling's subsequent growth time stays vanilla.
+With the defaults, each stump gets one 50% chance after five minutes. Old stumps start a full delay when first discovered; set ChancePercent=100 to renew every eligible stump. DelaySeconds only controls when the sapling is placed; its growth time stays vanilla.
 
-Defaults wait five minutes from first observation/removal, give each stump one 50% chance, avoid player structures within ten metres of their collision footprint, and avoid dirt, paved or cultivated ground within a three-metre square sampling radius. The building check runs just before renewal, including structures built during the delay. Walls, floors, beams and other player-built pieces all count; height separation does not bypass the horizontal buffer. Increase StructureExclusionMeters for a wider buffer. Set ChancePercent=100 if every otherwise eligible stump should renew. Existing old stumps start a full delay when first discovered. A persisted 24-hour native-world-time cooldown covers renewals within five horizontal metres. Native paint can identify cleared roads; unpainted paths cannot be classified.
+Just before placing a sapling, renewal checks for player-built pieces within StructureExclusionMeters of their collision footprint (walls, floors, beams and every other piece; height separation does not help) and for any existing sapling or crop within PlantExclusionMeters, whoever planted it. Building or planting during the delay therefore blocks renewal, leaving the plant and any stump intact. Dirt, paved and cultivated ground is also avoided; native paint can identify cleared roads, but unpainted paths cannot be classified. A persisted cooldown of native world hours covers renewals within five horizontal metres.
 
-Pending renewals and consumed decisions are stored beneath the active loader's config directory in `HeimKit/ForestRenewal/world-<world UID>.renewals`. Preserve this file and its backup with the world. Corrupt or incomplete ledger recovery stops this feature. Native world time controls pending delays. The at-most-once persistence policy and crash behavior are described in [limitations](../limitations.md#new-world-features).
+Pending renewals and consumed decisions are stored beneath the active loader's config directory in `HeimKit/ForestRenewal/world-<world UID>.renewals`. Preserve this file and its backup with the world; see [world backups](../world-backups.md#forestrenewal-data). Corrupt or incomplete ledger recovery stops this feature. Native world time controls pending delays. The at-most-once persistence policy and crash behavior are described in [limitations](../limitations.md#new-world-features).
 
 ## Configuration
 
@@ -33,18 +35,9 @@ Ranges and selection rules are in the [specification](../specs/forest-renewal.md
 
 ## Diagnostics
 
-Unknown structure-context samples include the blocking object, prefab and specific missing/unsupported condition. Unchanged blockers combine across affected stumps and repeat at most once per five minutes. Stage timings distinguish scope scanning and structure checks from terrain preparation, ledger serialization and world mutation. Known distant structure footprints use a conservative early distance check; unsupported geometry continues to postpone renewal.
+Normal output groups confirmed results per completed pass and preserves failures and lifecycle notices. Optional Debug summaries describe changed current scope and result counts at most once per minute. `scope` counts pending renewals; `results` counts completed operations in the latest pass; `lifetime_results` counts them during the current controller lifetime. Counts restart when the controller is recreated. Empty unchanged scopes are quiet. Bounded decision samples identify standing-stump replacement, cleared-position planting, structure buffers, plant/tree/terrain/cooldown exclusion and unknown structure context, naming the blocking object and missing condition; unchanged blockers repeat at most once per five minutes. Stage timings separate scope scanning, structure checks, terrain preparation, background ledger writes and world mutation.
 
-Normal output groups confirmed results per completed pass and preserves failures and lifecycle notices. Optional Debug summaries describe changed current scope and result counts at most once per minute. `scope` counts pending renewals; `results` counts completed operations in the latest pass; `lifetime_results` counts them during the current controller lifetime. Counts restart when the controller is recreated. Empty unchanged scopes are quiet. Bounded decision samples identify standing-stump replacement, cleared-position planting, structure buffers, plant/tree/terrain/cooldown exclusion and unknown structure context.
-
-See [shared safety and delivery limitations](../limitations.md#new-world-features) and [server setup](../server-setup.md).
-
-Ledger writes run on one background worker. Sapling placement waits for durable acknowledgement and another main-thread exclusion check. Native growth still determines when the sapling becomes a tree. Debug separates background ledger I/O duration from controller processing time and reports snapshot, terrain-context and world-mutation stages.
-
-Pending and cooldown indexes limit repeated ledger searches; cached vegetation definitions reduce repeated prefab component lookups. Renewal rules and saved decisions remain unchanged.
-
-Discovery reuses nearby candidate records and accepts native record changes. Entering another area seeds discovery again; action eligibility and timing retain the configured rules. See the [shared discovery design](../architecture.md#record-driven-candidate-discovery).
-
+See [shared safety and delivery limitations](../limitations.md#new-world-features).
 
 ## HeimKit log topics
 

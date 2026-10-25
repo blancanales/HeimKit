@@ -28,9 +28,11 @@ World health persists through normal world saves. Observation history, random de
 
 Scans run every two seconds around one rotating player, reuse Plugin's player census, and retain at most 4096 damaged-piece observations and 256 nearby threat positions. Native sector queries can temporarily return more records; oversized scopes are rejected. Fully healthy pieces are not retained, and observed completed repairs release their candidate slots. First observation of damage starts the quiet period. Stale observations expire after 180 seconds. Warn once on damaged-candidate capacity exhaustion and announce recovery after a later scan has no omissions; do not raise the cap to accommodate healthy buildings. A cycle takes one random decision per eligible observed piece and queues no more than the configured cap. Up to four native requests are issued per scan, with ten-second confirmation timeouts. Administrative batches retain at most 2000 candidates and issue at most AdminMaxPieces requests. No full-world or per-frame object scan occurs. Unavailable observations retain native behavior.
 
-## Player-service integration
-
 Automatic selection gathers current player and threat positions once per cycle and reuses candidate/pruning buffers. Request issuance still rechecks live threat, range, damage and owner conditions. Routed administration checks the authenticated method header before reading chat parameters, leaving unrelated RPC payloads untouched.
+
+Automatic observation uses the shared spatial candidate index for eligible structures and monster records. Accepted local/replicated health and creator changes can add candidates, and threat movement updates spatial coverage. Live health, damage quiet periods, threat checks, cycle timing, random selection and repair confirmation remain unchanged. Administrative requests still query current world scope immediately.
+
+## Player-service integration
 
 The module receives Plugin-owned PlayerServices, subscribes to Events with replay, and uses Presence and shared RoutedMessages. It acquires no AFK activity lease. Native readiness requires PlayerServices.Ready, ZDOMan, ZNetScene and ZRoutedRpc. False or unknown presence disposes its controller, routed subscription and batches before pause acknowledgment. World replacement recreates the controller. Shutdown is idempotent. The configuration watcher and trusted local command registration are explicit access-management/operator-request exceptions, separate from gameplay; they may remain installed while empty, but cannot scan or repair without a ready joined player. Enabled=false releases gameplay; configuration monitoring remains available for reactivation. Compatibility failure never activates gameplay.
 
@@ -40,8 +42,6 @@ Normal output announces lifecycle, accepted/rejected admin requests and one conf
 
 Optional controller-pass timing reports duration_avg_ms and duration_max_ms at most once per minute for nonempty scope. Collection follows effective debug policy and includes synchronous controller processing only; see [shared measurement limitations](../limitations.md).
 
-Automatic observation uses the shared spatial candidate index for eligible structures and monster records. Accepted local/replicated health and creator changes can add candidates, and threat movement updates spatial coverage. Live health, damage quiet periods, threat checks, cycle timing, random selection and repair confirmation remain unchanged. Administrative requests still query current world scope immediately.
-
 ## HeimKit Core integration
 
-The performance rebuild in `src/HeimKit2/Features/` consumes CandidateSubscription for structures/threats and administrative scope, PrefabRegistry structural metadata, PlayerServices presence/routed input and ModuleScheduler; section reload and repair batches stay feature-owned. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
+The performance rebuild in `src/HeimKit/Features/` consumes CandidateSubscription for structures/threats and administrative scope, PrefabRegistry structural metadata, PlayerServices presence/routed input and ModuleScheduler; section reload and repair batches stay feature-owned. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.

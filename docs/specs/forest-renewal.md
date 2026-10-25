@@ -33,6 +33,8 @@ Scene preparation is bounded by native budgets and at most 8192 scoped records; 
 
 Maintain an in-memory pending-decision index alongside the durable ledger and reuse the due-candidate buffer each pass. Index consumed placement decisions in five-metre horizontal cells for location-cooldown checks, including durable-write waits; update both indexes on consumption and pre-mutation retry. Preserve ledger timestamps and compare native world time at lookup, including after clock rollback. Cache plant/tree prefab classification for at most 4096 definitions per controller. These indexes change neither chance decisions nor durable acknowledgement requirements.
 
+Standing-stump discovery uses the shared spatial candidate index instead of repeatedly discovering unrelated records. Due decisions still rotate fairly at the existing interval, including deferred entries and world-clock rollback. Structure, vegetation and terrain checks query fresh full context only when a due decision or acknowledged placement needs it. Durable acknowledgement, fresh exclusions and confirmed-destruction rules remain unchanged.
+
 ## Structure processing bounds
 
 Cache piece classification, local collision bounds and default scale for at most 4096 prefab definitions. Before transforming all eight footprint corners, reject known geometry whose conservative pivot-centred bound cannot reach the configured clearance. Offset, replicated scale, rotation and height-separated structures remain covered. Unknown geometry/definitions still defer renewal; no distance-only guess bypasses an unknown footprint.
@@ -45,7 +47,11 @@ Follow the [required feature hookup](../architecture.md#required-feature-hookup)
 
 Unknown structure context identifies the blocking object/prefab and whether its definition, collision geometry, scale or transform is unavailable. Repeated identical blockers combine across affected stump IDs, with at most one reminder per five minutes within the existing decision budget. The diagnostic identity cache holds at most 4096 entries. Main-thread stage timing also separates scope refresh and structure exclusions, so terrain and disk work are not assumed to explain all processing cost.
 
-Use the [shared logging and suppression policy](../architecture.md#logging). Enabled/Disabled, Ready and failures remain visible independently of DebugMode. Each completed processing pass combines confirmed results into one Info count; empty passes are silent. Optional changed-result diagnostics have a single summary per 60 seconds, with pass and lifetime counts. Sample at most 16 decision records per minute with source identity and placement/exclusion reason. Pending state clears on controller disposal, except the durable ForestRenewal ledger. The effective global-or-feature policy and hidden suppression apply before optional formatting.
+Use the [shared logging and suppression policy](../architecture.md#logging). Enabled/Disabled, Ready and failures remain visible independently of DebugMode. Each completed processing pass combines confirmed results into one Info count; empty passes are silent. Optional changed-result diagnostics have a single summary per 60 seconds, with pass and lifetime counts. Sample at most 16 decision records per minute with source identity and placement/exclusion reason. Pending state clears on controller disposal, except the durable ledger. The effective global-or-feature policy and hidden suppression apply before optional formatting.
+
+Debug ledger-write timing reports background I/O duration separately, at most once per minute; background I/O is not gameplay-thread processing time. Main-thread snapshot serialization, terrain preparation and world mutation each report their own bounded average/maximum timing once per minute.
+
+Optional controller-pass timing reports duration_avg_ms and duration_max_ms at most once per minute for nonempty scope. Collection follows effective debug policy and includes synchronous controller processing only; see [shared measurement limitations](../limitations.md).
 
 ## Acceptance criteria
 
@@ -53,14 +59,8 @@ Each accepted stump ID has one persisted chance decision and at most one placeme
 
 ## Compatibility and shared criteria
 
-Use the [supported environment](../server-setup.md#supported-environment) and shared exact-version guard. Each module isolates failure and releases only its own resources. Disabled features bind configuration but install no gameplay hooks and scan nothing. Objects outside verified scope retain native behavior. Acceptance requires independent enablement, repeatable cleanup, native state preservation, bounded retained state and the ownership/persistence rules below. Shared observation and delivery qualifications belong in [limitations](../limitations.md#new-world-features).
-
-Debug ledger-write timing reports background I/O duration separately, at most once per minute. Main-thread snapshot serialization, terrain preparation and world mutation each report their own bounded average/maximum timing once per minute. It is not gameplay-thread processing time.
-
-Optional controller-pass timing reports duration_avg_ms and duration_max_ms at most once per minute for nonempty scope. Collection follows effective debug policy and includes synchronous controller processing only; see [shared measurement limitations](../limitations.md).
-
-Standing-stump discovery uses the shared spatial candidate index instead of repeatedly discovering unrelated records. Due decisions still rotate fairly at the existing interval, including deferred entries and world-clock rollback. Structure, vegetation and terrain checks query fresh full context only when a due decision or acknowledged placement needs it. Durable acknowledgement, fresh exclusions and confirmed-destruction rules remain unchanged.
+Use the [supported environment](../server-setup.md#supported-environment) and shared exact-version guard. Each module isolates failure and releases only its own resources. Disabled features bind configuration but install no gameplay hooks and scan nothing. Objects outside verified scope retain native behavior. Acceptance requires independent enablement, repeatable cleanup, native state preservation, bounded retained state and the ownership/persistence rules above. Shared observation and delivery qualifications belong in [limitations](../limitations.md#new-world-features).
 
 ## HeimKit Core integration
 
-The performance rebuild in `src/HeimKit2/Features/` consumes CandidateSubscription for stumps and safety context, PrefabRegistry vegetation/structure metadata, TerrainContext, NativeWorldObject, ObjectAuthority and ModuleScheduler; the durable decision ledger stays feature-owned. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
+The performance rebuild in `src/HeimKit/Features/` consumes CandidateSubscription for stumps and safety context, PrefabRegistry vegetation/structure metadata, TerrainContext, NativeWorldObject, ObjectAuthority and ModuleScheduler; the durable decision ledger stays feature-owned. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.

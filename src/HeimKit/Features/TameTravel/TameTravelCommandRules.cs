@@ -12,8 +12,8 @@ internal static class TameTravelCommandRules
 {
     internal static float SelectionRange(TameOrder order, float commandRange) => order == TameOrder.Stay ? 32 : commandRange;
     internal static bool AwaitingEarlierFollow(bool pending, TameOrder previous, bool sent) => pending && previous == TameOrder.Follow && sent;
-    public static bool StopAssociated(string following, string player, bool bound)
-        => player.Length != 0 && (following == player || bound && following.Length == 0);
+    public static bool StopAssociated(string following, string player, bool bound, string reclaimName = "", bool pending = false)
+        => player.Length != 0 && (following == player || bound && (following.Length == 0 || pending && reclaimName.Length != 0 && following == reclaimName));
     public static bool Chat(string text, out TameOrder order)
     {
         order = default;

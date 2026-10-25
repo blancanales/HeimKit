@@ -76,13 +76,10 @@ Request budgets bound sends rather than sector enumeration. Removing the plugin 
 | InfiniteTorchesRefillRules.cs | Prefab fuel eligibility and the exact brazier and configurable fireplace wet-flame exceptions. |
 | InfiniteTorchesPendingRefills.cs | Duplicate suppression, reconciliation, timeout and capacity control. |
 | InfiniteTorchesDiagnostics.cs | Bounded diagnostic output using the global-or-feature debug policy. |
+| InfiniteTorchesLogTopics.cs | Feature log topic. |
 | Models/RefillObservation.cs | Observed owner and fuel data for reconciliation. |
 | Models/RefillRequest.cs | Pending request owner, fuel target and timing data. |
 | Models/RefillResult.cs | Reconciled request outcome, observed state and elapsed wait. |
-
-User installation and general configuration belong in [server setup](../server-setup.md); feature usage and troubleshooting belong in the [feature guide](../features/infinite-torches.md). Project design belongs in [architecture.md](../architecture.md); file placement and development procedures belong in [contributing.md](../contributing.md).
-
-ConfigurationLoader manages the shared file, and DiagnosticsSettings binds the common debug switch. The main class activates the controller only after enable and compatibility checks pass; the controller performs gameplay work and reports processing failures to the main class.
 
 ## Player-service integration
 
@@ -96,8 +93,6 @@ Prefab lookup combines all unsupported entries into one Warning containing the t
 
 Use the shared [compatibility contract](../architecture.md#configuration) before activation.
 
-Supported light-source discovery uses the shared spatial candidate index with native ready-owner sector geometry, activation/area-entry seeding and local/replicated updates. Fuel, state and owner are checked live at the existing refill interval. Pending requests reconcile independently of discovery; ownership changes do not discard eligible light definitions.
-
 ## HeimKit Core integration
 
-The performance rebuild in `src/HeimKit2/Features/` consumes near-only owner-filtered CandidateSubscription, PrefabRegistry fireplace metadata and ModuleScheduler refill cadence; no ownership lease. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
+The performance rebuild in `src/HeimKit/Features/` consumes near-only owner-filtered CandidateSubscription, PrefabRegistry fireplace metadata and ModuleScheduler refill cadence; no ownership lease. Discovery uses native ready-owner sector geometry, activation/area-entry seeding and local/replicated updates. Fuel, state and owner are checked live at the refill interval. Pending requests reconcile independently of discovery; ownership changes do not discard eligible light definitions. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.

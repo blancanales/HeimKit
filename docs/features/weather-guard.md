@@ -45,8 +45,7 @@ Medium Debug explains eligibility, management and native processing gates. Detai
 
 Roof fields describe their sample size, age and unchecked/stale counts. Piece/player biomes and server wetness provide context. The [specification](../specs/weather-guard.md#exposure-counts-and-biome-evidence) defines these fields and budgets.
 
-Cached prefab eligibility and native method delegates reduce repeated lookups. Weather protection still reads current saved creator and health, and retains the same surrounding scene and terrain refresh.
-
+When a native damage, repair or removal handler runs on a protected piece, the `wear` record names the handler and its `command` and reports health before and after. These are hits, repairs or removals, not weather wear.
 
 ## HeimKit log topics
 

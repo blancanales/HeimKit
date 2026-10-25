@@ -1,0 +1,13 @@
+# Text files use CRLF line endings in the working tree.
+* text=auto eol=crlf
+
+# Never convert binary files.
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.ico binary
+*.dll binary
+*.pdb binary
+*.exe binary
+*.zip binary

@@ -31,6 +31,22 @@ internal sealed class TameTravelRules
         }
     }
     public bool Actor(ZNetPeer peer, out ZDO actor) => ActorRejection(peer, out actor) == null;
+    internal bool ConnectedName(string name) => ConnectedName(_presence, name);
+    internal static bool ConnectedName(IPlayerPresence presence, string name)
+    {
+        // A transport peer remains protected while loading, dead or respawning.
+        // Unavailable presence is not evidence that an owner logged out.
+        if (!presence.ConnectedCount.HasValue) return true;
+        foreach (var peer in presence.Peers)
+            if (string.Equals(peer.m_playerName, name, StringComparison.Ordinal)) return true;
+        return false;
+    }
+    internal bool ConnectedPeer(ZNetPeer peer)
+    {
+        if (!_presence.ConnectedCount.HasValue) return true;
+        foreach (var current in _presence.Peers) if (ReferenceEquals(current, peer)) return true;
+        return false;
+    }
     public string? ActorRejection(ZNetPeer peer, out ZDO actor)
     {
         actor = null!;

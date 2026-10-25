@@ -1,15 +1,13 @@
 # HeimKit performance rebuild — implementation specification
 
-> **Status:** authorized design specification for a from-scratch rebuild of HeimKit into a
-> new `src/HeimKit2/` tree. This document is the single source of truth for *where code lives*
+> **Status:** authorized design specification for the Core-based HeimKit implementation in
+> `src/HeimKit/`. This document is the single source of truth for *where code lives*
 > and *what the shared core owns*. If a placement is not answered here, stop and ask the
 > repository owner (Trevor) rather than guessing.
 
 ## 0. How to read this document
 
-You are an AI agent implementing a greenfield rebuild. The existing `src/HeimKit/` plugin
-stays in place, untouched, as the **behavioral reference** you port from. You build a parallel
-plugin in `src/HeimKit2/`.
+The Core-based implementation now lives in `src/HeimKit/`. The legacy source tree is retired; this specification governs the current code and its shared responsibilities.
 
 The central goal is **de-duplication for performance**: today each feature independently scans
 the world, classifies prefabs, caches native reflection, and re-runs world-readiness checks.
@@ -19,7 +17,7 @@ A feature must never re-implement a Core responsibility.
 Read, in order, before writing any code:
 
 1. This document (authority on placement and the Core contracts).
-2. `AGENTS.md` (repository rules; still apply in full to `src/HeimKit2/`).
+2. `AGENTS.md` (repository rules; still apply in full to `src/HeimKit/`).
 3. `docs/architecture.md` (the *current* architecture — carry forward its lifecycle, logging,
    configuration and player-service contracts; this document only changes *code placement* and
    *shared ownership*, not those behavioral contracts).
@@ -37,8 +35,8 @@ transpilers, replication fences), preserve it exactly — port, do not reinvent 
 - **Target platform:** Windows Valheim dedicated servers only. Same `[BepInProcess("valheim_server.exe")]` guard.
 - **Do not build or publish.** Per `AGENTS.md`, do not compile, package, bump versions, or create
   release artifacts unless Trevor explicitly asks. Leave all edits local and reviewable.
-- **Do not touch `src/HeimKit/`.** It remains the live, working plugin and your reference. No edits there.
-- **One HeimKit implementation runs on a server.** The rebuild replaces the legacy plugin and retains the `HeimKit` product name, `heimkit` BepInEx GUID, `HeimKit.dll` assembly, `HeimKit` namespaces and `heimkit.<feature>` Harmony IDs. Temporary source/test directories distinguish the implementations in the repository; only one DLL is deployed. Do not declare incompatibility with the plugin's own GUID or reject its own loader registration.
+- **Work in `src/HeimKit/`.** Keep changes scoped to the requested task and preserve unrelated work.
+- **One HeimKit implementation runs on a server.** The rebuild replaces the legacy plugin and retains the `HeimKit` product name, `heimkit` BepInEx GUID, `HeimKit.dll` assembly, `HeimKit` namespaces and `heimkit.<feature>` Harmony IDs. The source directory is `src/HeimKit/`; deploy only one HeimKit DLL. Do not declare incompatibility with the plugin's own GUID or reject its own loader registration.
 - **Server-only compatibility discipline** from `docs/architecture.md#server-only-compatibility`
   applies unchanged. Do not change the audited game version.
 - **Testing stays in chat.** Do not write test results, validation status, or testing instructions
@@ -46,11 +44,10 @@ transpilers, replication fences), preserve it exactly — port, do not reinvent 
 
 ## 2. Target directory layout
 
-The temporary source directory is `src/HeimKit2/`; it becomes `src/HeimKit/` when Trevor authorizes the cutover. Product, project and namespace identity already remains HeimKit. Create this tree with namespaces rooted at: `HeimKit`, `HeimKit.Core.<Area>`,
-`HeimKit.Features.<Name>`.
+The source directory is `src/HeimKit/`, with project `HeimKit.csproj` and namespaces `HeimKit`, `HeimKit.Core.<Area>` and `HeimKit.Features.<Name>`.
 
 ```text
-src/HeimKit2/
+src/HeimKit/
   HeimKit.csproj                 # new project; mirror HeimKit.csproj references (BepInEx, Harmony, game asms)
   Plugin.cs                       # entry point: config load, module registration, tick dispatch, shutdown
   Core/
@@ -518,7 +515,7 @@ the code and by in-chat testing with Trevor (no test artifacts committed).
 - No new features or gameplay changes. The approved shared DebugVerbosity setting is the only settings exception.
 - No change to the audited game version or server-only compatibility posture.
 - Approved logging exceptions permit timestamped topics, rewritten Debug/Error records, the shared DebugVerbosity setting and WeatherGuard ten-minute prevention roll-ups; other Info/Warning wording, severities and existing gates remain unchanged. Player-activity contracts retain their behavior when moved to `Core/`.
-- No removal of the legacy `src/HeimKit/` tree or rename of the temporary source/test directories until Trevor authorizes the cutover.
+- No additional source or test directory moves as an incidental part of feature work.
 - No deployment, server install, or world changes.
 
 ## 12. When you are blocked

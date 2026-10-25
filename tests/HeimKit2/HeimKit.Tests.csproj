@@ -5,12 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GameManaged>$(ServerPath)\valheim_server_Data\Managed</GameManaged>
-    <HeimKitProject Condition="'$(HeimKitProject)' == '' and Exists('..\..\src\HeimKit2\HeimKit.csproj')">..\..\src\HeimKit2\HeimKit.csproj</HeimKitProject>
-    <HeimKitProject Condition="'$(HeimKitProject)' == ''">..\..\src\HeimKit\HeimKit.csproj</HeimKitProject>
     <BepInExCore Condition="'$(BepInExCore)' == ''">$(ServerPath)\BepInEx\core</BepInExCore>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="$(HeimKitProject)" />
+    <ProjectReference Include="..\..\src\HeimKit\HeimKit.csproj" />
     <Reference Include="BepInEx"><HintPath>$(BepInExCore)\BepInEx.dll</HintPath></Reference>
     <Reference Include="0Harmony"><HintPath>$(BepInExCore)\0Harmony.dll</HintPath></Reference>
     <Reference Include="assembly_valheim"><HintPath>$(GameManaged)\assembly_valheim.dll</HintPath></Reference>

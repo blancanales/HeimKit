@@ -23,6 +23,10 @@ SharedMap's community terrain is stored separately from Valheim's world save. If
 
 Keep each `world-<world UID in hexadecimal>.map`, its matching `.portal-pins`, `.resources`, `.resource-pins`, `.entrances`, `.runestones`, `.spawners`, `.pin-state` and `.pin-removals` files and their `.bak` files with the corresponding world backup. In-game Manage Saves and native world backup retention do not manage these plugin files. Restore the world and community files together from the same backup point; restoring an older world while keeping a later community map can reveal terrain from later progress. SharedMap rejects corrupt or incompatible community files rather than silently erasing them. See the [SharedMap guide](features/shared-map.md#storage-and-recovery).
 
+## ForestRenewal data
+
+ForestRenewal keeps pending renewals and consumed decisions in `HeimKit/ForestRenewal/world-<world UID in hexadecimal>.renewals`, with a `.bak` copy, under the same active configuration directory. Copy the whole `HeimKit/ForestRenewal` directory into the same dated backup and restore it together with its world; a ledger from a different save point can suppress or forfeit renewals.
+
 ## Valheim's in-game save management
 
 The in-game menu manages worlds available to that game installation. It does not back up a remote dedicated server's world; use the host-side File Explorer instructions above for that world.

@@ -14,6 +14,8 @@ internal sealed class FollowingSession
     public bool Started;
     public bool Stopped;
     public float Requested;
+    // When a stay or wait arrived while the server was simulating; -1 when none is pending.
+    public float StopRequested = -1;
     public float ContextAt = float.NegativeInfinity;
     public float NextContext;
     public float UnreadySince = -1;

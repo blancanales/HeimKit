@@ -18,6 +18,7 @@ internal sealed class FollowBinding
     public bool Pending;
     public bool CommandSent = true;
     public bool AwaitingEarlierFollow;
+    public string ReclaimName = "";
     public TameOrder Order;
     public UnityEngine.Vector3 WaitPosition;
 }

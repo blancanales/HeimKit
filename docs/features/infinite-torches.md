@@ -46,9 +46,6 @@ Bonfires = false
 
 Info groups observed fuel increases into one result per pass. Empty/unchanged passes stay quiet. Debug includes candidates, requests, skip reasons, pending records and deferred work; refill-request details are capped at four per minute. See the [logging contract](../architecture.md#logging) for shared formatting and budgets.
 
-Discovery reuses nearby candidate records and accepts native record changes. Entering another area seeds discovery again; action eligibility and timing retain the configured rules. See the [shared discovery design](../architecture.md#record-driven-candidate-discovery).
-
-
 ## HeimKit log topics
 
 - `refill`: Native fuel requests and observed results.

@@ -614,7 +614,7 @@ internal sealed class WeatherGuardController : IDisposable
         foreach (var candidate in objects)
             if (PrefabRegistry.Current.Prefab(candidate.GetPrefab()) is GameObject prefab && RequiresContext(candidate, scene) && scene.FindInstance(candidate) == null)
                 return new() { ["missing_object"] = candidate.m_uid.ToString(), ["missing_prefab"] = prefab.name,
-                    ["missing_position"] = Identity(candidate)["position"], ["missing_persistent"] = candidate.Persistent,
+                    ["missing_pos"] = candidate.GetPosition(), ["missing_persistent"] = candidate.Persistent,
                     ["prefab_colliders"] = PrefabRegistry.Children<Collider>(prefab, true).Length,
                     ["prefab_rigidbodies"] = PrefabRegistry.Children<Rigidbody>(prefab, true).Length,
                     ["prefab_wear_piece"] = PrefabRegistry.Component<WearNTear>(prefab) != null,

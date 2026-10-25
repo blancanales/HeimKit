@@ -120,37 +120,9 @@ Medium reports one grouped prevention-path scope summary per sixty seconds: elig
 
 Detailed includes the Medium path plus loading, exclusions, capacity and omitted-message evidence. One grouped record adds acquisition/release interval counts with interval release reasons, ownership, networking, native-command and structural-support counters. Wear-call and native-weather-due interval counts appear only in the path scope summary, while their useful lifetime totals remain separately labeled. Eligibility is reported once for the full current scope. Representative wear evidence shows native roof/wetness/shield/health values, warmup, native timer start, current game time and final restrictions. Identical blocking phases do not repeat separately for every piece. Changed phases or native errors remain useful diagnostic evidence. Object/loading streams retain bounded samples; successful acquisition/release evidence is grouped into interval counts and release reasons rather than repeated per-piece entries; routine rejected owner transfers are counted rather than repeatedly printed.
 
-Up to three exposed player-built pieces and optional world-created controls retain sampled health histories. Individual outcome sample entries are emitted for newly observed health loss, including loss followed by repair. Unchanged health produces no routine per-piece result; suppression counts belong in grouped summaries and the normal prevention notice. Health loss retains its measured amount and identity without attributing an unknown cause to weather. Native command exceptions remain Error. Diagnostic collection does not alter roof, wetness, timers, creator or gameplay decisions.
+Up to three exposed player-built pieces and optional world-created controls retain sampled health histories. Individual outcome sample entries are emitted for newly observed health loss, including loss followed by repair. Unchanged health produces no routine per-piece result; suppression counts belong in grouped summaries and the normal prevention notice. Health loss retains its measured amount and identity without attributing an unknown cause to weather. Native damage, repair and removal handlers on protected pieces produce a `wear` record that names the handler, its `command` and the health before and after, with `weather_damage=unconfirmed`; a destroyed piece reports `health_after=unavailable`. Native command exceptions remain Error. Diagnostic collection does not alter roof, wetness, timers, creator or gameplay decisions.
 
 Normal prevention output is a ten-minute roll-up of completed successful native wear sweeps. Confirmed pieces accumulate across partial sweep frames; failed or unfinished sweeps cannot contribute. The roll-up tracks distinct ZDOIDs and counts each tracked piece once per window. Its set is bounded to 8,192 identities; additional untracked confirmations are counted without retaining their IDs. A nonempty window emits one Info sentence, such as `Prevented weather damage to 87 pieces in the last 10 minutes.` One distinct piece retains its registered prefab name and object ID. Controller disposal flushes a nonempty pending count once using `since HH:mm`, then clears it; no count crosses controller instances. A direct successful wear invocation contributes to the same roll-up. The updater index API remains checked during installation. Ownership acquisition, exposed geometry and unchanged health cannot produce this result. Native combat, support, creator, timers and gameplay processing remain unchanged.
-
-## Source responsibilities
-
-| File in `src/HeimKit/Features/WeatherGuard/` | Responsibility |
-| --- | --- |
-| WeatherGuard.cs | Settings construction, compatibility, module lifecycle and failure isolation. |
-| WeatherGuardSettings.cs | Feature configuration bindings and defaults. |
-| WeatherGuardDebugLogLevelValues.cs | BepInEx validation of the two supported diagnostic levels. |
-| WeatherGuardController.cs | Region loading, readiness, acquisition/release, ownership reconciliation, native evidence collection and operational counters. |
-| WeatherGuardDiagnostics.cs | Debug gating, summaries/evidence formatting, independent sample limits and reset. |
-| WeatherGuardPatches.cs | Harmony hooks for processing, ownership and networking. |
-| WeatherGuardCoverageRequests.cs | Local one-shot admin request consumption, polling bounds and failure isolation. |
-| Models/CoverageSnapshot.cs | Requested coverage counts, scope and reason measurements. |
-| WeatherGuardRules.cs | Eligibility, acquisition gates, routing and revision rules. |
-| WeatherGuardNetworkFilter.cs | Selective packet filtering and cursor preservation. |
-| Models/WeatherGuardStatus.cs | Processing-counter snapshot supplied to diagnostics. |
-| Models/DebugLogLevel.cs | Medium/Detailed diagnostic level selection. |
-| Models/ProtectionObservation.cs | Qualifying-item protection snapshot for compact diagnostics. |
-| Models/WearObservation.cs | Bounded native wear/command evidence supplied to diagnostics. |
-| Models/RainEvidence.cs | Bounded per-object health, ownership and wet-processing history. |
-| Models/WearProcessingState.cs | Invocation scope and diagnostic observation restored by the wear finalizer. |
-| Models/Routing.cs | Routing decision enum used by rules and patches. |
-
-User installation and general configuration belong in [server setup](../server-setup.md); feature usage and troubleshooting belong in the [feature guide](../features/weather-guard.md). Project design belongs in [architecture.md](../architecture.md); file placement and development procedures belong in [contributing.md](../contributing.md).
-
-ConfigurationLoader manages the shared file, and DiagnosticsSettings binds the common debug switch. The main class activates the controller only after enable and compatibility checks pass and world services are ready; the controller performs gameplay work and reports processing failures to the main class.
-
-Normal prevention output follows the native weather-contribution and ten-minute roll-up contract in [Logging](#logging). Acquisition and geometry checks are Debug evidence only.
 
 Processing capacity degradation produces one Warning when the limit is reached, not one warning per unmanaged piece or poll. WeatherGuardDiagnostics.CapacityState reports one Info recovery when a later scope scan clears that limit. Recovery identifies the cleared processing limit. Exclusion-list setup warnings include the rejected/unknown count and the setting to review. Individual acquisition and per-piece evidence remain optional Debug output; requested coverage reports remain separately available. See the [standard logging contract](../architecture.md#standard-feature-events-and-grouping).
 
@@ -164,6 +136,31 @@ WeatherGuardExposureTracking retains roof observations across the eligible playe
 
 Piece biomes come from WorldGenerator at each checked piece position; ready player biomes come from the shared presence roster's replicated character positions. The headless server environment's wet flag is labeled separately and must not describe player-local rain or a player's Wet status. Swamp geography gives local context but does not synthesize a native wetness value. A fresh roof/cache disagreement is labeled explicitly rather than describing an exposed piece as covered. Pieces can be acquired before native wetness qualifies; prevention is observed when the native weather contribution becomes due. Routine rejected owner transfers are counted in the interval network summary rather than printed repeatedly for each piece. The three-piece health sample remains bounded and is never an exposed-piece total.
 
+## Source responsibilities
+
+| File in `src/HeimKit/Features/WeatherGuard/` | Responsibility |
+| --- | --- |
+| WeatherGuard.cs | Settings construction, compatibility, module lifecycle and failure isolation. |
+| WeatherGuardSettings.cs | Feature configuration bindings and defaults. |
+| WeatherGuardDebugLogLevelValues.cs | BepInEx validation of the two supported diagnostic levels. |
+| WeatherGuardController.cs | Region loading, readiness, acquisition/release, ownership reconciliation, native evidence collection and operational counters. |
+| WeatherGuardWearPass.cs | Distinct-piece counting for completed native wear sweeps. |
+| WeatherGuardExposureTracking.cs | Rolling roof and underwater observations across the eligible scope. |
+| WeatherGuardDiagnostics.cs | Debug gating, summaries/evidence formatting, independent sample limits and reset. |
+| WeatherGuardLogTopics.cs | Feature log topics. |
+| WeatherGuardPatches.cs | Harmony hooks for processing, ownership and networking. |
+| WeatherGuardCoverageRequests.cs | Local one-shot admin request consumption, polling bounds and failure isolation. |
+| Models/CoverageSnapshot.cs | Requested coverage counts, scope and reason measurements. |
+| WeatherGuardRules.cs | Eligibility, acquisition gates, routing and revision rules. |
+| WeatherGuardNetworkFilter.cs | Selective packet filtering and cursor preservation. |
+| Models/WeatherGuardStatus.cs | Processing-counter snapshot supplied to diagnostics. |
+| Models/DebugLogLevel.cs | Medium/Detailed diagnostic level selection. |
+| Models/ProtectionObservation.cs | Qualifying-item protection snapshot for compact diagnostics. |
+| Models/WearObservation.cs | Bounded native wear/command evidence supplied to diagnostics. |
+| Models/RainEvidence.cs | Bounded per-object health, ownership and wet-processing history. |
+| Models/WearProcessingState.cs | Invocation scope and diagnostic observation restored by the wear finalizer. |
+| Models/Routing.cs | Routing decision enum used by rules and patches. |
+
 ## Game-version compatibility
 
 Use the shared [compatibility contract](../architecture.md#configuration) before activation.
@@ -172,6 +169,6 @@ Immutable prefab eligibility is cached per controller, while creator, persistenc
 
 ## HeimKit Core integration
 
-The performance rebuild in `src/HeimKit2/Features/` consumes server-simulation CandidateSubscription with Core live-instance retention, PrefabRegistry structural/context metadata, NativeAccess wear/creator FieldRefs, ObjectAuthority/ZdoPackets protection fencing and ModuleScheduler processing/terrain cadence. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
+The performance rebuild in `src/HeimKit/Features/` consumes server-simulation CandidateSubscription with Core live-instance retention, PrefabRegistry structural/context metadata, NativeAccess wear/creator FieldRefs, ObjectAuthority/ZdoPackets protection fencing and ModuleScheduler processing/terrain cadence. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
 
 Native field access is supplied by Core NativeAccess through runtime-compatible cached ref-getters; feature controllers retain the existing field types and gameplay operations.

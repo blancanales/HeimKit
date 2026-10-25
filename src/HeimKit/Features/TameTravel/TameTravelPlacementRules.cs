@@ -85,6 +85,10 @@ internal static class TameTravelPlacementRules
         float expected = centerHeight - (normal.x * offset.x + normal.z * offset.z) / normal.y;
         return Math.Abs(sampleHeight - expected) <= .5f;
     }
+    // The shared step budget ran out before this candidate's walk-out check finished. A check that
+    // started with the whole budget and still ran out can never finish, so it counts as blocked.
+    internal static bool EscapeDeferred(int probesBefore, int probesAfter) =>
+        probesBefore > 0 && probesAfter >= MaximumEscapeProbes;
     internal static bool HasEscape(Vector3 start, Vector3 outward, float distance,
         Func<Vector3, Vector3?> ground, Func<Vector3, Vector3, bool> clear, ref int probes)
     {

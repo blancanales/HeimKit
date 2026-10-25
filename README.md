@@ -6,13 +6,13 @@ Quality-of-life features for Windows Valheim dedicated servers: infinite torches
 
 Install on the server. Players use unmodified Valheim clients. Choose each feature independently in `heimkit.cfg`.
 
-The HeimKit performance rebuild shares world discovery, prefab metadata and scheduling through a common Core. It retains the same features, settings and data paths. See the [rebuild specification](docs/ai/heimkit-rebuild-spec.md) and [development guide](docs/development.md) for its temporary source layout. Run only one implementation on a server.
+DoorKeeper, ForestRenewal, SeaSalvage, TameTravel and HeimMender default enabled. Review their guides and disable any features you do not want before starting the server. Existing configuration values are preserved; missing settings are added automatically. Install only one HeimKit plugin DLL.
 
 Before enabling HeimKit, follow [world backups](docs/world-backups.md) and read [safety and limitations](docs/limitations.md).
 
 ## Features
 
-![HeimKit features: torch upkeep, weather protection, majority sleep, AFK raid protection and SharedMap with portal, resource, dungeon, runestone and recurring-spawner markers](docs/images/feature-overview.jpg)
+![All ten HeimKit features: InfiniteTorches, WeatherGuard, AFKNightWatch, AFKRaidWatch, TameTravel, DoorKeeper, ForestRenewal, SeaSalvage, HeimMender and SharedMap](docs/images/feature-overview.jpg)
 
 ### InfiniteTorches
 
@@ -44,11 +44,11 @@ Saves community exploration and discoveries across restarts, independently of ca
 
 Five independent marker options default enabled:
 
-- **PortalMarkerSync:** named player-built portals, with optional nearby grouping.
-- **ResourceMarkerSync:** outdoor metal/Obsidian deposits, Tin node counts and Copper/Silver progress. Silver requires pickaxe discovery.
-- **DungeonMarkerSync:** labeled exterior entrance markers with the vanilla hammer icon and cleanup of nearby duplicate dungeon pins. Supported pickup percentages appear after observed entry or evidence of already-picked items.
-- **RunestoneMarkerSync:** placed lore-runestone landmarks as labeled dots.
-- **SpawnerMarkerSync:** visible, player-destructible recurring spawner objects as labeled dots, removed after confirmed source destruction.
+- **Portal Marker:** named player-built portals, with optional nearby grouping.
+- **Resource Marker:** outdoor metal/Obsidian deposits, Tin node counts and Copper/Silver progress. Silver requires pickaxe discovery.
+- **Dungeon Marker:** labeled exterior entrance markers with the vanilla hammer icon and cleanup of nearby duplicate dungeon pins. Supported pickup percentages appear after observed entry or evidence of already-picked items.
+- **Runestone Marker:** placed lore-runestone landmarks as labeled dots.
+- **Spawner Marker:** visible, player-destructible recurring spawner objects as labeled dots, removed after confirmed source destruction.
 
 Optional settings discover resources/dungeons in previously explored terrain or reject player map uploads while automatic collection continues. Enabled runestone/spawner markers automatically include eligible points in community-explored terrain. Optional shared X checkmarks default off. Server owners can remove a selected shared pin through server-side administration without clearing other pins or exploration.
 
@@ -62,7 +62,7 @@ Closes eligible player-built doors and gates after a delay once players clear th
 
 ### TameTravel
 
-Brings explicitly following or portal-waiting tamed wolves, boars, lox, asksvin, hens and moose along a validated trip between linked outdoor portals. Preserves the same animal and its saved state. One follow command covers successive portal trips and following continues at the destination until stopped. Follow, stay and optional portal-wait commands have vanilla emote fallbacks. Explicit followers can use configurable stopping distance through bounded server control. Defaults enabled.
+Brings explicitly following or portal-waiting tamed wolves, boars, lox, asksvin, hens and moose along a validated trip between linked player-built portals outside dungeons. Preserves the same animal and its saved state. One follow command covers successive portal trips and following continues at the destination until stopped. Follow, stay and optional portal-wait commands have vanilla emote fallbacks. Explicit followers can use configurable stopping distance through bounded server control. Defaults enabled.
 
 [Usage and settings](docs/features/tame-travel.md) · [Specification](docs/specs/tame-travel.md)
 
@@ -96,13 +96,8 @@ Follow [server setup](docs/server-setup.md#installation) for Thunderstore Mod Ma
 
 - [Server setup](docs/server-setup.md): installation, configuration and diagnostics.
 - [Safety and limitations](docs/limitations.md): world risks, server observations and client limitations.
-- [World backups](docs/world-backups.md): matching world and SharedMap backups/recovery.
-- [SharedMap](docs/features/shared-map.md): exploration, marker options, uploads and pin administration.
-- [DoorKeeper](docs/features/door-keeper.md): delayed door closing.
-- [ForestRenewal](docs/features/forest-renewal.md): optional sapling renewal.
-- [SeaSalvage](docs/features/sea-salvage.md): floating recovery cargo.
-- [TameTravel](docs/features/tame-travel.md): explicit followers through linked outdoor portals.
-- [HeimMender](docs/features/heim-mender.md): gradual and administrative building repairs.
+- [World backups](docs/world-backups.md): matching world, SharedMap and ForestRenewal backups/recovery.
+- Feature guides and specifications: linked under each feature in [Features](#features).
 - [Development](docs/development.md): build and packaging commands.
 - [Architecture](docs/architecture.md): shared design and lifecycle contracts.
 - [Contributing](docs/contributing.md): source/documentation procedures.

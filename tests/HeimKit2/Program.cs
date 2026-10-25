@@ -17,6 +17,8 @@ Run("CoreRebuildTests", CoreRebuildTests.Run);
 Run("GameCompatibilityTests", GameCompatibilityTests.Run);
 Run("PerformanceRegressionTests", PerformanceRegressionTests.Run);
 Run("TameTravelRecoveryTests", TameTravelRecoveryTests.Run);
+Run("TameTravelStopTests", TameTravelStopTests.Run);
+Run("TameTravelReviewTests", TameTravelReviewTests.Run);
 Run("GameVersionCompatibilityTests", GameVersionCompatibilityTests.Run);
 Run("SharedMapTests", SharedMapTests.Run);
 Run("SharedMapExplorationTests", SharedMapExplorationTests.Run);

@@ -7,7 +7,7 @@
     <RootNamespace>HeimKit</RootNamespace>
     <Product>HeimKit</Product>
     <Title>HeimKit</Title>
-    <Version>0.2.0-rebuild.9</Version>
+    <Version>0.2.0-rebuild.15</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <GameManaged>$(ServerPath)\valheim_server_Data\Managed</GameManaged>
     <BepInExCore Condition="'$(BepInExCore)' == ''">$(ServerPath)\BepInEx\core</BepInExCore>

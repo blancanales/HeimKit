@@ -14,7 +14,7 @@ param(
     [string]$PackageName = 'HeimKit',
     [string]$WebsiteUrl = 'https://github.com/blancanales/HeimKit',
     [string]$ReadmeBaseUrl = 'https://github.com/blancanales/HeimKit/blob/main',
-    [string]$Description = 'Valheim: Infinite Torches (InfiniteTorches), fuel-free braziers, Shared Map (SharedMap), exploration/map sharing, pins/markers, portals, ore/resources, dungeons, runestones, spawners, rain/weather protection, sleep, AFK raid protection. Server-only.',
+    [string]$Description = 'Valheim server-only: Infinite Torches (InfiniteTorches), braziers, Shared Map (SharedMap), exploration, ore/dungeon/runestone/spawner markers, weather, AFK sleep/raids, tame portals, auto doors, tree renewal, sunken loot recovery, building repairs.',
     [string[]]$AdditionalDependencies = @(),
     [switch]$Force
 )
@@ -56,7 +56,10 @@ $pluginAttributes = [regex]::Matches($pluginSource, '\[BepInPlugin\(\s*"heimkit"
 if ($pluginAttributes.Count -ne 1 -or $pluginAttributes[0].Groups[1].Value -cne $version) {
     throw 'Plugin.cs BepInPlugin version must match HeimKit.csproj Version (one literal attribute expected).'
 }
-if (!$pluginSource.Contains("Starting version $version.")) { throw 'Plugin startup version must match the project version.' }
+$startupVersions = [regex]::Matches($pluginSource, 'Starting version ([0-9]+\.[0-9]+\.[0-9]+)(?: at |\.)')
+if ($startupVersions.Count -ne 2 -or @($startupVersions | Where-Object { $_.Groups[1].Value -cne $version }).Count -ne 0) {
+    throw 'Plugin startup version must match the project version in both build configurations.'
+}
 $setup = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'docs/server-setup.md') -Raw
 if ($setup -notmatch ('(?m)^\| HeimKit (?:release baseline|build) \| ' + [regex]::Escape($version) + ' \|\s*$')) {
     throw 'Synchronize the HeimKit release baseline row in docs/server-setup.md before packaging.'

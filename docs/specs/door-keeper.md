@@ -16,6 +16,10 @@ The controller tracks at most 1,024 open doors without taking ownership during t
 
 Shared scanning rotates one of at most 64 usable ready actors per pass and rejects an over-8,192-record sector scope instead of truncating safety evidence. Manual closed-state observation clears the timer. Occupancy postpones closure without an opening request. Native confirmed state transitions are grouped per pass as closed-door counts.
 
+Static retained-door positions use a spatial cell index for native active-area queries rather than comparing every retained door with every wear update. Shared context expires after ten seconds without refresh even if no further operation runs; idle scene hooks avoid allocating inclusion sets.
+
+Door discovery uses the shared spatial candidate index with activation/area-entry seeding and replicated/local change intake. Indexed doors still have live state, creator, delay and clearance checked at the configured interval. Full surrounding safety context is queried only for the selected due, clear door; native synchronous closing and immediate authority release remain unchanged.
+
 ## Terrain readiness
 
 Shared terrain preparation checks the heightmap, paint mask, pending rebuilds and native compiler initialization before invoking saved-terrain loading. A compiler whose native Awake returned early for a missing heightmap may resume that initialization only once a usable heightmap exists. Missing/empty compiler arrays or a mismatched heightmap postpone closure rather than calling Load with incomplete state. Unexpected native failures still follow module failure isolation. Debug eligibility summaries include the terrain wait reason and blocking object when available.
@@ -26,7 +30,9 @@ Follow the [required feature hookup](../architecture.md#required-feature-hookup)
 
 ## Logging
 
-Use the [shared logging and suppression policy](../architecture.md#logging). Enabled/Disabled, Ready and failures remain visible independently of DebugMode. Each completed processing pass combines confirmed results into one Info count; empty passes are silent. Optional changed-result summaries have a single report per 60 seconds, with pass/lifetime counts. A separate changed eligibility summary, also at most once per minute, gives context readiness, delay waits and occupied counts; no individual object stream. Pending state clears on controller disposal, except the durable ForestRenewal ledger. The effective global-or-feature policy and hidden suppression apply before optional formatting.
+Use the [shared logging and suppression policy](../architecture.md#logging). Enabled/Disabled, Ready and failures remain visible independently of DebugMode. Each completed processing pass combines confirmed results into one Info count; empty passes are silent. Optional changed-result summaries have a single report per 60 seconds, with pass/lifetime counts. A separate changed eligibility summary, also at most once per minute, gives context readiness, delay waits and occupied counts; no individual object stream. Pending state clears on controller disposal. The effective global-or-feature policy and hidden suppression apply before optional formatting.
+
+Optional controller-pass timing reports duration_avg_ms and duration_max_ms at most once per minute for nonempty scope. Collection follows effective debug policy and includes synchronous controller processing only; see [shared measurement limitations](../limitations.md).
 
 ## Acceptance criteria
 
@@ -34,14 +40,8 @@ A qualifying observed open interval may produce only a close transition, never a
 
 ## Compatibility and shared criteria
 
-Use the [supported environment](../server-setup.md#supported-environment) and shared exact-version guard. Each module isolates failure and releases only its own resources. Disabled features bind configuration but install no gameplay hooks and scan nothing. Objects outside verified scope retain native behavior. Acceptance requires independent enablement, repeatable cleanup, native state preservation, bounded retained state and the ownership/persistence rules below. Shared observation and delivery qualifications belong in [limitations](../limitations.md#new-world-features).
-
-Static retained-door positions use a spatial cell index for native active-area queries rather than comparing every retained door with every wear update. Shared context expires after ten seconds without refresh even if no further operation runs; idle scene hooks avoid allocating inclusion sets.
-
-Optional controller-pass timing reports duration_avg_ms and duration_max_ms at most once per minute for nonempty scope. Collection follows effective debug policy and includes synchronous controller processing only; see [shared measurement limitations](../limitations.md).
-
-Door discovery uses the shared spatial candidate index with activation/area-entry seeding and replicated/local change intake. Indexed doors still have live state, creator, delay and clearance checked at the configured interval. Full surrounding safety context is queried only for the selected due, clear door; native synchronous closing and immediate authority release remain unchanged.
+Use the [supported environment](../server-setup.md#supported-environment) and shared exact-version guard. Each module isolates failure and releases only its own resources. Disabled features bind configuration but install no gameplay hooks and scan nothing. Objects outside verified scope retain native behavior. Acceptance requires independent enablement, repeatable cleanup, native state preservation, bounded retained state and the ownership/persistence rules above. Shared observation and delivery qualifications belong in [limitations](../limitations.md#new-world-features).
 
 ## HeimKit Core integration
 
-The performance rebuild in `src/HeimKit2/Features/` consumes CandidateSubscription for doors and context, PrefabRegistry door/collision metadata, NativeAccess delegates, TerrainContext, ObjectAuthority and ModuleScheduler. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
+The performance rebuild in `src/HeimKit/Features/` consumes CandidateSubscription for doors and context, PrefabRegistry door/collision metadata, NativeAccess delegates, TerrainContext, ObjectAuthority and ModuleScheduler. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.

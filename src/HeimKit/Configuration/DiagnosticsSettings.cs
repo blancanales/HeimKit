@@ -18,7 +18,7 @@ public static class DiagnosticsSettings
     public static ConfigEntry<bool> Bind(ConfigFile config)
     {
         _verbosity = config.Bind("Diagnostics", "DebugVerbosity", DebugVerbosity.Normal,
-            "Applies to the performance rebuild; ignored by the legacy implementation. Normal shows concise diagnostics; Verbose adds detailed evidence when effective feature debugging is enabled. Restart after edits.");
+            "Normal shows concise diagnostics; Verbose adds detailed evidence when effective feature debugging is enabled. Restart after edits.");
         var debugMode = config.Bind("Diagnostics", "DebugMode", false,
             "Enable diagnostics for all features unless their hidden feature override suppresses them. When false, feature DebugMode settings can enable individual diagnostics. Restart after edits.");
         // Consume and remove retired settings so existing files also keep the current global debug switch.

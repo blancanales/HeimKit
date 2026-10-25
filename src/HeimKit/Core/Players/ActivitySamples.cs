@@ -17,15 +17,7 @@ public sealed class ActivitySamples
     private readonly HashSet<long> _peers = new();
     private readonly List<long> _departed = new();
     private readonly List<PlayerActivityView> _chosen = new();
-    private readonly List<(PlayerActivityView View, int Order)> _ordered = new();
-    // A cached IComparer: Mono's List.Sort(Comparison) allocates a wrapper per call.
-    private static readonly SampleComparer SampleOrder = new();
-    private sealed class SampleComparer : IComparer<(PlayerActivityView View, int Order)>
-    {
-        public int Compare((PlayerActivityView View, int Order) a, (PlayerActivityView View, int Order) b) =>
-            a.View.Known != b.View.Known ? a.View.Known.CompareTo(b.View.Known) :
-            a.View.Idle != b.View.Idle ? b.View.Idle.CompareTo(a.View.Idle) : a.Order.CompareTo(b.Order);
-    }
+    private readonly List<PlayerActivityView> _ordered = new();
     private float _last = float.NegativeInfinity;
     public long TransitionsInterval { get; private set; }
     public long ReplacedPendingInterval { get; private set; }
@@ -63,11 +55,15 @@ public sealed class ActivitySamples
     }
     public IReadOnlyList<PlayerActivityView> Drain(int maximum)
     {
-        var chosen = _chosen; chosen.Clear(); _ordered.Clear(); int order = 0;
-        foreach (var item in _pending.Values) _ordered.Add((item, order++));
-        _ordered.Sort(SampleOrder);
+        var chosen = _chosen; chosen.Clear(); _ordered.Clear();
+        foreach (var item in _pending.Values) _ordered.Add(item);
         int count = Math.Min(Math.Max(0, maximum), _ordered.Count);
-        for (int i = 0; i < count; i++) chosen.Add(_ordered[i].View);
+        // Four stable priority buckets preserve native enumeration ties without
+        // the comparer/delegate wrappers created by runtime sorting helpers.
+        for (int priority = 0; priority < 4 && chosen.Count < count; priority++)
+            foreach (var item in _ordered)
+                if ((item.Known ? 2 : 0) + (item.Idle ? 0 : 1) == priority)
+                { chosen.Add(item); if (chosen.Count == count) break; }
         foreach (var item in chosen) _pending.Remove(item.Peer);
         return chosen;
     }

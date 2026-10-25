@@ -4,7 +4,7 @@ SharedMap saves community exploration and discoveries, then shares them through 
 
 SharedMap and portal/resource/dungeon/runestone/recurring-spawner markers default enabled. Each source works independently. See [safety and limitations](../limitations.md#sharedmap) for discovery, client-update and upload limitations, and [server setup](../server-setup.md) for installation and shared settings.
 
-![SharedMap: explore, save discoveries across restarts and Read Map; five enabled-by-default marker options, optional dungeon percentages, visible destructible spawners and configurable resource spacing](../images/shared-map-workflow.jpg)
+![SharedMap: explore, save and Read Map, with Portal Marker, Resource Marker, Dungeon Marker, Runestone Marker and Spawner Marker options](../images/shared-map-workflow.jpg)
 
 ## Shared exploration
 
@@ -12,7 +12,7 @@ Terrain is recorded around usable outdoor player positions using the native mini
 
 On first use without a saved community map, SharedMap imports valid exploration from existing saved tables, including distant tables. It saves the completed import before starting player capture. Later starts load the saved map.
 
-## PortalMarkerSync
+## Portal Marker
 
 Player-built portals in community-explored terrain receive portal-shaped markers. Labels use current portal tags, or `NoName` when blank; connected and unconnected endpoints qualify.
 
@@ -20,7 +20,7 @@ PortalClusterDistanceMeters groups endpoints around a fixed first portal. Groups
 
 While enabled, automatic portal management reserves every portal-icon pin in table data for actual portals. Other icons are preserved except matching nearby obsolete portal pins; automatic reconciliation preserves player-owned hammer pins. Disabling portal sync removes generated portal records and preserves player-owned pins.
 
-## ResourceMarkerSync
+## Resource Marker
 
 Records outdoor Copper, Tin, Silver, Obsidian and static Flametal deposits with labeled dot markers. Scraps, dungeon resources, creatures, dropped items, ordinary stone and player-built objects are excluded.
 
@@ -32,7 +32,7 @@ ResourceMarkerHideDistanceMeters defaults to 10 metres. A generated resource mar
 
 ResourceDiscoverPreviouslyExplored also discovers eligible deposits in saved community-explored terrain without a revisit. Silver keeps its mining requirement. Turning the setting off retains accepted discoveries. Player-created dot pins keep their original records.
 
-## DungeonMarkerSync
+## Dungeon Marker
 
 Records supported dungeon **exterior entrances** within the native exploration radius. Markers use the vanilla hammer/T icon and a short type label. Each gateway keeps its own saved discovery record. Shared tables publish one dungeon marker per fixed ten-metre anchor, suppressing nearby duplicates without deleting discoveries or world objects. DungeonLootProgress adds short remaining-pickup percentages where supported, such as `Burial Chamber 40%` and `Frost Cave 0%`. Arbitrary player hammer notes are preserved. Uploaded hammer pins using a recognized dungeon label, with or without a percentage, are removed within ten metres of a generated dungeon anchor so stale copies do not accumulate.
 
@@ -76,7 +76,7 @@ Set `DungeonLootProgress = false` to show plain dungeon names without percentage
 | Winding Tunnels | Frost Core pickups |
 | Mörkhalla | Ancient gemstone pickups |
 
-Percentages stay hidden until the server observes someone inside that dungeon or verifies that at least one tracked pickup has already been picked. Afterward, Read Map shares the remaining percentage with everyone. The percentage counts unpicked sites divided by the established placed total. All picked, or a supported dungeon with no tracked pickups, displays `0%`; unsupported or unknown inventories keep the ordinary label. Empty inventories may take an additional 30 seconds to establish after entry.
+Percentages stay hidden until the server observes someone inside that dungeon or verifies that at least one tracked pickup has already been picked. Afterward, Read Map shares the remaining percentage with everyone. The percentage counts unpicked sites divided by the established placed total. All picked, or a supported dungeon with no tracked pickups, displays `0%`; unsupported or unknown inventories keep the ordinary label. Empty inventories may take an additional 30 seconds to establish after entry; a percentage already shown stays during that wait.
 
 Visits and progress survive restarts. Existing saves without visit history unlock percentages after an observed entry or a fresh scan confirming already-picked items. Untouched or empty inventories alone do not establish a visit. Turning DungeonLootProgress off hides percentages while retaining discoveries, visits and saved progress.
 
@@ -84,13 +84,13 @@ Visits and progress survive restarts. Existing saves without visit history unloc
 
 SharePinCheckmarks defaults false, keeping player X marks personal. Enable it with AllowPlayerMapWrites to share checked/unchecked changes through Write Map and Read Map across dungeon, portal, resource, runestone, spawner and ordinary player pins. For a grey shared marker, the first click makes it personal and the next toggles its X; Write Map shares the change. Manual X marks are independent of pickup percentages. Checkmarks and publication positions survive restarts in `.pin-state`. Percentage/checkmark changes use small publication offsets around the original source; see [client map updates](../limitations.md#client-map-updates).
 
-## RunestoneMarkerSync
+## Runestone Marker
 
 This source defaults enabled and shares separate vanilla dot markers for placed Boar, Greydwarf, Draugr and biome lore runestones. The [specification](../specs/shared-map.md#runestone-eligibility-and-placement) lists all eleven supported location prefabs. Stones qualify through their actual placed point; reading them is unnecessary. Boss trophy stones, Vegvisirs and decorative writing are excluded. Boar Runestones identify Meadows landmarks, not recurring boar farms.
 
 Eligible placed stones inside saved community exploration are also discovered automatically. Disabling RunestoneMarkerSync retains discoveries and removes its generated table publications during reconciliation.
 
-## SpawnerMarkerSync
+## Spawner Marker
 
 This source defaults enabled and shares visible, player-destructible, stationary recurring spawner objects as vanilla dots. Supported sources include Greydwarf nests, both bone piles, Draugr piles, Charred stone/elite/event/cross sources, Jotun cores, Elaking single/double holes and Mork blob sources. Hidden creature-spawn points around dungeons, invisible recurring points, fish and Kvastur spawn instructions are excluded. The [classification table](../specs/shared-map.md#spawner-eligibility-and-classification) owns exact prefabs, labels and exclusions. One-shot points and incompatible legacy EvilHeart_Swamp are excluded.
 
@@ -119,8 +119,6 @@ Beside `HeimKit/SharedMap/world-<world UID>.map` in the active configuration dir
 Copy the complete ID for the intended location. Removal targets owner, label, position and icon; other pins with the same label remain. Changing those fields creates a new identity. `allow` permits future uploads rather than recreating a deleted record.
 
 Requests run with joined players and ready world services; no restart or DebugMode is needed. Accepted request files are deleted. Create a new file for another command. Invalid requests remain for correction and produce a warning. Ensure the filename ends in `.request`, not `.request.txt`. Read Map after the completed sweep and replication.
-
-Shared-pin removal uses the server-side request file above. For X-mark behavior and client attribution, see [player uploads](../limitations.md#player-uploads).
 
 ### Worked example: remove a pin named Vile
 
@@ -202,12 +200,9 @@ Stores validate world identity, format, bounds and checksums. Dirty saves use fl
 
 Info reports storage selection, completed first-run import, grouped discoveries/removals and table changes. Unchanged passes stay quiet. Failures remain visible with debugging off.
 
-Debug adds native radius/cadence, supported dungeon prefab/gateway counts, discovery source and coordinates, mining evidence, publication choices and table pin changes. Dungeon proximity details include the original player sample and distance/radius. Pickup evidence reports gateway identity, total/picked sites, remaining percentage and availability reason. Saved-layout details report dungeon type, room count, payload size and decode status. Visit details distinguish observed interior entry from a prior visit inferred from matched picked items; empty-inventory evidence reports its settling state. Checkmark logs distinguish accepted uploads from publication changes. Storage details identify loaded and saved counts. Pin changes show owner, label, position, icon and replication sender when available. PinDebugNameFilter narrows per-pin details without changing totals or processing.
+Debug adds native radius/cadence, supported dungeon prefab/gateway counts, discovery source and coordinates, mining evidence, publication choices and table pin changes. Dungeon proximity details include the original player sample and distance/radius. Pickup and saved-layout records name the dungeon, its location prefab, gateway and entrance position, and are written only when the result changes: pickup records give total/picked sites, remaining percentage and reason; layout records give room count, payload size and validity. Visit details distinguish observed interior entry from a prior visit inferred from matched picked items; empty-inventory evidence reports its settling state. Checkmark logs distinguish accepted uploads from publication changes. Storage details identify loaded and saved counts. Pin changes show owner, label, position, icon and replication sender when available. PinDebugNameFilter narrows per-pin details without changing totals or processing.
 
 Discovery/publication details are capped at six per stream per minute; the [specification](../specs/shared-map.md#logging) owns the full limits. Shared debug configuration, loader filters and presence notices are described in [server setup](../server-setup.md#configuration).
-
-Unchanged table payloads and published community inputs reuse their successful reconciliation. Terrain-map disk work runs on one background writer; later exploration remains pending until its own snapshot is saved. Orderly shutdown flushes outstanding exploration.
-
 
 ## HeimKit log topics
 

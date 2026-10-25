@@ -78,18 +78,35 @@ internal static class TameTravelRecoveryTests
         var peer = (ZNetPeer)RuntimeHelpers.GetUninitializedObject(typeof(ZNetPeer)); peer.m_uid = 91; peer.m_playerName = "Traveller";
         for (int i = 0; i < 20; i++) diagnostics.Traversal(peer, "placement", "gate_" + i);
         Check(lines.Count == 6, "Placement gates exceeded their reserved allowance.");
+        diagnostics.Traversal(peer, "arrival", "linked_exit_observed", transition: true);
+        Check(lines.Count == 7, "Placement waits consumed the entry and arrival allowance.");
         var transfer = new HeimKit.Features.TameTravel.Models.AnimalTransfer {
             Journey = new HeimKit.Features.TameTravel.Models.PortalJourney { Name = "Traveller" },
             PlacementAttempts = 12, PlacementCandidates = 768, PlacementContextMilliseconds = 3, PlacementSearchMilliseconds = 4 };
         transfer.PlacementRejections["solid_overlap"] = 42;
         diagnostics.Transfer(transfer, false, null);
-        Check(lines.Count == 7 && lines[^1].Contains("768 candidates") && lines[^1].Contains("context_ms=3.00") && lines[^1].Contains("search_ms=4.00") && !lines[^1].Contains("rejections="),
+        Check(lines.Count == 8 && lines[^1].Contains("768 candidates") && lines[^1].Contains("context_ms=3.00") && lines[^1].Contains("search_ms=4.00") && !lines[^1].Contains("rejections="),
             "Normal endings lost the compact outcome or built Verbose placement fields.");
         for (int i = 0; i < 20; i++) diagnostics.Transfer(transfer, false, null);
-        Check(lines.Count == 14, "Transaction endings exceeded their independent allowance.");
+        Check(lines.Count == 15, "Transaction endings exceeded their independent allowance.");
         debug.Value = false; diagnostics.Transfer(transfer, false, null);
-        Check(lines.Count == 14, "Suppressed placement evidence still emitted output.");
-        System.Console.WriteLine("PASS: placement outcomes retain rejection and timing totals after gate-budget exhaustion, with independent bounded endings and debug suppression.");
+        Check(lines.Count == 15, "Suppressed placement evidence still emitted output.");
+        debug.Value = true; HeimKit.Core.Diagnostics.DiagnosticLog.StartSession(); lines.Clear();
+        config.Bind("Diagnostics", "DebugVerbosity", HeimKit.Configuration.DebugVerbosity.Normal).Value = HeimKit.Configuration.DebugVerbosity.Verbose;
+        try
+        {
+            var placed = new TameTravelDiagnostics(log, new HeimKit.Configuration.DebugLoggingPolicy(debug, false), () => 1);
+            var moved = new HeimKit.Features.TameTravel.Models.AnimalTransfer {
+                Journey = new HeimKit.Features.TameTravel.Models.PortalJourney { Name = "Traveller", DestinationRotation = Quaternion.identity },
+                Moved = true, Placement = new Vector3(3, 0, 1), PlacementTraveller = new Vector3(0, 0, 1) };
+            moved.PlacementRejections["building_overhead"] = 5; moved.PlacementWalkoutRejections["solid_overlap"] = 9; moved.PlacementWaitReasons["no_safe_ground_position"] = 2;
+            placed.Transfer(moved, true, null);
+            Check(lines.Count == 2 && lines[1].Contains("rejections=building_overhead:5") && lines[1].Contains("walkout_rejections=solid_overlap:9") &&
+                lines[1].Contains("wait_reasons=no_safe_ground_position:2") && lines[1].Contains("traveller_forward_m=0") && lines[1].Contains("traveller_side_m=3.0") &&
+                lines[1].Contains("traveller_distance_m=3.0"), "Transfer evidence mixed walk-out steps into candidate reasons or lost the traveller-relative landing: " + string.Join(" | ", lines));
+        }
+        finally { LogCapture.ResetVerbosity(); }
+        System.Console.WriteLine("PASS: placement outcomes retain rejection and timing totals after gate-budget exhaustion, placement waits keep their own allowance, walk-out steps stay separate from candidate reasons, landings report traveller-relative offsets, with independent bounded endings and debug suppression.");
     }
 
     private static void ReplicationOrdering()
@@ -178,6 +195,9 @@ internal static class TameTravelRecoveryTests
         Check(TameTravelPlacementSurfaces.LowSlab(new Vector3(2, .5f, 2), 1) &&
             !TameTravelPlacementSurfaces.LowSlab(new Vector3(.3f, 2, 2), 1) &&
             !TameTravelPlacementSurfaces.LowSlab(new Vector3(2, .5f, 2), 4), "Low paving geometry was confused with walls or raised construction.");
+        Check(TameTravelPlacementSurfaces.LowSlab(new Vector3(2, 1, 2), .7f) && TameTravelPlacementSurfaces.SlabRejection(new Vector3(2, 2, 1), .5f) == "too_thick" &&
+            TameTravelPlacementSurfaces.SlabRejection(new Vector3(2, .5f, 2), 4) == "raised_construction" && TameTravelPlacementSurfaces.SlabRejection(new Vector3(.3f, .5f, 2), 1) == "too_narrow",
+            "A one-metre stone floor was rejected as support, or a wall, raised or narrow piece lost its named reason.");
         // A narrow landing opening between arc spots must be visited locally.
         var local = Enumerable.Range(0, TameTravelPlacementRules.ArcCandidates(1))
             .Select(i => TameTravelPlacementRules.Candidate(i, 1, Vector3.zero, Vector3.zero, Vector3.forward)).ToArray();
@@ -245,8 +265,11 @@ internal static class TameTravelRecoveryTests
         probes = TameTravelPlacementRules.MaximumEscapeProbes - 1;
         Check(!TameTravelPlacementRules.HasEscape(Vector3.zero, Vector3.forward, 5, Flat, (_, _) => true, ref probes) &&
             probes == TameTravelPlacementRules.MaximumEscapeProbes, "Escape-route work exceeded its per-search budget.");
+        Check(TameTravelPlacementRules.EscapeDeferred(10, TameTravelPlacementRules.MaximumEscapeProbes) &&
+            !TameTravelPlacementRules.EscapeDeferred(10, 40) && !TameTravelPlacementRules.EscapeDeferred(0, TameTravelPlacementRules.MaximumEscapeProbes),
+            "A walk-out check cut short by the shared budget was not retried, or one that can never finish was retried forever.");
         probes = 0;
         Check(TameTravelPlacementRules.HasEscape(Vector3.zero, Vector3.forward, 5, Flat, (_, _) => true, ref probes), "An open flat walkout was rejected.");
-        System.Console.WriteLine("PASS: traveller-centred arcs sweep right to left in quarter-metre steps, widen to a full circle at the sweep limit, reach ground behind the portal and retain building/traveller fallbacks across four portal rotations; footprint checks accept steady slopes and reject ledges; escape checks reject blocked routes and enforce the shared probe budget.");
+        System.Console.WriteLine("PASS: traveller-centred arcs sweep right to left in quarter-metre steps, widen to a full circle at the sweep limit, reach ground behind the portal and retain building/traveller fallbacks across four portal rotations; footprint checks accept steady slopes and reject ledges; escape checks reject blocked routes, enforce the shared probe budget and retry a candidate the budget cut short.");
     }
 }

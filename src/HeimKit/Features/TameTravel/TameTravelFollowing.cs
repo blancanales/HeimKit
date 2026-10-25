@@ -30,10 +30,22 @@ internal sealed class TameTravelFollowing : IDisposable
     private readonly Action<Exception> _fail;
     private readonly Dictionary<ZDOID, FollowingSession> _sessions = new();
     private readonly List<KeyValuePair<ZDOID, FollowingSession>> _snapshot = new();
+    // Spacing that ended because the animal fell behind; it restarts once the animal catches up.
+    private readonly Dictionary<ZDOID, AnimalTransfer> _lapsed = new();
+    private readonly List<ZDOID> _lapsedIds = new();
+    private const float RangeLimit = 32, CatchUpRange = 16;
     private readonly Func<BaseAI, float, Vector3, float, bool, bool> _moveTo;
     private int _cursor;
     private bool _disposed;
     public int Count => _sessions.Count;
+    internal OwnershipLease? TakeForStop(ZDOID id)
+    {
+        _lapsed.Remove(id);
+        if (!_sessions.TryGetValue(id, out var session)) return null;
+        _sessions.Remove(id);
+        _diagnostics.FollowingEnded(session.Lease, "stop_handshake");
+        return session.Acquired && _authority.Holds(session.Lease) ? session.Lease : null;
+    }
     public bool ChangingOwners(ZDOID id) => _sessions.TryGetValue(id, out var s) && s.Acquired && s.Lease.Phase != 5;
     internal static MethodInfo NativeMethod(string name, params Type[] parameters)
         => typeof(BaseAI).GetMethod(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, parameters, null)
@@ -56,11 +68,19 @@ internal sealed class TameTravelFollowing : IDisposable
     }
     public void Command(ZNetPeer peer, ZDO animal, TameOrder order)
     {
-        if (order != TameOrder.Follow) { Stop(animal.m_uid, "stay_or_wait"); return; }
+        if (order != TameOrder.Follow)
+        {
+            // While the server simulates the animal, its own instance follows this player, so the native
+            // stay toggle sent to the server can only mean stay. Releasing first would hand the toggle to a
+            // new owner whose follow target may not be restored yet, where it would mean follow.
+            if (_sessions.TryGetValue(animal.m_uid, out var running) && running.Acquired && running.Lease.Phase == 5 && _authority.Holds(running.Lease))
+            { running.StopRequested = Time.unscaledTime; return; }
+            Stop(animal.m_uid, "stay_or_wait"); return;
+        }
         if (!_settings.FollowSpacingEnabled.Value) return;
         if (_sessions.TryGetValue(animal.m_uid, out var previous))
         {
-            if (ReferenceEquals(previous.Lease.Journey.Peer, peer) && previous.Lease.Journey.Character == peer.m_characterID) return;
+            if (ReferenceEquals(previous.Lease.Journey.Peer, peer) && previous.Lease.Journey.Character == peer.m_characterID) { previous.StopRequested = -1; return; }
             Stop(animal.m_uid, "new_player_session");
         }
         if (_sessions.Count >= _settings.MaxControlledFollowers.Value)
@@ -75,10 +95,9 @@ internal sealed class TameTravelFollowing : IDisposable
         _diagnostics.Following(lease, "requested", 0, 0, 0);
     }
     private bool Valid(FollowingSession s, out ZDO actor)
-        => InvalidReason(s, out actor) == null;
-    private string? InvalidReason(FollowingSession s, out ZDO actor)
+        => InvalidReason(s.Lease, out actor) == null;
+    private string? InvalidReason(AnimalTransfer t, out ZDO actor)
     {
-        var t = s.Lease;
         string? reason = _rules.ActorRejection(t.Journey.Peer, out actor);
         if (reason != null) return reason;
         if (t.Journey.Character != t.Journey.Peer.m_characterID) return "character_replaced";
@@ -86,16 +105,37 @@ internal sealed class TameTravelFollowing : IDisposable
         if (!ReferenceEquals(ZDOMan.instance.GetZDO(t.Id), t.Record) || t.Record.m_uid != t.Id) return "animal_record_replaced";
         reason = _rules.AnimalRejection(t.Record); if (reason != null) return reason;
         if (t.Record.GetString(ZDOVars.s_follow) != t.Journey.Name) return "follow_state_changed";
-        return (t.Record.GetPosition() - actor.GetPosition()).sqrMagnitude > 32 * 32 ? "follower_range_exceeded" : null;
+        return (t.Record.GetPosition() - actor.GetPosition()).sqrMagnitude > RangeLimit * RangeLimit ? "follower_range_exceeded" : null;
+    }
+    // An animal that fell behind but still follows the same player gets spacing back once it is within
+    // half the range limit again. Any other change to the player, the animal or its follow name forgets it.
+    private void Resume()
+    {
+        _lapsedIds.Clear(); _lapsedIds.AddRange(_lapsed.Keys);
+        foreach (var id in _lapsedIds)
+        {
+            var t = _lapsed[id];
+            string? reason = InvalidReason(t, out var actor);
+            if (reason == "follower_range_exceeded") continue;
+            float distance = reason == null ? Vector3.Distance(t.Record.GetPosition(), actor.GetPosition()) : 0;
+            if (reason == null && distance > CatchUpRange) continue;
+            _lapsed.Remove(id);
+            if (reason != null || _sessions.ContainsKey(id)) continue;
+            _diagnostics.Following(t, "caught_up", distance, 0, 0);
+            Command(t.Journey.Peer, t.Record, TameOrder.Follow);
+        }
     }
     public void Tick(float now)
     {
+        if (_lapsed.Count > 0) Resume();
         Snapshot();
         foreach (var pair in _snapshot)
         {
             var s = pair.Value;
-            string? reason = InvalidReason(s, out _);
+            string? reason = InvalidReason(s.Lease, out _);
             if (reason == null && s.Acquired && !_authority.Holds(s.Lease)) reason = "follower_ownership_changed";
+            // A confirmed stay clears the saved follow name and ends the session above; never hold it longer.
+            if (reason == null && s.StopRequested >= 0 && now - s.StopRequested > 6) reason = "stay_unconfirmed";
             if (reason != null) Stop(pair.Key, reason);
         }
         Snapshot();
@@ -204,9 +244,11 @@ internal sealed class TameTravelFollowing : IDisposable
     }
     public void Stop(ZDOID id, string reason, bool warning = false)
     {
+        _lapsed.Remove(id);
         if (!_sessions.TryGetValue(id, out var s)) return;
         _sessions.Remove(id);
-        _diagnostics.Traversal(s.Lease.Journey.Peer, "follow_spacing_ended", reason, animal: id, transition: true);
+        if (reason == "follower_range_exceeded" && _lapsed.Count < 64) _lapsed[id] = s.Lease;
+        _diagnostics.FollowingEnded(s.Lease, reason);
         if (s.Acquired && _authority.Holds(s.Lease)) _authority.Release(id);
         if (s.Started || warning)
             DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Follow, $"Server follow spacing released for {s.Lease.Journey.Name}.", new (string, object?)[] { ("animal", id), ("reason", reason) }, warning ? LogLevel.Warning : LogLevel.Info);
@@ -228,6 +270,7 @@ internal sealed class TameTravelFollowing : IDisposable
         if (ReferenceEquals(_current, this)) _current = null;
         var errors = new List<Exception>();
         foreach (var id in _sessions.Keys.ToArray()) try { Stop(id, "controller_stopped"); } catch (Exception error) { errors.Add(error); }
+        _lapsed.Clear();
         foreach (Action step in new Action[] { () => _hooks.UnpatchSelf(), () => _context.Dispose() })
             try { step(); } catch (Exception error) { errors.Add(error); }
         if (errors.Count > 0) throw new AggregateException("Following cleanup failed.", errors);

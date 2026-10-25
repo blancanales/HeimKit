@@ -15,6 +15,14 @@ internal sealed class TameTravelPlacementAccess
 {
     private readonly List<Vector3> _path = new();
     private readonly int _walls = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "terrain", "vehicle");
+    // Asking for a route makes the server start building its path map around both ends, which takes
+    // several seconds on ground nobody has walked recently.
+    internal void Warm(Vector3 traveller, Vector3 exit)
+    {
+        if (Pathfinding.instance == null) return;
+        Pathfinding.instance.GetPath(traveller, exit, _path, Pathfinding.AgentType.HumanoidNoSwim, requireFullPath: false, cleanup: false, havePath: false);
+        _path.Clear();
+    }
     internal bool Reachable(Vector3 traveller, Vector3 landing, out string reason)
     {
         reason = "access_path_unready_or_blocked";

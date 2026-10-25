@@ -2,6 +2,8 @@
 
 Gradually repairs damaged player-built static structures and accepts bounded administrative repair requests. It restores existing pieces to native maximum health without consuming materials or changing their creator. Destroyed pieces and world-created ruins are excluded. See [specification](../specs/heim-mender.md) and [shared limitations](../limitations.md).
 
+![HeimMender: observe damaged player-built pieces and repair through automatic cycles or bounded administrative requests](../images/heim-mender-workflow.jpg)
+
 ## Settings
 
 Settings are in `[HeimMender]` in the loader-provided `heimkit.cfg`. This section reloads during play, including Enabled and DebugMode; other features keep their documented restart requirements. Save a complete edit and allow a few seconds for application. Invalid values retain the previously loaded section and produce a warning.
@@ -37,11 +39,6 @@ Player-built static building-category walls, floors, roofs, structural beams, do
 Normal output reports accepted/rejected requests and confirmed repair totals per completed batch. Debug scope summary records show damaged candidates, quiet/threat deferrals, unavailable owners and selected requests. Request samples include ZDO identity, health, maximum health and owner; outcome sample records separate requests, confirmations and timeouts. A sent request alone is not a repair confirmation.
 
 The observation budget retains damaged candidates rather than healthy building pieces. Completed repairs release their slots. Normal output warns if damaged-candidate capacity is exhausted and reports when capacity recovers.
-
-Automatic cycles reuse player/threat position snapshots during selection and recheck live conditions before issuing repairs. Unrelated routed traffic is skipped before chat payload decoding.
-
-Discovery reuses nearby candidate records and accepts native record changes. Entering another area seeds discovery again; action eligibility and timing retain the configured rules. See the [shared discovery design](../architecture.md#record-driven-candidate-discovery).
-
 
 ## HeimKit log topics
 

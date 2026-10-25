@@ -1,6 +1,6 @@
 # AFKRaidWatch
 
-Protects inferred-idle-only locations from new automatic random raids. AFKNightWatch controls sleep independently. See [server setup](../server-setup.md#afkraidwatch), [AFK limitations](../limitations.md#afk-detection-sleep-and-raids), and the [specification](../specs/afk-raid-watch.md).
+Protects inferred-idle-only locations from new automatic random raids. AFKNightWatch controls sleep independently. See [shared activity settings](../server-setup.md#playeractivity), [AFK limitations](../limitations.md#afk-detection-sleep-and-raids), and the [specification](../specs/afk-raid-watch.md).
 
 ![AFKRaidWatch: exclude qualifying idle-only locations from automatic raid selection](../images/afk-raid-watch-workflow.jpg)
 
@@ -19,7 +19,6 @@ Shared thresholds live under [PlayerActivity](../server-setup.md#playeractivity)
 ## Diagnostics
 
 Info groups excluded candidates once per native automatic selection pass. Debug explains local population, eligibility reasons, native gates and observed event transitions. Shared PlayerActivity owns named AFK entry/exit notices, visible with debugging off. Raid debugging does not enable sleep diagnostics.
-
 
 ## HeimKit log topics
 

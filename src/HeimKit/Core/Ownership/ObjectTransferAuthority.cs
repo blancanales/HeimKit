@@ -75,7 +75,7 @@ internal sealed class ObjectTransferAuthority : IDisposable
     public bool Contains(ZDOID id) => _leases.ContainsKey(id);
     public bool RunningFollow(ZDOID id) => _leases.TryGetValue(id, out var t) && t.FollowControl && t.Phase == 5;
     public bool Holds(OwnershipLease t) => _leases.TryGetValue(t.Id, out var current) && ReferenceEquals(current, t);
-    public bool Acquire(OwnershipLease transfer, float now)
+    public bool Acquire(OwnershipLease transfer, float now, bool allowDisconnectedOwner = false)
     {
         if (_leases.Count >= 64 || Contains(transfer.Id) || _world.GetZDO(transfer.Id) != transfer.Record || !transfer.Record.IsValid()) return false;
         var z = transfer.Record; transfer.PreviousOwner = z.GetOwner(); transfer.Source = z.GetPosition();
@@ -84,7 +84,7 @@ internal sealed class ObjectTransferAuthority : IDisposable
         if (transfer.PreviousOwner != 0 && transfer.PreviousOwner != ZDOMan.GetSessionID())
         {
             transfer.PreviousPeer = _presence.Peers.FirstOrDefault(p => p.IsReady() && p.m_uid == transfer.PreviousOwner);
-            if (transfer.PreviousPeer == null) return false;
+            if (transfer.PreviousPeer == null && !allowDisconnectedOwner) return false;
         }
         _leases.Add(transfer.Id, transfer);
         z.SetOwner(ZDOMan.GetSessionID()); _world.ForceSendZDO(transfer.Id);
@@ -123,6 +123,17 @@ internal sealed class ObjectTransferAuthority : IDisposable
         if (_barriers.TryGetValue(nonce, out var b) && ReferenceEquals(peer, b.Peer)) _barriers[nonce] = (b.Peer, b.Sent, true);
     }
     public bool Echoed(float nonce) => _barriers.TryGetValue(nonce, out var b) && b.Echo;
+    // Reset only remote caches, never the authoritative world record. The native
+    // client destruction handler drops its scene instance before this same-ID
+    // snapshot is delivered. Re-creation clears non-replicated AI targets.
+    public float ResetClientInstance(ZNetPeer peer, OwnershipLease lease, float now)
+    {
+        if (!Holds(lease) || lease.Record.GetOwner() != ZDOMan.GetSessionID())
+            throw new InvalidOperationException("Client refresh requires fenced server ownership.");
+        ZdoReplication.ResetClientCache(lease.Id,
+            packet => ZRoutedRpc.instance.InvokeRoutedRPC(peer.m_uid, "DestroyZDO", packet), () => Send(peer, lease.Record));
+        return SendBarrier(peer, null, now);
+    }
     private void Prune(float now)
     {
         _expiredBarriers.Clear();

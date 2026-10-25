@@ -19,7 +19,7 @@ internal sealed class PortalJourney
     public Vector3 SourcePosition, DestinationPosition, Exit;
     public Quaternion SourceRotation, DestinationRotation;
     public string Tag = "";
-    public float Entered, Arrived = -1, Barrier;
+    public float Entered, Arrived = -1, Barrier, PathWarmed = float.NegativeInfinity;
     public bool Ready;
     public string? EndReason;
     public readonly Queue<ZDOID> Followers = new();

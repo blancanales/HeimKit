@@ -37,16 +37,19 @@ internal sealed class TameTravelPlacement : IDisposable
     // Padding applies to buildings and objects, not to terrain or creatures, which have their own checks.
     private readonly int _obstacles = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "vehicle");
     private readonly Collider[] _overlaps = new Collider[32];
+    private readonly RaycastHit[] _roofs = new RaycastHit[32];
     private CapsuleCollider? _padding;
     private readonly Func<Vector3, Vector3?> _groundProbe;
     private readonly Func<Vector3, Vector3, bool> _clearProbe;
     private AnimalTransfer _probeTransfer = null!;
-    private bool _probeEvidence;
+    private bool _probeEvidence, _probeWalkout;
+    private string? _candidateReason;
     private Vector3 _probeCenterOffset, _probeAxis;
     private Quaternion _probeRotation;
     private int _probeDirection;
     private float _probeExtent, _probeHorizontalExtent, _probeHalfLine, _probeRadius;
     public TameTravelPlacement(TameTravelRules rules) { _rules = rules; _groundProbe = ProbeGround; _clearProbe = ProbeClear; }
+    public void WarmAccess(Vector3 traveller, Vector3 exit) => _access.Warm(traveller, exit);
     public bool Find(AnimalTransfer t, Dictionary<ZDOID, AnimalTransfer>.ValueCollection transfers, IReadOnlyList<ZNetPeer> peers, float now, bool evidence, out Vector3 position)
     {
         long started = evidence ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
@@ -59,7 +62,7 @@ internal sealed class TameTravelPlacement : IDisposable
                 t.PlacementAttempts++;
                 t.PlacementSearchMilliseconds += (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000d / System.Diagnostics.Stopwatch.Frequency -
                     (t.PlacementContextMilliseconds - contextBefore);
-                if (WaitReason != "placed") Reject(t, WaitReason);
+                if (WaitReason != "placed") Count(t.PlacementWaitReasons, WaitReason);
             }
         }
     }
@@ -131,19 +134,24 @@ internal sealed class TameTravelPlacement : IDisposable
             if (evidence) t.PlacementCandidates++;
             var candidate = TameTravelPlacementRules.Candidate(index, horizontalExtent, t.Journey.Exit, anchor, forward);
             if (evidence) { t.PlacementLastProbe = candidate; t.PlacementSupportHeight = null; }
+            _candidateReason = null;
             var point = ProbeLanding(candidate);
-            if (!point.HasValue) continue;
+            if (!point.HasValue) { if (evidence) Reject(t, _candidateReason ?? "no_safe_ground_position"); continue; }
             var direction = point.Value - anchor; direction.y = 0;
             if (direction.sqrMagnitude < .001f) direction = forward;
             if (evidence) t.PlacementSupportHeight = point.Value.y - extent + centerOffset.y - .15f;
-            if (TameTravelPlacementRules.HasEscape(point.Value, direction, Math.Max(3, horizontalExtent + 2), groundProbe, clearProbe, ref escapeProbes))
+            bool escape; int probesBefore = escapeProbes;
+            _probeWalkout = true;
+            try { escape = TameTravelPlacementRules.HasEscape(point.Value, direction, Math.Max(3, horizontalExtent + 2), groundProbe, clearProbe, ref escapeProbes); }
+            finally { _probeWalkout = false; }
+            if (escape)
             {
                 accessProbes++;
                 // Navigation targets stand on the support surface, not at an offset animal root.
                 var support = point.Value - Vector3.up * (extent - centerOffset.y + .15f);
                 t.PlacementAccessWarmupUntil ??= now + 4;
                 if (_access.Reachable(traveller.GetPosition(), support, out string accessReason))
-                { position = point.Value; WaitReason = "placed"; return true; }
+                { position = point.Value; t.PlacementTraveller = traveller.GetPosition(); WaitReason = "placed"; return true; }
                 if (evidence) Reject(t, accessReason);
                 WaitReason = accessReason;
                 if (accessReason == "access_path_unready_or_blocked" && now < t.PlacementAccessWarmupUntil.Value)
@@ -151,12 +159,11 @@ internal sealed class TameTravelPlacement : IDisposable
                 if (accessProbes >= 4) return false;
                 continue;
             }
-            WaitReason = "destination_escape_route_blocked";
-            if (escapeProbes >= TameTravelPlacementRules.MaximumEscapeProbes)
-            {
-                WaitReason = "destination_escape_search_deferred";
-                return false;
-            }
+            bool deferred = TameTravelPlacementRules.EscapeDeferred(probesBefore, escapeProbes);
+            WaitReason = deferred ? "destination_escape_search_deferred" : "destination_escape_route_blocked";
+            if (evidence) Reject(t, WaitReason);
+            // An unfinished walk-out check is retried: start the next pass at this candidate.
+            if (deferred) { t.PlacementCursor = index; return false; }
         }
         return false;
     }
@@ -168,11 +175,11 @@ internal sealed class TameTravelPlacement : IDisposable
         {
             var delta = candidate - _probeTransfer.Journey.Exit;
             if (delta.x * delta.x + delta.z * delta.z > TameTravelPlacementRules.LandingRadius * TameTravelPlacementRules.LandingRadius)
-            { if (_probeEvidence) Reject(_probeTransfer, "landing_range"); return null; }
+            { Note("landing_range"); return null; }
             var point = ProbeGround(candidate);
             if (!point.HasValue) return null;
             if (!Crowded(point.Value, out var away)) return point;
-            if (_probeEvidence) Reject(_probeTransfer, "obstacle_padding");
+            Note("obstacle_padding");
             if (push == TameTravelPlacementRules.MaximumPushes || away.sqrMagnitude < .0001f) return null;
             candidate = point.Value + away.normalized * (away.magnitude + .05f);
             if (_probeEvidence) _probeTransfer.PlacementLastProbe = candidate;
@@ -216,11 +223,16 @@ internal sealed class TameTravelPlacement : IDisposable
     }
     private Vector3? ProbeGround(Vector3 p)
         {
-            Vector3? Rejected(string reason) { if (_probeEvidence) Reject(_probeTransfer, reason); return null; }
-            if (!_surfaces.Probe(p, out float height, out var normal, out string surfaceReason)) return Rejected(surfaceReason);
+            Vector3? Rejected(string reason) { Note(reason); return null; }
+            if (!_surfaces.Probe(p, out float height, out var normal, out string surfaceReason))
+            {
+                if (_surfaces.Unsupported != null) Name(_probeTransfer.PlacementSurfaceBlocks, _surfaces.Unsupported);
+                return Rejected(surfaceReason);
+            }
             if (Math.Abs(height - _probeTransfer.Journey.Exit.y) > 24) return Rejected("vertical_range");
             p.y = height + _probeExtent - _probeCenterOffset.y + .15f;
-            if (Physics.Raycast(new Vector3(p.x, height + .1f, p.z), Vector3.up, 64, _building, QueryTriggerInteraction.Ignore)) return Rejected("building_overhead");
+            string? roof = Roof(new Vector3(p.x, height + .1f, p.z));
+            if (roof != null) { Name(_probeTransfer.PlacementSurfaceBlocks, roof + ":building_overhead"); return Rejected("building_overhead"); }
             if ((p - _probeTransfer.Journey.Exit).sqrMagnitude > TameTravelPlacementRules.ContextRadius * TameTravelPlacementRules.ContextRadius) return Rejected("walkout_range");
             // Cardinal and diagonal support samples cover the complete conservative footprint.
             foreach (var offset in FootprintOffsets)
@@ -233,18 +245,65 @@ internal sealed class TameTravelPlacement : IDisposable
             foreach (var creature in _creatures)
                 if ((creature.Position - p).sqrMagnitude < (_probeHorizontalExtent + creature.Clearance) * (_probeHorizontalExtent + creature.Clearance)) return Rejected("creature_clearance");
             var center = p + _probeCenterOffset;
-            return Physics.CheckCapsule(center + _probeAxis * _probeHalfLine, center - _probeAxis * _probeHalfLine, _probeRadius + .05f, _solid, QueryTriggerInteraction.Ignore) ? Rejected("solid_overlap") : p;
+            if (!Physics.CheckCapsule(center + _probeAxis * _probeHalfLine, center - _probeAxis * _probeHalfLine, _probeRadius + .05f, _solid, QueryTriggerInteraction.Ignore)) return p;
+            if (_probeEvidence && !_probeWalkout) Name(_probeTransfer.PlacementOverlapHits, Overlapping(center));
+            return Rejected("solid_overlap");
         }
+    // A player-built piece anywhere above is a roof. World-generated ruins (no creator) are not, so their
+    // arches and walls never hide the open ground beneath them; low ones still fail the body overlap.
+    private string? Roof(Vector3 point)
+    {
+        int count = Physics.RaycastNonAlloc(point, Vector3.up, _roofs, 64, _building, QueryTriggerInteraction.Ignore);
+        string? roof = count == _roofs.Length ? "roof_probe_capacity" : null;
+        for (int i = 0; i < count; i++)
+        {
+            var collider = _roofs[i].collider; _roofs[i] = default;
+            if (roof != null || collider == null) continue;
+            var view = collider.GetComponentInParent<ZNetView>();
+            var z = view != null ? view.GetZDO() : null;
+            if (z == null || z.GetLong(ZDOVars.s_creator) != 0) roof = view != null ? Utils.GetPrefabName(view.gameObject) : collider.name;
+        }
+        return roof;
+    }
+    // Name what the body overlapped, preferring a placed object over the terrain beneath it.
+    private string Overlapping(Vector3 center)
+    {
+        int count = Physics.OverlapCapsuleNonAlloc(center + _probeAxis * _probeHalfLine, center - _probeAxis * _probeHalfLine, _probeRadius + .05f,
+            _overlaps, _solid, QueryTriggerInteraction.Ignore);
+        string? found = null, terrain = null;
+        for (int i = 0; i < count; i++)
+        {
+            var collider = _overlaps[i]; _overlaps[i] = null!;
+            if (collider == null || found != null) continue;
+            string layer = LayerMask.LayerToName(collider.gameObject.layer);
+            var view = collider.GetComponentInParent<ZNetView>();
+            string name = layer + ":" + (view != null ? Utils.GetPrefabName(view.gameObject) : collider.name);
+            if (layer == "terrain") terrain ??= name; else found = name;
+        }
+        return found ?? terrain ?? "unknown";
+    }
+    private void Name(Dictionary<string, int> counts, string key)
+    {
+        if (!_probeEvidence || _probeWalkout) return;
+        Count(counts, counts.Count >= 16 && !counts.ContainsKey(key) ? "other" : key);
+    }
     private bool ProbeClear(Vector3 before, Vector3 after)
         {
             var center = before + _probeCenterOffset; var delta = after - before;
             bool clear = !Physics.CapsuleCast(center + _probeAxis * _probeHalfLine, center - _probeAxis * _probeHalfLine, _probeRadius + .05f,
                 delta.normalized, out _, delta.magnitude, _solid, QueryTriggerInteraction.Ignore);
-            if (!clear && _probeEvidence) Reject(_probeTransfer, "walkout_collision");
+            if (!clear) Note("walkout_collision");
             return clear;
         }
-    private static void Reject(AnimalTransfer t, string reason) =>
-        t.PlacementRejections[reason] = t.PlacementRejections.TryGetValue(reason, out int count) ? count + 1 : 1;
+    // Walk-out steps are counted per step; a candidate keeps only its latest reason until its outcome is known.
+    private void Note(string reason)
+    {
+        if (!_probeEvidence) return;
+        if (_probeWalkout) Count(_probeTransfer.PlacementWalkoutRejections, reason); else _candidateReason = reason;
+    }
+    private static void Reject(AnimalTransfer t, string reason) => Count(t.PlacementRejections, reason);
+    private static void Count(Dictionary<string, int> counts, string reason) =>
+        counts[reason] = counts.TryGetValue(reason, out int count) ? count + 1 : 1;
 
     public static void Move(AnimalTransfer t, Vector3 position)
     {

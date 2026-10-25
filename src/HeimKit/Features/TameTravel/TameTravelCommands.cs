@@ -23,13 +23,14 @@ internal sealed class TameTravelCommands
     private readonly Func<ZDOID, bool> _reserved;
     private readonly Action<ZNetPeer, ZDO, TameOrder> _confirmed;
     private readonly TameTravelDiagnostics _diagnostics;
+    private readonly TameTravelStops? _stops;
     public readonly Dictionary<ZDOID, FollowBinding> Bindings = new();
     public bool FollowingAuthorized(ZDOID id, ZNetPeer peer, ZDOID character, string name)
         => Bindings.TryGetValue(id, out var binding) && !binding.Pending && binding.Order == TameOrder.Follow &&
             ReferenceEquals(binding.Peer, peer) && binding.Character == character && binding.Name == name;
     private readonly List<KeyValuePair<ZDOID, FollowBinding>> _snapshot = new();
-    public TameTravelCommands(TameTravelRules rules, TameTravelSettings settings, ManualLogSource log, Func<ZDOID, bool> reserved, Action<ZNetPeer, ZDO, TameOrder> confirmed, TameTravelDiagnostics diagnostics)
-    { _rules = rules; _settings = settings; _log = log; _reserved = reserved; _confirmed = confirmed; _diagnostics = diagnostics; }
+    public TameTravelCommands(TameTravelRules rules, TameTravelSettings settings, ManualLogSource log, Func<ZDOID, bool> reserved, Action<ZNetPeer, ZDO, TameOrder> confirmed, TameTravelDiagnostics diagnostics, TameTravelStops? stops = null)
+    { _rules = rules; _settings = settings; _log = log; _reserved = reserved; _confirmed = confirmed; _diagnostics = diagnostics; _stops = stops; }
     public void Observe(ZNetPeer peer, ZDOID target, int method, ZPackage parameters, float now)
     {
         if (!_rules.Actor(peer, out var actor)) return;
@@ -41,7 +42,9 @@ internal sealed class TameTravelCommands
             if (id != peer.m_characterID || parameters.GetPos() != parameters.Size()) return;
             // A native toggle invalidates any earlier association, including another player's.
             Bindings.Remove(target);
+            TameTravelFollowState.Untrack(target);
             if (animal.GetString(ZDOVars.s_follow).Length == 0) Bind(peer, animal, now, pending: true, TameOrder.Follow);
+            else if (animal.GetString(ZDOVars.s_follow) == peer.m_playerName) _stops?.QueueCleanup(animal, peer.m_playerName, now);
             return;
         }
         if (method != "Say".GetStableHashCode() && method != "ChatMessage".GetStableHashCode()) return;
@@ -69,25 +72,25 @@ internal sealed class TameTravelCommands
         float range = TameTravelCommandRules.SelectionRange(order, _settings.CommandRangeMeters.Value);
         var eligible = _eligible; eligible.Clear();
         foreach (var z in nearby) if (_rules.Animal(z) && (z.GetPosition() - actor.GetPosition()).sqrMagnitude <= range * range) eligible.Add(z);
+        _own.Clear();
+        if (order == TameOrder.Stay) foreach (var z in eligible) if (StopAssociated(peer, z)) _own.Add(z);
         if (_diagnostics.SelectionEnabled)
         {
             _supported.Clear();
             foreach (var z in nearby) if (_rules.Supported(z)) _supported.Add((z, Vector3.Distance(z.GetPosition(), actor.GetPosition())));
             _supported.Sort(DistanceOrder);
-            _diagnostics.Selection(peer, order, nearby.Count, _supported.Count, eligible.Count);
+            _diagnostics.Selection(peer, order, nearby.Count, _supported.Count, order == TameOrder.Stay ? _own.Count : eligible.Count);
             for (int i = 0; i < Math.Min(3, _supported.Count); i++)
             {
                 var candidate = _supported[i];
                 _diagnostics.Candidate(peer, order, candidate.Record, candidate.Distance, range,
-                    _rules.AnimalRejection(candidate.Record) ?? (candidate.Distance > range ? "outside_command_range" : "eligible"));
+                    _rules.AnimalRejection(candidate.Record) ?? (candidate.Distance > range ? "outside_command_range" :
+                        order == TameOrder.Stay && !StopAssociated(peer, candidate.Record) ?
+                            candidate.Record.GetString(ZDOVars.s_follow).Length == 0 ? "not_following_you" : "following_another_player" : "eligible"));
             }
         }
         if (order == TameOrder.Stay)
         {
-            _own.Clear();
-            foreach (var z in eligible)
-                if (TameTravelCommandRules.StopAssociated(z.GetString(ZDOVars.s_follow), peer.m_playerName,
-                    Bindings.TryGetValue(z.m_uid, out var binding) && ReferenceEquals(binding.Peer, peer) && binding.Character == peer.m_characterID)) _own.Add(z);
             _own.Sort(AnimalOrder);
             if (_own.Count == 0) { Reject(peer, "no_associated_animals", "No following or waiting animal associated with you is in command range."); return; }
             for (int i = 0; i < Math.Min(16, _own.Count); i++) QueueStop(peer, _own[i], now);
@@ -106,17 +109,41 @@ internal sealed class TameTravelCommands
         if (_reserved(selected.m_uid)) { Reject(peer, "animal_handoff_busy", "That animal is changing ownership; wait for its result."); return; }
         Apply(peer, selected, order, now);
     }
+    private bool StopAssociated(ZNetPeer peer, ZDO animal)
+    {
+        bool bound = Bindings.TryGetValue(animal.m_uid, out var binding) && ReferenceEquals(binding.Peer, peer) && binding.Character == peer.m_characterID;
+        string follow = animal.GetString(ZDOVars.s_follow);
+        return TameTravelCommandRules.StopAssociated(follow, peer.m_playerName, bound, binding?.ReclaimName ?? "", binding?.Pending ?? false);
+    }
     private void Apply(ZNetPeer peer, ZDO selected, TameOrder order, float now)
     {
+        if (_stops?.Contains(selected.m_uid) == true)
+        { Reject(peer, "stop_pending", "Waiting for the animal's stop handshake to finish."); return; }
         bool associated = Bindings.TryGetValue(selected.m_uid, out var existing) && ReferenceEquals(existing.Peer, peer) && existing.Character == peer.m_characterID;
-        if (existing != null && !associated) { Reject(peer, "foreign_association", "That animal has another player's active command."); return; }
+        if (existing != null && !associated)
+        {
+            if (_rules.ConnectedPeer(existing.Peer)) { Reject(peer, "foreign_association", "That animal has another player's active command."); return; }
+            Bindings.Remove(selected.m_uid); existing = null;
+        }
         if (existing?.Pending == true) { Reject(peer, "command_pending", "Waiting for the previous animal command to confirm."); return; }
         string follow = selected.GetString(ZDOVars.s_follow);
-        if (follow.Length != 0 && follow != peer.m_playerName) { Reject(peer, "foreign_following", "That animal is following another player."); return; }
+        if (follow.Length != 0 && follow != peer.m_playerName)
+        {
+            if (order != TameOrder.Follow || _rules.ConnectedName(follow) || _stops == null)
+            { Reject(peer, "foreign_following", "That animal is following another connected player, or its owner cannot be verified."); return; }
+            if (!Bind(peer, selected, now, pending: true, order)) return;
+            var reclaim = Bindings[selected.m_uid]; reclaim.ReclaimName = follow; reclaim.CommandSent = false;
+            TameTravelFollowState.Mark(selected, follow);
+            Feedback(peer, "Clearing the absent player's saved following before starting yours.");
+            _diagnostics.Command(peer, "reclaim_queued", "Follow", "saved_follower_offline", animal: selected.m_uid);
+            return;
+        }
         // A fresh authenticated command can address native following after reconnect.
         // A saved name alone still never starts a portal journey.
         if (order != TameOrder.Follow && !associated && follow != peer.m_playerName)
         { Reject(peer, "association_required", order == TameOrder.Stay ? "Animal is already staying; no portal travel authorized." : "Use !follow or /comehere to associate this animal first."); return; }
+        if (order == TameOrder.Wait && _stops != null)
+        { Bind(peer, selected, now, pending: true, order); return; }
         string expected = TameTravelCommandRules.ExpectedFollow(order, peer.m_playerName);
         if (follow == expected)
         {
@@ -133,14 +160,16 @@ internal sealed class TameTravelCommands
     private bool Bind(ZNetPeer peer, ZDO animal, float now, bool pending, TameOrder order)
     {
         if (Bindings.Count >= 512 && !Bindings.ContainsKey(animal.m_uid)) { Reject(peer, "binding_capacity", "Animal command capacity reached; try again later."); return false; }
+        if (order == TameOrder.Follow) TameTravelFollowState.Mark(animal, peer.m_playerName);
         Bindings[animal.m_uid] = new FollowBinding { Peer = peer, Character = peer.m_characterID, Animal = animal.m_uid,
             Name = peer.m_playerName, Consent = now, Requested = now, Pending = pending, Order = order, WaitPosition = animal.GetPosition() };
         return true;
     }
     private void QueueStop(ZNetPeer peer, ZDO animal, float now)
     {
-        // Revoke portal authority immediately. The controller sees the changed
-        // binding and releases its transfer fence before the native stop is sent.
+        // Revoke portal authority immediately. The controller sees the changed binding and releases its
+        // transfer fence before the native stop is sent; a running follow-spacing session instead keeps
+        // server ownership so the stop reaches the server's own instance and is released once confirmed.
         Bindings.TryGetValue(animal.m_uid, out var previous);
         if (previous != null && (!ReferenceEquals(previous.Peer, peer) || previous.Character != peer.m_characterID))
         { Reject(peer, "foreign_association", "That animal has another player's active command."); return; }
@@ -148,9 +177,10 @@ internal sealed class TameTravelCommands
         { Feedback(peer, "The stop request is already pending."); return; }
         if (!Bind(peer, animal, now, pending: true, TameOrder.Stay)) return;
         Bindings[animal.m_uid].CommandSent = false;
+        Bindings[animal.m_uid].ReclaimName = previous?.ReclaimName ?? "";
         Bindings[animal.m_uid].AwaitingEarlierFollow = previous != null &&
             TameTravelCommandRules.AwaitingEarlierFollow(previous.Pending, previous.Order, previous.CommandSent);
-        _confirmed(peer, animal, TameOrder.Stay);
+        if (_stops == null) _confirmed(peer, animal, TameOrder.Stay);
         _diagnostics.Command(peer, "stop_queued", "Stay", Bindings[animal.m_uid].AwaitingEarlierFollow ? "earlier_follow_pending" : "ownership_and_stop_pending", animal: animal.m_uid);
         Feedback(peer, "Following permission cancelled; confirming animal stay.");
     }
@@ -167,6 +197,30 @@ internal sealed class TameTravelCommands
             if (reason == null && TameTravelCommandRules.ConsentExpired(b.Order, now - b.Consent, _settings.FollowConsentSeconds.Value)) reason = "consent_expired";
             if (reason != null) { RemoveBinding(pair.Key, b, reason, now, animal); continue; }
             string follow = animal!.GetString(ZDOVars.s_follow);
+            if (b.Pending && b.ReclaimName.Length != 0 && _stops != null)
+            {
+                if (_rules.ConnectedName(b.ReclaimName) || follow.Length != 0 && follow != b.ReclaimName)
+                { Bindings.Remove(pair.Key); Reject(b.Peer, "reclaim_owner_changed", "The former follower reconnected or the animal changed following; command cancelled."); continue; }
+                if (!_stops.Contains(pair.Key) && _reserved(pair.Key)) continue;
+                if (_stops.TryStop(animal, b.ReclaimName, now))
+                {
+                    b.ReclaimName = ""; b.Requested = now;
+                    if (b.Order == TameOrder.Follow) TameTravelFollowState.Mark(animal, b.Name);
+                    else { b.Pending = false; Result(b.Peer, animal, b.Order); Bindings.Remove(pair.Key); }
+                }
+                else if (now - b.Requested > 15)
+                { Bindings.Remove(pair.Key); Reject(b.Peer, "reclaim_stop_timeout", "The old following could not be cleared; follow was not started.", failed: true); }
+                continue;
+            }
+            if (b.Pending && b.Order != TameOrder.Follow && _stops != null)
+            {
+                if (!_stops.Contains(pair.Key) && _reserved(pair.Key)) continue;
+                if (_stops.TryStop(animal, b.Name, now))
+                { b.Pending = false; Result(b.Peer, animal, b.Order); if (b.Order == TameOrder.Stay) Bindings.Remove(pair.Key); }
+                else if (now - b.Requested > 15)
+                { Bindings.Remove(pair.Key); Reject(b.Peer, "stop_handshake_timeout", "Stay could not be confirmed; retry /nonono.", failed: true); }
+                continue;
+            }
             if (b.Pending)
             {
                 if (!b.CommandSent)
@@ -195,7 +249,7 @@ internal sealed class TameTravelCommands
                         }
                         ZRoutedRpc.instance.InvokeRoutedRPC(owner, pair.Key, "Command", b.Character, false);
                         b.CommandSent = true; b.Requested = now;
-                        _diagnostics.Command(b.Peer, "native_toggle_sent", "Stay", animal: pair.Key);
+                        _diagnostics.Command(b.Peer, "native_toggle_sent", b.Order.ToString(), animal: pair.Key);
                         continue;
                     }
                 }
@@ -210,8 +264,21 @@ internal sealed class TameTravelCommands
     }
     private void RemoveBinding(ZDOID id, FollowBinding binding, string reason, float now, ZDO? animal)
     {
+        if (_stops != null && animal != null && _rules.Animal(animal) &&
+            (binding.Order == TameOrder.Follow || binding.Pending) && reason != "follow_state_changed")
+            _stops.QueueCleanup(animal, binding.ReclaimName.Length != 0 ? binding.ReclaimName : binding.Name, now);
+        else TameTravelFollowState.Untrack(id);
         Bindings.Remove(id);
         { if (_diagnostics.TraversalReady(binding.Peer, "consent_ended", reason, animal: id, transition: true)) _diagnostics.Traversal(binding.Peer, "consent_ended", reason, animal: id, fields: null, transition: true, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("order", binding.Order), ("consent_age_s", now - binding.Consent), ("following", animal?.GetString(ZDOVars.s_follow)), ("wait_position", binding.WaitPosition), ("animal_position", animal?.GetPosition()), ("maximum_wait_range_m", _settings.FollowerRangeMeters.Value) } : null); }
+    }
+    internal void ClearForShutdown()
+    {
+        if (_stops == null || ZDOMan.instance == null) return;
+        foreach (var binding in Bindings.Values)
+        {
+            var animal = ZDOMan.instance.GetZDO(binding.Animal);
+            if (animal != null) _stops.ClearForShutdown(animal, binding.ReclaimName.Length != 0 ? binding.ReclaimName : binding.Name);
+        }
     }
     private void Result(ZNetPeer peer, ZDO animal, TameOrder order)
     {

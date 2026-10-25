@@ -38,6 +38,14 @@ internal static class ZdoReplication
         catch (Exception error) { throw new InvalidOperationException("Native animal replication peer bookkeeping is unavailable.", error); }
     }
 
+    internal static void ResetClientCache(ZDOID id, Action<ZPackage> removeRemoteCache, Action sendSnapshot)
+    {
+        if (id.IsNone()) throw new ArgumentException("A client cache reset requires an original record ID.", nameof(id));
+        var packet = new ZPackage(); packet.Write(1); packet.Write(id);
+        removeRemoteCache(packet);
+        sendSnapshot();
+    }
+
     internal static void Send(ZNetPeer peer, ZDO record, uint? wireRevision = null)
     {
         var native = Accessors.GetPeer(ZDOMan.instance, peer.m_uid);

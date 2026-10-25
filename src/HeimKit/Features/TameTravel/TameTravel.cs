@@ -18,6 +18,7 @@ public sealed class TameTravel : IServerModule
     private readonly GameVersionCompatibility _compatibility;
     private readonly PlayerServices _players;
     private TameTravelController? _controller;
+    private TameTravelFollowRecovery? _followRecovery;
     private IDisposable? _presenceRegistration;
     private bool _occupied;
     private ZDOMan? _world;
@@ -41,6 +42,7 @@ public sealed class TameTravel : IServerModule
         if (!_settings.Enabled.Value) return;
         if (!_compatibility.Supports(gameVersion)) { Log("DISABLED: unsupported game version " + gameVersion + "; required version " + _compatibility.RequiredVersion, LogLevel.Warning); return; }
         IsActive = true;
+        try { _followRecovery = new(_logger); } catch (Exception error) { Fail(error); return; }
         if (_settings.DebugLogging.Enabled) Log("Waiting for joined players and dedicated-server world", LogLevel.Debug);
         try { _presenceRegistration = _players.Events.Subscribe(PresenceChanged, Fail, () => _processing.IsEmptyPaused, () => _processing.IsRunning, () => _processing.IsServerReady); }
         catch (Exception error) { Fail(error); }
@@ -52,6 +54,7 @@ public sealed class TameTravel : IServerModule
         if (!_settings.Enabled.Value) { Shutdown(); return; }
         try
         {
+            _followRecovery?.Report();
             bool ready = WorldServices.Activity && WorldServices.Terrain;
             if (ready) _processing.ServerReady();
             if (!_occupied) { StopController(); return; }
@@ -94,6 +97,7 @@ public sealed class TameTravel : IServerModule
     {
         IsActive = false; _occupied = false; _processing.Reset();
         var registration = _presenceRegistration; _presenceRegistration = null;
-        ModuleCleanup.Run(_logger, Name, () => registration?.Dispose(), StopController);
+        var recovery = _followRecovery; _followRecovery = null;
+        ModuleCleanup.Run(_logger, Name, () => registration?.Dispose(), StopController, () => recovery?.Dispose());
     }
 }
