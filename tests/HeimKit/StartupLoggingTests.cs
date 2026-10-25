@@ -15,7 +15,12 @@ internal static class StartupLoggingTests
             ("InfiniteTorches", "Torches", (config, log) => new InfiniteTorches(config, log, PlayerServicesTests.For(config, log))),
             ("WeatherGuard", "WeatherGuard", (config, log) => new WeatherGuard(config, log, PlayerServicesTests.For(config, log))),
             ("AFKNightWatch", "AFKNightWatch", (config, log) => new AFKNightWatch(config, log, PlayerServicesTests.For(config, log))),
-            ("AFKRaidWatch", "AFKRaidWatch", (config, log) => new AFKRaidWatch(config, log, PlayerServicesTests.For(config, log)))
+            ("AFKRaidWatch", "AFKRaidWatch", (config, log) => new AFKRaidWatch(config, log, PlayerServicesTests.For(config, log))),
+            ("DoorKeeper", "DoorKeeper", (config, log) => new HeimKit.Features.DoorKeeper.DoorKeeper(config, log, PlayerServicesTests.For(config, log))),
+            ("ForestRenewal", "ForestRenewal", (config, log) => new HeimKit.Features.ForestRenewal.ForestRenewal(config, log, PlayerServicesTests.For(config, log))),
+            ("SeaSalvage", "SeaSalvage", (config, log) => new HeimKit.Features.SeaSalvage.SeaSalvage(config, log, PlayerServicesTests.For(config, log))),
+            ("TameTravel", "TameTravel", (config, log) => new HeimKit.Features.TameTravel.TameTravel(config, log, PlayerServicesTests.For(config, log))),
+            ("HeimMender", "HeimMender", (config, log) => new HeimKit.Features.HeimMender.HeimMender(config, log, PlayerServicesTests.For(config, log)))
         };
         foreach (var factory in factories)
         foreach (bool enabled in new[] { false, true })

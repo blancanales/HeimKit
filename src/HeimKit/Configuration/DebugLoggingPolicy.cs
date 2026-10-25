@@ -1,6 +1,12 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using HeimKit.Shared;
 
 namespace HeimKit.Configuration;
 
@@ -10,7 +16,7 @@ public sealed class DebugLoggingPolicy
     private readonly ConfigEntry<bool>? _feature;
     public bool Suppressed { get; }
     public bool ConfiguredEnabled => (_global.Value || _feature?.Value == true) && !Suppressed;
-    public bool Enabled => ConfiguredEnabled && HeimKit.Shared.DiagnosticLog.ServerActivity.Allowed;
+    public bool Enabled => ConfiguredEnabled && HeimKit.Core.Diagnostics.DiagnosticLog.ServerActivity.Allowed;
     // One configuration declaration is deliberately visible at Debug even when suppression
     // disables this feature's recurring diagnostics. Loader severity filters still apply.
     public void ReportStartup(ManualLogSource logger, string name, bool featureEnabled)
@@ -19,15 +25,12 @@ public sealed class DebugLoggingPolicy
         if (ConfiguredEnabled) DebugLoggingDelivery.Report(logger, name);
         string source = Suppressed ? "hidden_override" : _global.Value && _feature?.Value == true
             ? "global_and_feature" : _feature?.Value == true ? "feature" : "global";
-        DiagnosticLog.Write(logger, name, DiagnosticEvent.Lifecycle,
-            Suppressed ? "Debug logging suppressed by DisableDebugLogging."
+        if (DiagnosticLog.DebugAvailable(logger, name)) DiagnosticLog.Write(logger, name, CoreLogTopics.Config, Suppressed ? "Debug logging suppressed by DisableDebugLogging."
                 : source == "feature" ? "Debug logging enabled by feature DebugMode."
                 : source == "global" ? "Debug logging enabled by global DebugMode."
-                : "Debug logging enabled by global and feature DebugMode.",
-            new (string, object?)[] {
-                ("source", source), ("global_debug_mode", _global.Value), ("feature_debug_mode", _feature?.Value == true),
-                ("disable_debug_logging", Suppressed), ("configured_debug_enabled", ConfiguredEnabled),
-                ("feature_enabled", featureEnabled), ("config_section", _feature?.Definition.Section)
+                : "Debug logging enabled by global and feature DebugMode.", new LogField[] { ("source", source), DiagnosticLog.FieldAlways("global_debug_mode", _global.Value), DiagnosticLog.FieldAlways("feature_debug_mode", _feature?.Value == true),
+                DiagnosticLog.FieldAlways("disable_debug_logging", Suppressed), DiagnosticLog.FieldAlways("configured_debug_enabled", ConfiguredEnabled),
+                DiagnosticLog.FieldAlways("feature_enabled", featureEnabled), ("config_section", _feature?.Definition.Section), ("log_schema", 2)
             }, LogLevel.Debug);
     }
     public DebugLoggingPolicy(ConfigEntry<bool> global, bool suppressed, ConfigEntry<bool>? feature = null)

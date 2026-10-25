@@ -1,10 +1,16 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.IO;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
-using HeimKit.Shared;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 
 namespace HeimKit.Features.SharedMap;
 
@@ -168,17 +174,17 @@ public sealed class SharedMap : IServerModule
     internal void Fail(Exception error)
     {
         if (!IsActive) return;
-        Log("DISABLED after runtime failure: " + error, LogLevel.Error);
+        DiagnosticLog.Write(_logger, Name, CoreLogTopics.Lifecycle, "Disabled after a runtime failure.", level: LogLevel.Error, error: error);
         Shutdown();
     }
 
     private void Log(string message, LogLevel level = LogLevel.Info) =>
-        DiagnosticLog.Write(_logger, Name, DiagnosticEvent.Lifecycle, message, level: level);
+        DiagnosticLog.Write(_logger, Name, message, level: level);
 
     private void StopController()
     {
-        var controller = _controller; _controller = null;
-        controller?.Dispose();
+        var controller = _controller; _controller = null; if (controller != null) ModuleScheduler.Current.Forget(controller);
+        try { controller?.Dispose(); } finally { WorldObjectProvider.Current?.ReleaseOwner(Name); }
     }
 
     private void FlushStore()

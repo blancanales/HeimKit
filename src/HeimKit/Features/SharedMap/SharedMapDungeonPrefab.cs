@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -32,22 +39,23 @@ internal sealed class SharedMapDungeonPrefab
 
     public SharedMapDungeonPrefab(GameObject prefab)
     {
+        PrefabRegistry.Current.Observe(prefab);
         Name = prefab.name;
         if (!Labels.TryGetValue(Name, out string label)) throw new InvalidDataException("Unsupported dungeon prefab.");
         Label = label;
-        var location = prefab.GetComponent<Location>();
+        var location = PrefabRegistry.Component<Location>(prefab);
         if (location == null || !location.m_hasInterior) throw new InvalidDataException("Dungeon has no native interior metadata.");
         CustomInterior = location.m_useCustomInteriorTransform && location.m_interiorTransform != null && location.m_generator != null;
         CustomInteriorShift = CustomInterior ? location.m_interiorTransform!.localPosition + location.m_generator!.transform.localPosition : Vector3.zero;
         if (CustomInterior) CustomInteriorShift = new Vector3(CustomInteriorShift.x, location.m_interiorTransform!.localPosition.y, CustomInteriorShift.z);
         Pickups = SharedMapDungeonLoot.Points(prefab, CustomInterior ? location.m_interiorTransform : null);
         CustomPickups = CustomInterior ? SharedMapDungeonLoot.Points(location.m_interiorTransform!.gameObject) : Array.Empty<(int, Vector3, string)>();
-        GeneratorPoints = prefab.GetComponentsInChildren<DungeonGenerator>(true).Select(g =>
+        GeneratorPoints = PrefabRegistry.Children<DungeonGenerator>(prefab, true).Select(g =>
             (Utils.GetPrefabName(g.gameObject).GetStableHashCode(), Quaternion.Inverse(prefab.transform.rotation) * (g.transform.position - prefab.transform.position))).ToArray();
         Generators = GeneratorPoints.Select(g => g.Hash).Distinct().ToArray();
         var gateways = new List<DungeonGateway>();
         var root = prefab.transform;
-        foreach (var teleport in prefab.GetComponentsInChildren<Teleport>(true))
+        foreach (var teleport in PrefabRegistry.Children<Teleport>(prefab, true))
         {
             var target = teleport.m_targetPoint;
             if (!teleport.enabled || teleport.m_hoverText != "$location_enter" || target == null || target.m_targetPoint != teleport ||
@@ -61,7 +69,7 @@ internal sealed class SharedMapDungeonPrefab
             {
                 if (!node.gameObject.activeSelf) { valid = false; break; }
                 // Reject behaviours that can conditionally move, randomize or deactivate the gateway ancestry.
-                foreach (var behaviour in node.GetComponents<MonoBehaviour>())
+                foreach (var behaviour in PrefabRegistry.Components<MonoBehaviour>(node))
                     if (behaviour == null || behaviour != teleport && behaviour != location && behaviour.enabled) valid = false;
                 if (node == root) break;
                 indices.Insert(0, node.GetSiblingIndex().ToString(CultureInfo.InvariantCulture));

@@ -1,8 +1,15 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using HeimKit.Features.SharedMap.Models;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 using UnityEngine;
 
 namespace HeimKit.Features.SharedMap;
@@ -26,7 +33,7 @@ internal sealed class SharedMapSilverDiscovery : IDisposable
 
     public void Install()
     {
-        if (ZNetScene.instance.GetPrefab(TerrainPrefab)?.GetComponent<TerrainComp>() == null)
+        if (PrefabRegistry.Component<TerrainComp>(PrefabRegistry.Current.Prefab(TerrainPrefab)) == null)
             throw new InvalidOperationException("Native terrain compiler is unavailable for Silver discovery.");
         _subscription = _messages.Subscribe(Observe, _failed);
     }
@@ -40,7 +47,7 @@ internal sealed class SharedMapSilverDiscovery : IDisposable
         float health = actor.GetFloat(ZDOVars.s_health, float.NaN);
         position = actor.GetPosition();
         if (!SharedMapExploration.Finite(health) || health <= 0 || !Finite(position) || Character.InInterior(position)) return false;
-        var item = ZNetScene.instance.GetPrefab(actor.GetInt(ZDOVars.s_rightItem))?.GetComponent<ItemDrop>();
+        var item = PrefabRegistry.Component<ItemDrop>(PrefabRegistry.Current.Prefab(actor.GetInt(ZDOVars.s_rightItem)));
         if (item == null || item.m_itemData.m_shared.m_skillType != Skills.SkillType.Pickaxes) return false;
         animation = item.m_itemData.m_shared.m_attack?.m_attackAnimation ?? "";
         return animation.Length > 0;
@@ -108,7 +115,7 @@ internal sealed class SharedMapSilverDiscovery : IDisposable
     private bool RecentNear(Vector3 point)
     {
         float now = Time.unscaledTime; int matches = 0;
-        foreach (var peer in _presence.Peers)
+        for (int rosterIndex1 = 0; rosterIndex1 < _presence.Peers.Count && _presence.Peers[rosterIndex1] is var peer; rosterIndex1++)
         {
             if (!_recent.TryGetValue(peer.m_uid, out var recent) || recent.Actor != peer.m_characterID ||
                 now < recent.At || now - recent.At > 3 || !Actor(peer, out _, out var position, out _) || !Near(position, point)) continue;

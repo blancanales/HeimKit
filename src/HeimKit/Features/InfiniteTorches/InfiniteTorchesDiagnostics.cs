@@ -1,18 +1,23 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Linq;
 using System.Collections.Generic;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using HeimKit.Shared;
 using HeimKit.Features.InfiniteTorches.Models;
 
 namespace HeimKit.Features.InfiniteTorches;
 
-public sealed class InfiniteTorchesDiagnostics
+public sealed class InfiniteTorchesDiagnostics : FeatureDiagnostics
 {
     private readonly ManualLogSource _logger;
     private readonly Func<bool> _debugEnabled;
-    private readonly DiagnosticBudget _budget = new();
     private readonly Func<Dictionary<string, long>>? _totals;
     private Dictionary<string, long> _previous = new();
     private float _lastSummary;
@@ -25,21 +30,28 @@ public sealed class InfiniteTorchesDiagnostics
     public InfiniteTorchesDiagnostics(HeimKit.Configuration.DebugLoggingPolicy policy, ManualLogSource logger)
         : this(() => policy.Enabled, logger) { }
     public InfiniteTorchesDiagnostics(Func<bool> debugEnabled, ManualLogSource logger, Func<Dictionary<string, long>>? totals = null)
-    { _logger = logger; _debugEnabled = debugEnabled; _totals = totals; }
-    public bool IsDebugEnabled => _debugEnabled() && DiagnosticLog.ServerActivity.Allowed;
+    { _logger = logger; _debugEnabled = debugEnabled; ConfigureDiagnostics(debugEnabled, logger, "InfiniteTorches"); _totals = totals; }
+    public bool IsDebugEnabled => DiagnosticsEnabled;
     public string SettingsDescription => $"debug mode {IsDebugEnabled}; automatic diagnostic interval 60s";
-    private void Write(DiagnosticEvent category, string message, Dictionary<string, object?> fields)
-        => DiagnosticLog.Write(_logger, "InfiniteTorches", category, message, fields.Select(p => (p.Key, p.Value)), LogLevel.Debug);
-    private static (string Message, Dictionary<string, object?> Fields) Payload(string text)
+    private void Write(LogTopic topic, string message, Dictionary<string, object?> fields)
+    {
+        if (!IsDebugEnabled) return;
+        LogFields evidence = fields;
+        DiagnosticLog.Write(_logger, "InfiniteTorches", topic, message, evidence.Take(8), LogLevel.Debug);
+        if (VerboseEnabled && fields.Count > 8) DiagnosticLog.Write(_logger, "InfiniteTorches", topic, fields.TryGetValue("object", out var id) && id != null ? $"Refill evidence for object {id}." : "Refill evidence for the last minute.", evidence.Skip(8), LogLevel.Debug, verbose: true);
+    }
+    private static (string Message, Dictionary<string, object?> Fields) Payload(string text, int maximum = 8)
     {
         var segments = text.Split(new[] { "; " }, StringSplitOptions.None);
         var fields = new Dictionary<string, object?>();
         foreach (string segment in segments)
         {
+            if (fields.Count >= maximum) break;
             int equals = segment.IndexOf('=');
             if (equals < 0) continue;
             string key = new string(segment.Substring(0, equals).Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '_').ToArray());
             string value = segment.Substring(equals + 1).TrimEnd('.');
+            foreach (string suffix in new[] { "_now", "_pass", "_interval" }) if (key.EndsWith(suffix, StringComparison.Ordinal)) { key = key.Substring(0, key.Length - suffix.Length); break; }
             fields[key] = long.TryParse(value, out long count) ? count :
                 bool.TryParse(value, out bool flag) ? flag : (object)value;
         }
@@ -47,50 +59,49 @@ public sealed class InfiniteTorchesDiagnostics
     }
     public void LogRefillRequest(float now, Func<string> describe)
     {
-        if (!IsDebugEnabled || !_budget.Reserve(now, "ACTION", RefillDetailLimit)) return;
-        var payload = Payload(describe()); Write(DiagnosticEvent.Action, payload.Message, payload.Fields);
+        if (!IsDebugEnabled || !_budget.Reserve(now, "refill_requests", RefillDetailLimit)) return;
+        var payload = Payload(describe()); Write(InfiniteTorchesLogTopics.Refill, payload.Message, payload.Fields);
     }
-    public void Request(float now, string id, string prefab, string position, float before, float target)
+    public void Request(float now, string id, string prefab, UnityEngine.Vector3 position, float before, float target)
     {
-        if (!IsDebugEnabled || !_budget.Reserve(now, "ACTION", RefillDetailLimit)) return;
-        Write(DiagnosticEvent.Action, "Refill request sent; client application unconfirmed", new()
-        { ["object"] = id, ["prefab"] = prefab, ["position"] = position, ["fuel_before"] = before, ["fuel_target"] = target });
+        if (!IsDebugEnabled || !_budget.Reserve(now, "refill_requests", RefillDetailLimit)) return;
+        Write(InfiniteTorchesLogTopics.Refill, "Refill request sent; client application unconfirmed", new()
+        { ["object"] = id, ["prefab"] = prefab, ["pos"] = position, ["fuel_before"] = DiagnosticLog.Kept(before), ["fuel_target"] = target });
     }
     public void UnsupportedPrefabs(int count, IReadOnlyDictionary<string, int> reasons)
     {
         if (count <= 0) return;
         string grouped = string.Join(", ", reasons.OrderBy(pair => pair.Key).Select(pair => pair.Key + " (" + pair.Value + ")"));
-        DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Lifecycle,
-            $"Skipped {count} unsupported prefab entries: {grouped}. Review Torches.Prefabs.", level: LogLevel.Warning);
+        DiagnosticLog.Write(_logger, "InfiniteTorches", $"Skipped {count} unsupported prefab entries: {grouped}. Review Torches.Prefabs.", level: LogLevel.Warning);
     }
     public void RefillSummary(int fuelUpdates)
     {
         if (fuelUpdates <= 0) return;
-        DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Result,
-            $"Fuel increase observed for {fuelUpdates} {(fuelUpdates == 1 ? "light source" : "light sources")}.");
+        DiagnosticLog.Write(_logger, "InfiniteTorches", $"Fuel increase observed for {fuelUpdates} {(fuelUpdates == 1 ? "light source" : "light sources")}.");
     }
     public void Result(float now, RefillResult result)
     {
-        if (!IsDebugEnabled || !_budget.Reserve(now, "RESULT", 6)) return;
+        if (!IsDebugEnabled || !_budget.Reserve(now, "refill_results", 6)) return;
         string message = result.Outcome == "fuel_increase" ? "Fuel increase observed after request; delivery acknowledgement unavailable" :
             result.Outcome == "timeout" ? "Sufficient fuel increase not observed; retry permitted if eligible" :
             result.Outcome == "owner_changed" ? "Owner changed; prior request tracking cleared" : "Object unavailable; request tracking cleared";
         var fields = new Dictionary<string, object?> { ["object"] = result.Object, ["outcome"] = result.Outcome,
-            ["source"] = "replicated_state", ["wait_s"] = result.WaitSeconds, ["fuel_before"] = result.Before,
-            ["fuel_target"] = result.Target, ["fuel_observed"] = result.Fuel };
+            ["wait_s"] = result.WaitSeconds, ["fuel_before"] = DiagnosticLog.Kept(result.Before),
+            ["fuel_target"] = result.Target, ["fuel_observed"] = DiagnosticLog.Kept(result.Fuel) };
         if (result.Outcome == "owner_changed") { fields["requested_owner"] = result.RequestedOwner; fields["observed_owner"] = result.ObservedOwner; }
-        Write(DiagnosticEvent.Result, message, fields);
+        Write(InfiniteTorchesLogTopics.Refill, message, fields);
     }
     public void Report(float now, Func<string> describe)
     {
-        if (!IsDebugEnabled || !_budget.Reserve(now, "SUMMARY", 1, false)) return;
-        var payload = Payload(describe());
+        if (!IsDebugEnabled || !_budget.Reserve(now, "summary", 1, false)) return;
+        bool rich = VerboseAfterNormalEnabled;
+        var payload = Payload(describe(), rich ? int.MaxValue : 5);
         payload.Fields["interval_s"] = _reported ? Math.Max(0, now - _lastSummary) : 0;
-        payload.Fields["omitted_messages_interval"] = _budget.TakeOmitted();
+        payload.Fields["omitted_messages"] = _budget.TakeOmitted();
         var totals = _totals?.Invoke() ?? new Dictionary<string, long>();
         foreach (var pair in totals)
-        { _previous.TryGetValue(pair.Key, out long previous); payload.Fields[pair.Key + "_interval"] = Math.Max(0, pair.Value - previous); }
-        Write(DiagnosticEvent.Summary, payload.Message, payload.Fields);
+        { if (!rich && payload.Fields.Count >= 8) break; _previous.TryGetValue(pair.Key, out long previous); payload.Fields[pair.Key] = Math.Max(0, pair.Value - previous); }
+        Write(CoreLogTopics.Scope, payload.Message, payload.Fields);
         _previous = new Dictionary<string, long>(totals); _lastSummary = now; _reported = true;
     }
     public void Reset() { _budget.Reset(); _previous.Clear(); _lastSummary = 0; _reported = false; }

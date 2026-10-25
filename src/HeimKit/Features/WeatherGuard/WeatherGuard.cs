@@ -1,11 +1,17 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using HeimKit.Configuration;
 using System;
 using System.IO;
 using HeimKit.Features.WeatherGuard.Models;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using HeimKit.Shared;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 
 namespace HeimKit.Features.WeatherGuard;
 
@@ -28,6 +34,7 @@ public sealed class WeatherGuard : IServerModule
 
     public WeatherGuard(ConfigFile config, ManualLogSource logger, PlayerServices players)
     {
+        _coverageReport = ReportCoverage;
         _logger = logger; _compatibility = GameVersionCompatibility.Resolve(config, logger);
         _players = players;
         _settings = new WeatherGuardSettings(config, logger);
@@ -39,17 +46,16 @@ public sealed class WeatherGuard : IServerModule
     public void Initialize(string gameVersion)
     {
         Shutdown();
-        DiagnosticLog.Write(_logger, Name, DiagnosticEvent.Lifecycle, _settings.Enabled.Value ? "Enabled." : "Disabled.");
+        DiagnosticLog.Write(_logger, Name, _settings.Enabled.Value ? "Enabled." : "Disabled.");
         _settings.DebugLogging.ReportStartup(_logger, Name, _settings.Enabled.Value);
         WeatherGuardDiagnostics.StartupSettings(_logger, _settings);
         if (!_settings.Enabled.Value)
         { return; }
         if (!_compatibility.Supports(gameVersion))
-        { DiagnosticLog.Write(_logger, "WeatherGuard", DiagnosticEvent.Lifecycle, $"DISABLED (unsupported Valheim version {gameVersion}; required version {_compatibility.RequiredVersion}; built-in audited version {GameVersionCompatibility.AuditedVersion}).", level: LogLevel.Warning); return; }
+        { DiagnosticLog.Write(_logger, "WeatherGuard", $"DISABLED (unsupported Valheim version {gameVersion}; required version {_compatibility.RequiredVersion}; built-in audited version {GameVersionCompatibility.AuditedVersion}).", level: LogLevel.Warning); return; }
         IsActive = true;
         if (_settings.DebugLogging.Enabled)
-            DiagnosticLog.Write(_logger, Name, DiagnosticEvent.Lifecycle,
-                "Waiting for joined players and dedicated-server world", level: LogLevel.Debug);
+            DiagnosticLog.Write(_logger, Name, "Waiting for joined players and dedicated-server world", level: LogLevel.Debug);
         _presenceRegistration = _players.Events.Subscribe(PresenceChanged, Fail, () => _processing.IsEmptyPaused, () => _processing.IsRunning, () => _processing.IsServerReady);
     }
     public void Tick(float now)
@@ -67,8 +73,7 @@ public sealed class WeatherGuard : IServerModule
         }
         PollCoverage(now);
     }
-    private static bool ServerReady => ZNet.instance != null && ZNet.instance.IsServer() && ZNet.instance.IsDedicated()
-        && ZDOMan.instance != null && ZNetScene.instance != null && ZoneSystem.instance != null && ZRoutedRpc.instance != null;
+    private static bool ServerReady => WorldServices.Terrain;
     private void PresenceChanged(bool? occupied)
     {
         _occupied = occupied;
@@ -84,8 +89,7 @@ public sealed class WeatherGuard : IServerModule
     private void StartController()
     {
         var net = ZNet.instance; var world = ZDOMan.instance;
-        if (net == null || world == null || ZNetScene.instance == null || ZoneSystem.instance == null || ZRoutedRpc.instance == null ||
-            !net.IsServer() || !net.IsDedicated()) { StopController(); _processing.Paused("world services unavailable"); return; }
+        if (!WorldServices.Terrain) { StopController(); _processing.Paused("world services unavailable"); return; }
         if (!ReferenceEquals(_world, world) && _controller != null) { StopController(); _processing.Paused("world changed"); }
         if (_controller != null) return;
         _world = world;
@@ -95,15 +99,19 @@ public sealed class WeatherGuard : IServerModule
     }
     private void StopController()
     {
-        var controller = _controller; _controller = null; _world = null;
-        controller?.Dispose();
+        var controller = _controller; _controller = null; if (controller != null) ModuleScheduler.Current.Forget(controller); _world = null;
+        try { controller?.Dispose(); } finally { WorldObjectProvider.Current?.ReleaseOwner(Name); }
     }
-    private void PollCoverage(float now) => _coverageRequests.Poll(now, () =>
-        _adminDiagnostics.Coverage((_controller != null && ReferenceEquals(_world, ZDOMan.instance) && ZNet.instance != null && ZNet.instance.IsServer() && ZNet.instance.IsDedicated() && ZNetScene.instance != null && ZoneSystem.instance != null ? _controller.Coverage(now) : null) ?? new CoverageSnapshot
-        { State = !IsActive ? "module_inactive" : _occupied == false ? "server_empty" : _occupied == null ? "player_presence_unavailable" : "waiting_for_world", RainEnabled = _settings.ProtectRain.Value, UnderwaterEnabled = _settings.ProtectUnderwater.Value }));
+    private float _coverageNow;
+    private readonly Action _coverageReport;
+    private void PollCoverage(float now) { _coverageNow = now; _coverageRequests.Poll(now, _coverageReport); }
+    private void ReportCoverage() => _adminDiagnostics.Coverage(
+        (_controller != null && ReferenceEquals(_world, ZDOMan.instance) && WorldServices.Terrain ? _controller.Coverage(_coverageNow) : null)
+        ?? new CoverageSnapshot { State = !IsActive ? "module_inactive" : _occupied == false ? "server_empty" : _occupied == null ? "player_presence_unavailable" : "waiting_for_world",
+            RainEnabled = _settings.ProtectRain.Value, UnderwaterEnabled = _settings.ProtectUnderwater.Value });
     internal void Fail(Exception error)
     {
-        DiagnosticLog.Write(_logger, "WeatherGuard", DiagnosticEvent.Lifecycle, $"DISABLED after controller error; returning pieces to vanilla ownership: {error}", level: LogLevel.Error);
+        DiagnosticLog.Write(_logger, "WeatherGuard", CoreLogTopics.Lifecycle, $"Disabled after controller error; returning pieces to vanilla ownership.", level: LogLevel.Error, error: error);
         Shutdown();
     }
     public void Shutdown()

@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,12 +18,13 @@ namespace HeimKit.Features.SharedMap;
 internal sealed class SharedMapLandmarks : IDisposable
 {
     private readonly ZDOMan _world;
+    private CandidateSubscription? _index;
     private readonly SharedMapLandmarkStore? _runestones, _spawners;
     private readonly SharedMapExploration _map;
     private readonly SharedMapSettings _settings;
     private readonly SharedMapDiagnostics _diagnostics;
     private readonly Action<Exception> _fail;
-    private readonly Dictionary<int, SharedMapLandmarkPrefab> _runes = new(), _sources = new();
+    private readonly PrefabCatalog<SharedMapLandmarkPrefab> _runes = PrefabRegistry.Current.Catalog<SharedMapLandmarkPrefab>("SharedMapRunes"), _sources = PrefabRegistry.Current.Catalog<SharedMapLandmarkPrefab>("SharedMapSources");
     private readonly List<ZDO> _near = new(), _scan = new();
     private readonly Queue<(ZDOID Id, Vector3? Player)> _pending = new();
     private readonly HashSet<ZDOID> _queued = new();
@@ -33,14 +41,15 @@ internal sealed class SharedMapLandmarks : IDisposable
     private readonly int _proxyHash;
     private int _locationCursor, _prefabCursor, _scanName, _sector, _scanCursor, _addedRunes, _addedSpawners, _retired;
     private bool _metadataReady, _chunkComplete, _disposed;
-    private float _maximumOffset, _nextScan;
+    private float _maximumOffset;
+    private readonly ScheduleToken _nextScan = new();
 
     public SharedMapLandmarks(ZDOMan world, SharedMapLandmarkStore? runestones, SharedMapLandmarkStore? spawners,
         SharedMapExploration map, SharedMapSettings settings, SharedMapDiagnostics diagnostics, Action<Exception> fail)
     {
         _world = world; _runestones = runestones; _spawners = spawners; _map = map; _settings = settings; _diagnostics = diagnostics; _fail = fail;
         var proxy = ZoneSystem.instance.m_locationProxyPrefab;
-        if (proxy == null || proxy.GetComponent<LocationProxy>() == null || proxy.GetComponent<ZNetView>()?.m_persistent != true)
+        if (proxy == null || PrefabRegistry.Component<LocationProxy>(proxy) == null || PrefabRegistry.Component<ZNetView>(proxy)?.m_persistent != true)
             throw new InvalidOperationException("Native persistent location-proxy metadata is unavailable.");
         _proxyName = proxy.name; _proxyHash = _proxyName.GetStableHashCode();
     }
@@ -109,7 +118,8 @@ internal sealed class SharedMapLandmarks : IDisposable
         if (!SharedMapExploration.Finite(zoneSize) || zoneSize < 16) throw new InvalidOperationException("Unsupported landmark sector geometry.");
         int radius = (int)Math.Ceiling((_map.Radius + _maximumOffset) / zoneSize) + 1;
         if (radius > 16) throw new InvalidOperationException("Landmark sector extent exceeds supported bounds.");
-        _near.Clear(); _world.FindSectorObjects(ZoneSystem.GetZone(player), new SimulationDistance(radius, 0, true), _near);
+        _index ??= WorldObjectProvider.Current.Subscribe("SharedMap", z => z.GetPrefab() == _proxyHash || _sources.ContainsKey(z.GetPrefab()));
+        _index.Read(player, radius, _near, classic: true);
         if (_near.Count > 65536) throw new InvalidOperationException("Landmark nearby candidate limit exceeded.");
         _sampleCursors.TryGetValue(peer, out int cursor);
         for (int i = 0; i < Math.Min(256, _near.Count); i++)
@@ -123,16 +133,18 @@ internal sealed class SharedMapLandmarks : IDisposable
         if (_pending.Count >= 65536) throw new InvalidOperationException("Landmark encounter queue limit exceeded.");
         _pending.Enqueue((zdo.m_uid, player));
     }
-    private IEnumerable<(MapMarker Marker, bool Spawner)> Points(ZDO zdo)
+    private readonly Dictionary<ZDOID, ((string Name, Vector3 Root, Quaternion Rotation, Vector3 Ratio) Key, (MapMarker Marker, bool Spawner)[] Points)> _pointCache = new();
+    private readonly List<(MapMarker Marker, bool Spawner)> _pointScratch = new();
+    private (MapMarker Marker, bool Spawner)[] Points(ZDO zdo)
     {
-        if (!zdo.IsValid() || !zdo.Persistent) yield break;
+        if (!zdo.IsValid() || !zdo.Persistent) return Array.Empty<(MapMarker, bool)>();
         Vector3 root = zdo.GetPosition(); Quaternion rotation = zdo.GetRotation();
         if (!SharedMapDungeonPrefab.Finite(root) || Character.InInterior(root) || !SharedMapExploration.Finite(rotation.x) ||
             !SharedMapExploration.Finite(rotation.y) || !SharedMapExploration.Finite(rotation.z) || !SharedMapExploration.Finite(rotation.w) ||
-            Math.Abs(rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w - 1) > .01f) yield break;
+            Math.Abs(rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w - 1) > .01f) return Array.Empty<(MapMarker, bool)>();
         bool spawner = zdo.GetPrefab() != _proxyHash;
         SharedMapLandmarkPrefab? metadata;
-        if (!(spawner ? _sources : _runes).TryGetValue(spawner ? zdo.GetPrefab() : zdo.GetInt(ZDOVars.s_location), out metadata)) yield break;
+        if (!(spawner ? _sources : _runes).TryGetValue(spawner ? zdo.GetPrefab() : zdo.GetInt(ZDOVars.s_location), out metadata)) return Array.Empty<(MapMarker, bool)>();
         Vector3 ratio = Vector3.one;
         if (spawner && metadata.SyncScale)
         {
@@ -140,8 +152,11 @@ internal sealed class SharedMapLandmarks : IDisposable
             if (scale == Vector3.zero)
             { float scalar = zdo.GetFloat(ZDOVars.s_scaleScalarHash, metadata.Scale.x); scale = scalar == metadata.Scale.x ? metadata.Scale : new Vector3(scalar, scalar, scalar); }
             ratio = new Vector3(scale.x / metadata.Scale.x, scale.y / metadata.Scale.y, scale.z / metadata.Scale.z);
-            if (!SharedMapDungeonPrefab.Finite(ratio) || ratio.x <= 0 || ratio.y <= 0 || ratio.z <= 0 || ratio.x > 4 || ratio.y > 4 || ratio.z > 4) yield break;
+            if (!SharedMapDungeonPrefab.Finite(ratio) || ratio.x <= 0 || ratio.y <= 0 || ratio.z <= 0 || ratio.x > 4 || ratio.y > 4 || ratio.z > 4) return Array.Empty<(MapMarker, bool)>();
         }
+        var key = (metadata.Name, root, rotation, ratio);
+        if (_pointCache.TryGetValue(zdo.m_uid, out var prior) && prior.Key.Equals(key)) return prior.Points;
+        var output = _pointScratch; output.Clear();
         foreach (var point in metadata.Points)
         {
             Vector3 position = root + rotation * Vector3.Scale(point.Offset, ratio);
@@ -149,8 +164,12 @@ internal sealed class SharedMapLandmarks : IDisposable
             // Native StaticPhysics can settle a stationary source vertically. Its horizontal anchor and
             // hierarchy remain stable; concurrent vertically stacked identities are rejected by Bind.
             string identity = SharedMapLandmarkStore.SourceIdentity(metadata.Name, root.x, root.y, root.z, point.Path, spawner);
-            yield return (new MapMarker(point.Label, position.x, position.y, position.z, identity), spawner);
+            output.Add((new MapMarker(point.Label, position.x, position.y, position.z, identity), spawner));
         }
+        if (_pointCache.Count >= 65536 && !_pointCache.ContainsKey(zdo.m_uid))
+            throw new InvalidOperationException("Landmark placed-source cache limit exceeded.");
+        var result = new (MapMarker Marker, bool Spawner)[output.Count]; output.CopyTo(result);
+        _pointCache[zdo.m_uid] = (key, result); return result;
     }
     private bool Bind(string identity, ZDO zdo)
     {
@@ -163,16 +182,16 @@ internal sealed class SharedMapLandmarks : IDisposable
     public void Tick(float now)
     {
         if (!_metadataReady) { InspectOne(); return; }
-        if (_scanNames.Count > 0 && now >= _nextScan && _pending.Count < 32768)
+        if (_scanNames.Count > 0 && _nextScan.Ready(now) && _pending.Count < 32768)
         {
             if (_scanCursor == _scan.Count)
             {
                 if (_chunkComplete)
                 {
                     _chunkComplete = false; _sector = 0; _scanName++;
-                    if (_scanName >= _scanNames.Count) { _scanName = 0; _nextScan = now + _settings.TableIntervalSeconds.Value; }
+                    if (_scanName >= _scanNames.Count) { _scanName = 0; _nextScan.Postpone(now, _settings.TableIntervalSeconds.Value); }
                 }
-                if (now >= _nextScan)
+                if (_nextScan.Ready(now))
                 {
                     _scan.Clear(); _scanCursor = 0;
                     _chunkComplete = _world.GetAllZDOsWithPrefabIterative(_scanNames[_scanName], _scan, ref _sector);
@@ -207,7 +226,7 @@ internal sealed class SharedMapLandmarks : IDisposable
             // prefab on demand rather than losing a historical source's destruction during cache warmup.
             if (!_metadataReady && _spawners.Count > 0 && !_inspectedSources.Contains(zdo.GetPrefab()))
             {
-                var prefab = ZNetScene.instance.GetPrefab(zdo.GetPrefab());
+                var prefab = PrefabRegistry.Current.Prefab(zdo.GetPrefab());
                 if (prefab != null) InspectSpawner(prefab);
             }
             // Called only at accepted terminal ZDO removal, before native release. Unload has no path here.
@@ -227,6 +246,7 @@ internal sealed class SharedMapLandmarks : IDisposable
     public void Dispose()
     {
         _disposed = true; _world.m_onZDODestroyed -= Destroyed;
+        _index?.Dispose(); _index = null; _pointCache.Clear(); _pointScratch.Clear();
         _pending.Clear(); _queued.Clear(); _near.Clear(); _scan.Clear(); _runes.Clear(); _sources.Clear();
         _bindings.Clear(); _ambiguous.Clear(); _sampleCursors.Clear(); _scanNames.Clear(); _inspectedLocations.Clear(); _unavailable.Clear();
         _inspectedSources.Clear();

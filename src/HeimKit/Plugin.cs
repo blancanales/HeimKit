@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using BepInEx;
@@ -6,97 +13,77 @@ using HeimKit.Configuration;
 using HeimKit.Features.InfiniteTorches;
 using HeimKit.Features.WeatherGuard;
 using HeimKit.Features.AFKNightWatch;
-using HeimKit.Shared;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 using HeimKit.Features.AFKRaidWatch;
 using HeimKit.Features.SharedMap;
 using UnityEngine;
+using HeimKit.Features.DoorKeeper;
+using HeimKit.Features.ForestRenewal;
+using HeimKit.Features.SeaSalvage;
+using HeimKit.Features.TameTravel;
+using HeimKit.Features.HeimMender;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.1.55")]
+[BepInPlugin("heimkit", "HeimKit", "0.2.0-rebuild.15")]
 [BepInProcess("valheim_server.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
-    private readonly List<IServerModule> _features = new();
-
+    private ModuleHost? _host;
     private PlayerServices? _players;
+    private WorldObjectProvider? _world;
 
     private void Awake()
     {
+        _host = new ModuleHost(Logger);
         DiagnosticLog.StartSession();
 #if DEBUG
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.55. Build configuration: Debug.");
+        DiagnosticLog.Write(Logger, "HeimKit", CoreLogTopics.Lifecycle, $"Starting version 0.2.0-rebuild.15 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Debug.");
 #else
-        DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, "Starting version 0.1.55. Build configuration: Release.");
+        DiagnosticLog.Write(Logger, "HeimKit", $"Starting version 0.2.0-rebuild.15 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Release.");
 #endif
         try
         {
             ConfigurationLoader.Load(Paths.ConfigPath, Logger, config =>
             {
                 _players = new PlayerServices(config, Logger);
-                Register(() => new InfiniteTorches(config, Logger, _players), "InfiniteTorches");
-                Register(() => new WeatherGuard(config, Logger, _players), "WeatherGuard");
-                Register(() => new AFKNightWatch(config, Logger, _players), "AFKNightWatch");
-                Register(() => new AFKRaidWatch(config, Logger, _players), "AFKRaidWatch");
-                Register(() => new SharedMap(config, Logger, _players), "SharedMap");
+                _world = new WorldObjectProvider(_players.Presence);
+                _host.Register(() => new InfiniteTorches(config, Logger, _players), "InfiniteTorches");
+                _host.Register(() => new WeatherGuard(config, Logger, _players), "WeatherGuard");
+                _host.Register(() => new AFKNightWatch(config, Logger, _players), "AFKNightWatch");
+                _host.Register(() => new AFKRaidWatch(config, Logger, _players), "AFKRaidWatch");
+                _host.Register(() => new SharedMap(config, Logger, _players), "SharedMap");
+                _host.Register(() => new DoorKeeper(config, Logger, _players), "DoorKeeper");
+                _host.Register(() => new ForestRenewal(config, Logger, _players), "ForestRenewal");
+                _host.Register(() => new SeaSalvage(config, Logger, _players), "SeaSalvage");
+                _host.Register(() => new TameTravel(config, Logger, _players), "TameTravel");
+                _host.Register(() => new HeimMender(config, Logger, _players), "HeimMender");
                 return config;
             });
         }
         catch (Exception ex)
         {
             _players?.Dispose(); _players = null;
-            _features.Clear();
-            DiagnosticLog.Write(Logger, "HeimKit", DiagnosticEvent.Lifecycle, $"modules DISABLED because configuration setup failed: {ex.Message}", level: LogLevel.Error);
+            _host.Dispose(); _world?.Dispose(); _world = null;
+            DiagnosticLog.Write(Logger, "HeimKit", CoreLogTopics.Config, "Modules disabled because configuration setup failed.", level: LogLevel.Error, error: ex);
             return;
         }
-        foreach (var feature in _features)
-        {
-            try
-            {
-                feature.Initialize(global::Version.CurrentVersion.ToString());
-            }
-            catch (Exception ex)
-            {
-                ModuleCleanup.Run(Logger, feature.Name, feature.Shutdown);
-                DiagnosticLog.Write(Logger, feature.Name, DiagnosticEvent.Lifecycle, $"DISABLED after startup error: {ex}", level: LogLevel.Error);
-            }
-        }
+        _host.Initialize(global::Version.CurrentVersion.ToString());
     }
-
-    private void Register(Func<IServerModule> create, string name)
-    {
-        try { _features.Add(create()); }
-        catch (Exception error) { DiagnosticLog.Write(Logger, name, DiagnosticEvent.Lifecycle, $"DISABLED after configuration construction error: {error}", level: LogLevel.Error); }
-    }
-
     private void Update()
     {
-        _players?.Tick(Time.unscaledTime);
-        foreach (var feature in _features)
-        {
-            // Tick inactive modules too so explicit operator requests remain available.
-            // Each module gates its own gameplay processing on IsActive.
-            try
-            {
-                feature.Tick(Time.unscaledTime);
-            }
-            catch (Exception ex)
-            {
-                ModuleCleanup.Run(Logger, feature.Name, feature.Shutdown);
-                DiagnosticLog.Write(Logger, feature.Name, DiagnosticEvent.Lifecycle, $"DISABLED after runtime error: {ex}", level: LogLevel.Error);
-            }
-        }
+        float now = Time.unscaledTime;
+        WorldServices.Refresh();
+        _players?.Tick(now);
+        _world?.Tick(now);
+        _host?.Tick(now);
         _players?.Events.ReportProcessing();
     }
-
     private void OnDestroy()
     {
-        foreach (var feature in _features)
-        {
-            ModuleCleanup.Run(Logger, feature.Name, feature.Shutdown);
-        }
-        _features.Clear();
+        _host?.Dispose(); _host = null;
+        _world?.Dispose(); _world = null;
         _players?.Dispose(); _players = null;
+        PrefabRegistry.Current.Clear();
     }
 }

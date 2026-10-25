@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -6,7 +13,6 @@ using System.Linq;
 using System.Text;
 using BepInEx.Logging;
 using HeimKit.Features.SharedMap.Models;
-using HeimKit.Shared;
 
 namespace HeimKit.Features.SharedMap;
 
@@ -24,7 +30,7 @@ internal sealed class SharedMapPinAdministration : IDisposable
     private int _sector, _cursor, _examined, _invalid;
     private bool _lastChunk, _sweep, _warned;
     private string? _find;
-    private float _nextPoll;
+    private readonly ScheduleToken _nextPoll = new();
     public SharedMapPinRemovals Removals { get; }
 
     public SharedMapPinAdministration(ZDOMan world, int size, string directory, long worldId,
@@ -38,9 +44,9 @@ internal sealed class SharedMapPinAdministration : IDisposable
     public void Tick(float now)
     {
         // Keep a second request pending until the current lookup/sweep finishes.
-        if (_find == null && !_sweep && now >= _nextPoll)
+        if (_find == null && !_sweep && _nextPoll.Ready(now))
         {
-            _nextPoll = now + 1;
+            _nextPoll.Postpone(now, 1);
             try { ReadRequest(); _warned = false; }
             catch (Exception error)
             {
@@ -84,7 +90,7 @@ internal sealed class SharedMapPinAdministration : IDisposable
         }
         catch (Exception error)
         {
-            Write("Pin administration stopped; saved removal rules are retained: " + error.Message, LogLevel.Error);
+            DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Tables, "Pin administration stopped; saved removal rules are retained.", level: LogLevel.Error, error: error);
             Reset();
         }
     }
@@ -120,7 +126,7 @@ internal sealed class SharedMapPinAdministration : IDisposable
         Reset();
     }
     private void Write(string message, LogLevel level = LogLevel.Info) =>
-        DiagnosticLog.Write(_logger, "SharedMap", DiagnosticEvent.Result, message, level: level);
+        DiagnosticLog.Write(_logger, "SharedMap", message, level: level);
     private void Reset() { _tables.Clear(); _reported.Clear(); _find = null; _sweep = _lastChunk = false; _sector = _cursor = _examined = _invalid = 0; }
     public void Dispose() => Reset();
 }

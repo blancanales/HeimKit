@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -15,15 +22,16 @@ internal sealed class SharedMapDungeonLoot
         public Vector3 Root, Interior;
         public Quaternion Rotation;
         public readonly HashSet<string> Gateways = new();
-        public float Next;
+        public readonly ScheduleToken Next = new();
         public float EmptySince = -1;
     }
     private readonly ZDOMan _world;
     private readonly SharedMapDungeonStore _store;
     private readonly SharedMapDiagnostics _diagnostics;
     private readonly Dictionary<string, Target> _targets = new();
+    private readonly Dictionary<(string Name, Vector3 Root), string> _targetIdentities = new();
     private readonly List<string> _order = new();
-    private readonly Dictionary<int, (int Hash, Vector3 Offset, string Item)[]> _rooms = new();
+    private readonly PrefabCatalog<(int Hash, Vector3 Offset, string Item)[]> _rooms = PrefabRegistry.Current.Catalog<(int Hash, Vector3 Offset, string Item)[]>("SharedMapDungeonLoot._rooms");
     private readonly Dictionary<ZDOID, string> _claims = new();
     private readonly List<ZDO> _near = new(), _objects = new();
     private readonly List<(int Hash, Vector3 Position)> _points = new();
@@ -47,11 +55,12 @@ internal sealed class SharedMapDungeonLoot
     };
     internal static (int Hash, Vector3 Offset, string Item)[] Points(GameObject root, Transform? exclude = null)
     {
+        PrefabRegistry.Current.Observe(root);
         var output = new List<(int, Vector3, string)>();
-        foreach (var pickup in root.GetComponentsInChildren<Pickable>(true))
+        foreach (var pickup in PrefabRegistry.Children<Pickable>(root, true))
         {
             if (exclude != null && pickup.transform.IsChildOf(exclude)) continue;
-            var view = pickup.GetComponent<ZNetView>();
+            var view = PrefabRegistry.Component<ZNetView>(pickup);
             if (!pickup.enabled || pickup.m_defaultPicked || view == null || !view.m_persistent || pickup.m_itemPrefab == null || pickup.m_hideWhenPicked == null || pickup.m_respawnTimeMinutes != 0) continue;
             Vector3 offset = Quaternion.Inverse(root.transform.rotation) * (pickup.transform.position - root.transform.position);
             if (!SharedMapDungeonPrefab.Finite(offset)) continue;
@@ -62,7 +71,12 @@ internal sealed class SharedMapDungeonLoot
     }
     public void Track(string gateway, SharedMapDungeonPrefab prefab, Vector3 root, Quaternion rotation, Vector3 interior)
     {
-        string key = SharedMapDungeonIdentity.Create(prefab.Name, root.x, root.y, root.z, "loot");
+        var source = (prefab.Name, root);
+        if (!_targetIdentities.TryGetValue(source, out string key))
+        {
+            if (_targetIdentities.Count >= 4096) throw new InvalidDataException("Dungeon pickup target limit exceeded.");
+            key = SharedMapDungeonIdentity.Create(prefab.Name, root.x, root.y, root.z, "loot"); _targetIdentities.Add(source, key);
+        }
         if (!_targets.TryGetValue(key, out var target))
         {
             if (_targets.Count >= 4096) throw new InvalidDataException("Dungeon pickup target limit exceeded.");
@@ -75,7 +89,7 @@ internal sealed class SharedMapDungeonLoot
     {
         if (_order.Count == 0) return;
         string key = _order[_cursor++ % _order.Count]; if (_cursor == int.MaxValue) _cursor = 0;
-        var target = _targets[key]; if (now < target.Next) return;
+        var target = _targets[key]; if (!target.Next.Ready(now)) return;
         var points = _points; points.Clear();
         foreach (var point in target.Prefab.Pickups)
             if (Objective(target.Prefab.Name, point.Item)) points.Add((point.Hash, target.Root + target.Rotation * point.Offset));
@@ -85,7 +99,7 @@ internal sealed class SharedMapDungeonLoot
             if (Objective(target.Prefab.Name, point.Item)) points.Add((point.Hash, customOrigin + point.Offset));
         Vector3 interior = target.Prefab.CustomInterior ? customOrigin : target.Interior;
         _near.Clear();
-        _world.FindSectorObjects(ZoneSystem.GetZone(interior), new SimulationDistance(2, 0, true), _near);
+        WorldObjectProvider.Current.For("SharedMap").Query(ZoneSystem.GetZone(interior), new SimulationDistance(2, 0, true), _near);
         if (_near.Count > 65536) { Unknown(target, now, "interior_record_limit"); return; }
         ZDO? generator = null;
         int generatorCount = 0;
@@ -102,7 +116,7 @@ internal sealed class SharedMapDungeonLoot
             if (generatorCount != 1) { Unknown(target, now, "layout_not_unique_or_unavailable"); return; }
             byte[]? data = generator!.GetByteArray(ZDOVars.s_roomData);
             bool valid = SharedMapDungeonLayout.TryRead(data, out var rooms, out string reason);
-            _diagnostics.DungeonLayout(now, target.Gateways.First(), target.Prefab.Name, data?.Length ?? 0,
+            _diagnostics.DungeonLayout(now, target.Gateways.First(), target.Prefab.Name, target.Root, data?.Length ?? 0,
                 data != null && data.Length >= 4 ? BitConverter.ToInt32(data, 0) : 0, valid, reason);
             if (!valid) { Unknown(target, now, reason); return; }
             foreach (var placement in rooms)
@@ -123,7 +137,7 @@ internal sealed class SharedMapDungeonLoot
                 if (points.Count > 65536) { Unknown(target, now, "pickup_point_limit"); return; }
             }
         }
-        target.Next = now + interval;
+        target.Next.Postpone(now, interval);
         if (points.Count == 0) { Record(target, now, 0, 0, "verified_empty_layout", verifiedEmpty: true); return; }
         foreach (var list in _cells.Values)
         {
@@ -142,7 +156,7 @@ internal sealed class SharedMapDungeonLoot
         float extent = points.Max(p => Math.Max(Math.Abs(p.Position.x - centre.x), Math.Abs(p.Position.z - centre.z)));
         int radius = (int)Math.Ceiling(extent / zoneSize) + 1;
         if (radius > 16) { Unknown(target, now, "pickup_extent_limit"); return; }
-        _objects.Clear(); _world.FindSectorObjects(ZoneSystem.GetZone(centre), new SimulationDistance(radius, 0, true), _objects);
+        _objects.Clear(); WorldObjectProvider.Current.For("SharedMap").Query(ZoneSystem.GetZone(centre), new SimulationDistance(radius, 0, true), _objects);
         if (_objects.Count > 65536) { Unknown(target, now, "pickup_record_limit"); return; }
         int total = 0, picked = 0; _seen.Clear(); _matchedSites.Clear();
         foreach (var zdo in _objects)
@@ -162,11 +176,12 @@ internal sealed class SharedMapDungeonLoot
         // Wait across complete scans after a visit; absent formerly established pickups stay unknown.
         if (total == 0)
         {
-            if (!target.Gateways.Any(_store.Visited))
+            bool visited = false; foreach (var gateway in target.Gateways) if (_store.Visited(gateway)) { visited = true; break; }
+            if (!visited)
             { Record(target, now, 0, 0, "unvisited_empty_inventory"); return; }
             if (target.EmptySince < 0) target.EmptySince = now;
             if (now - target.EmptySince < 30)
-            { Record(target, now, 0, 0, "empty_inventory_pending"); return; }
+            { Pending(target, now); return; }
         }
         else target.EmptySince = -1;
         Record(target, now, total, picked, total == 0 ? "observed_empty_inventory" : "saved_pickup_flags", verifiedEmpty: total == 0);
@@ -179,8 +194,17 @@ internal sealed class SharedMapDungeonLoot
             if (_store.VisitFromPickups(gateway, total, picked))
                 _diagnostics.DungeonPriorVisit(now, gateway, total, picked);
             var accepted = _store.ProgressState(gateway);
-            _diagnostics.DungeonLoot(now, gateway, accepted.Total, accepted.Picked, changed,
-                accepted.Picked < 0 && reason != "empty_inventory_pending" ? "missing_or_unestablished_pickups" : reason);
+            _diagnostics.DungeonLoot(now, gateway, target.Prefab.Name, target.Root, accepted.Total, accepted.Picked, changed,
+                accepted.Picked < 0 ? "missing_or_unestablished_pickups" : reason);
+        }
+    }
+    // An empty scan inside the wait is inconclusive, so established progress and its label stay published.
+    private void Pending(Target target, float now)
+    {
+        foreach (string gateway in target.Gateways)
+        {
+            var accepted = _store.ProgressState(gateway);
+            _diagnostics.DungeonLoot(now, gateway, target.Prefab.Name, target.Root, accepted.Total, accepted.Picked, false, "empty_inventory_pending");
         }
     }
     internal static int FindSite(IReadOnlyDictionary<(int Hash, int X, int Y, int Z), List<Vector3>> cells,
@@ -204,11 +228,12 @@ internal sealed class SharedMapDungeonLoot
     private void Unknown(Target target, float now, string reason)
     {
         target.EmptySince = -1;
-        target.Next = now + 10;
+        target.Next.Postpone(now, 10);
         foreach (string gateway in target.Gateways)
         {
             bool changed = _store.Progress(gateway, 0, 0); if (changed) _changed++;
-            _diagnostics.DungeonLoot(now, gateway, 0, -1, changed, reason);
+            var accepted = _store.ProgressState(gateway);
+            _diagnostics.DungeonLoot(now, gateway, target.Prefab.Name, target.Root, accepted.Total, -1, changed, reason);
         }
     }
     public int TakeChanges() { int count = _changed; _changed = 0; return count; }

@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using HeimKit.Features.WeatherGuard.Models;
 using System;
 using System.Collections.Generic;
@@ -16,7 +23,7 @@ internal sealed class WeatherGuardPatches : IDisposable
     [ThreadStatic] private static bool _weatherSuppressed;
     [ThreadStatic] private static WeatherGuardWearPass? _wearPass;
     private static readonly Dictionary<WearNTearUpdater, WeatherGuardWearPass> PendingWearSweeps = new();
-    private static readonly FieldInfo? WearIndex = typeof(WearNTearUpdater).GetField("m_index", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly AccessTools.FieldRef<WearNTearUpdater, int> WearIndex = NativeAccess.Field<WearNTearUpdater, int>("m_index");
     private static readonly int Destroyed = "DestroyZDO".GetStableHashCode();
     public void Install()
     {
@@ -27,7 +34,7 @@ internal sealed class WeatherGuardPatches : IDisposable
         Patch(typeof(ZDOMan), "RPC_ZDOData", nameof(Data));
         Patch(typeof(ZRoutedRpc), "RPC_RoutedRPC", nameof(Routed));
         var updater = AccessTools.Method(typeof(WearNTearUpdater), "UpdateWearNTear", new[] { typeof(float), typeof(float) });
-        if (updater == null || WearIndex?.FieldType != typeof(int)) throw new MissingMemberException("WearNTearUpdater wear-sweep APIs");
+        if (updater == null || WearIndex == null) throw new MissingMemberException("WearNTearUpdater wear-sweep APIs");
         _harmony.Patch(updater, prefix: Method(nameof(BeginWearPass)), finalizer: Method(nameof(EndWearPass)));
         var wear = AccessTools.Method(typeof(WearNTear), "UpdateWear", new[] { typeof(float) });
         if (wear == null) throw new MissingMethodException("WearNTear.UpdateWear");
@@ -184,10 +191,9 @@ internal sealed class WeatherGuardPatches : IDisposable
         {
             if (pass != null && active?.Running == true)
             {
-                bool finished = __exception != null || (int)WearIndex!.GetValue(__instance) == 0;
-                int count = pass.CompleteFrame(__exception == null, finished, out string? id, out string? prefab);
+                bool finished = __exception != null || WearIndex(__instance) == 0;
+                pass.CompleteFrame(__exception == null, finished, active.ConfirmedPiece);
                 if (finished) PendingWearSweeps.Remove(__instance);
-                active.WeatherDamageSuppressed(count, id, prefab);
             }
             else PendingWearSweeps.Remove(__instance);
         }
@@ -229,8 +235,8 @@ internal sealed class WeatherGuardPatches : IDisposable
         {
             if (__state.Protected && suppressed && __exception == null && WeatherGuardController.Active?.Running == true)
             {
-                if (_wearPass != null) _wearPass.Record(__state.Identity.ToString(), true, true, __state.Prefab);
-                else WeatherGuardController.Active.WeatherDamageSuppressed(1, __state.Identity.ToString(), __state.Prefab);
+                if (_wearPass != null) _wearPass.Record(__state.Identity, true, true, __state.Prefab);
+                else WeatherGuardController.Active.WeatherDamageSuppressed(__state.Identity, __state.Prefab);
             }
         }
         catch (Exception error) { WeatherGuardController.Active?.Fail(error); }

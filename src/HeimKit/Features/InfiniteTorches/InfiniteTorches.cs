@@ -1,9 +1,15 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using HeimKit.Configuration;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 using System;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using HeimKit.Shared;
 
 namespace HeimKit.Features.InfiniteTorches;
 
@@ -33,7 +39,7 @@ public sealed class InfiniteTorches : IServerModule
     public void Initialize(string gameVersion)
     {
         Shutdown();
-        DiagnosticLog.Write(_logger, Name, DiagnosticEvent.Lifecycle, _settings.Enabled.Value ? "Enabled." : "Disabled.");
+        DiagnosticLog.Write(_logger, Name, _settings.Enabled.Value ? "Enabled." : "Disabled.");
         _settings.DebugLogging.ReportStartup(_logger, Name, _settings.Enabled.Value);
         if (!_settings.Enabled.Value)
         {
@@ -41,13 +47,12 @@ public sealed class InfiniteTorches : IServerModule
         }
         if (!_compatibility.Supports(gameVersion))
         {
-            DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Lifecycle, $"DISABLED (unsupported Valheim version {gameVersion}; required version {_compatibility.RequiredVersion}; built-in audited version {GameVersionCompatibility.AuditedVersion}). Configuration requests Enabled = true.", level: LogLevel.Warning);
+            DiagnosticLog.Write(_logger, "InfiniteTorches", $"DISABLED (unsupported Valheim version {gameVersion}; required version {_compatibility.RequiredVersion}; built-in audited version {GameVersionCompatibility.AuditedVersion}). Configuration requests Enabled = true.", level: LogLevel.Warning);
             return;
         }
         IsActive = true;
         if (_settings.DebugLogging.Enabled)
-            DiagnosticLog.Write(_logger, Name, DiagnosticEvent.Lifecycle, "Waiting for joined players and dedicated-server world", new (string, object?)[]
-            { ("interval_s", _settings.IntervalSeconds.Value), ("maximum_requests_per_pass", _settings.MaxMessagesPerPass.Value), ("debug_mode", true), ("log_schema", 1) }, LogLevel.Debug);
+            if (DiagnosticLog.DebugAvailable(_logger, Name)) DiagnosticLog.Write(_logger, Name, CoreLogTopics.Lifecycle, "Waiting for joined players and dedicated-server world", new (string, object?)[] { ("interval_s", _settings.IntervalSeconds.Value), ("maximum_requests_per", _settings.MaxMessagesPerPass.Value), ("debug_mode", true), ("log_schema", 1) }, LogLevel.Debug);
         _presenceRegistration = _players.Events.Subscribe(PresenceChanged, error => Fail(error, "responding to player presence"), () => _processing.IsEmptyPaused, () => _processing.IsRunning, () => _processing.IsServerReady);
     }
 
@@ -58,7 +63,7 @@ public sealed class InfiniteTorches : IServerModule
         if (ServerReady) _processing.ServerReady();
         if (!_occupied) return;
         var net = ZNet.instance; var world = ZDOMan.instance;
-        if (net == null || world == null || ZNetScene.instance == null || ZRoutedRpc.instance == null || !net.IsServer() || !net.IsDedicated())
+        if (!WorldObjectProvider.Current.Ready)
         { StopController(); _processing.Paused("world services unavailable"); return; }
         if (_world != null && !ReferenceEquals(_world, world)) { StopController(); _processing.Paused("world changed"); }
         _world = world;
@@ -66,8 +71,7 @@ public sealed class InfiniteTorches : IServerModule
         _controller.Tick(now);
     }
 
-    private static bool ServerReady => ZNet.instance != null && ZNet.instance.IsServer() && ZNet.instance.IsDedicated()
-        && ZDOMan.instance != null && ZNetScene.instance != null && ZRoutedRpc.instance != null;
+    private static bool ServerReady => WorldServices.World;
     private void PresenceChanged(bool? occupied)
     {
         _occupied = occupied == true;
@@ -84,13 +88,13 @@ public sealed class InfiniteTorches : IServerModule
     internal void ProcessingReady() => _processing.Ready();
     private void StopController()
     {
-        var controller = _controller; _controller = null; _world = null;
-        controller?.Dispose();
+        var controller = _controller; _controller = null; if (controller != null) ModuleScheduler.Current.Forget(controller); _world = null;
+        try { controller?.Dispose(); } finally { WorldObjectProvider.Current?.ReleaseOwner(Name); }
     }
 
     internal void Fail(Exception error, string operation)
     {
-        DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Lifecycle, $"DISABLED after runtime error while {operation}: {error}", level: LogLevel.Error);
+        DiagnosticLog.Write(_logger, "InfiniteTorches", CoreLogTopics.Lifecycle, $"Disabled after runtime error while {operation}.", level: LogLevel.Error, error: error);
         Shutdown();
     }
 

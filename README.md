@@ -2,15 +2,17 @@
 
 ![HeimKit: shield and longhouse emblem beside the HeimKit name](docs/images/heimkit-banner.jpg)
 
-Quality-of-life features for Windows Valheim dedicated servers: infinite torches, shared map exploration and markers, weather protection, majority sleep and AFK raid protection.
+Quality-of-life features for Windows Valheim dedicated servers: infinite torches, shared map exploration and markers, weather protection, majority sleep, AFK raid protection, tame portal travel, door closing, tree renewal, sunken-loot recovery and gradual building repairs.
 
 Install on the server. Players use unmodified Valheim clients. Choose each feature independently in `heimkit.cfg`.
+
+DoorKeeper, ForestRenewal, SeaSalvage, TameTravel and HeimMender default enabled. Review their guides and disable any features you do not want before starting the server. Existing configuration values are preserved; missing settings are added automatically. Install only one HeimKit plugin DLL.
 
 Before enabling HeimKit, follow [world backups](docs/world-backups.md) and read [safety and limitations](docs/limitations.md).
 
 ## Features
 
-![HeimKit features: torch upkeep, weather protection, majority sleep, AFK raid protection and SharedMap with portal, resource, dungeon, runestone and recurring-spawner markers](docs/images/feature-overview.jpg)
+![All ten HeimKit features: InfiniteTorches, WeatherGuard, AFKNightWatch, AFKRaidWatch, TameTravel, DoorKeeper, ForestRenewal, SeaSalvage, HeimMender and SharedMap](docs/images/feature-overview.jpg)
 
 ### InfiniteTorches
 
@@ -42,15 +44,45 @@ Saves community exploration and discoveries across restarts, independently of ca
 
 Five independent marker options default enabled:
 
-- **PortalMarkerSync:** named player-built portals, with optional nearby grouping.
-- **ResourceMarkerSync:** outdoor metal/Obsidian deposits, Tin node counts and Copper/Silver progress. Silver requires pickaxe discovery.
-- **DungeonMarkerSync:** labeled exterior entrance markers with the vanilla hammer icon and cleanup of nearby duplicate dungeon pins. Supported pickup percentages appear after observed entry or evidence of already-picked items.
-- **RunestoneMarkerSync:** placed lore-runestone landmarks as labeled dots.
-- **SpawnerMarkerSync:** visible, player-destructible recurring spawner objects as labeled dots, removed after confirmed source destruction.
+- **Portal Marker:** named player-built portals, with optional nearby grouping.
+- **Resource Marker:** outdoor metal/Obsidian deposits, Tin node counts and Copper/Silver progress. Silver requires pickaxe discovery.
+- **Dungeon Marker:** labeled exterior entrance markers with the vanilla hammer icon and cleanup of nearby duplicate dungeon pins. Supported pickup percentages appear after observed entry or evidence of already-picked items.
+- **Runestone Marker:** placed lore-runestone landmarks as labeled dots.
+- **Spawner Marker:** visible, player-destructible recurring spawner objects as labeled dots, removed after confirmed source destruction.
 
 Optional settings discover resources/dungeons in previously explored terrain or reject player map uploads while automatic collection continues. Enabled runestone/spawner markers automatically include eligible points in community-explored terrain. Optional shared X checkmarks default off. Server owners can remove a selected shared pin through server-side administration without clearing other pins or exploration.
 
 [Usage, settings and administration](docs/features/shared-map.md) · [Specification](docs/specs/shared-map.md)
+
+### DoorKeeper
+
+Closes eligible player-built doors and gates after a delay once players clear the doorway. Native manual access remains; keyed and special doors are excluded. Defaults enabled.
+
+[Usage and settings](docs/features/door-keeper.md) · [Specification](docs/specs/door-keeper.md)
+
+### TameTravel
+
+Brings explicitly following or portal-waiting tamed wolves, boars, lox, asksvin, hens and moose along a validated trip between linked player-built portals outside dungeons. Preserves the same animal and its saved state. One follow command covers successive portal trips and following continues at the destination until stopped. Follow, stay and optional portal-wait commands have vanilla emote fallbacks. Explicit followers can use configurable stopping distance through bounded server control. Defaults enabled.
+
+[Usage and settings](docs/features/tame-travel.md) · [Specification](docs/specs/tame-travel.md)
+
+### ForestRenewal
+
+Renews supported trees from stumps left behind or their confirmed-cleared locations, using vanilla saplings, renewal chance, delay, terrain/building exclusions and persisted cooldowns. Native growth requirements remain. Defaults enabled.
+
+[Usage and settings](docs/features/forest-renewal.md) · [Specification](docs/specs/forest-renewal.md)
+
+### SeaSalvage
+
+Recovers eligible stable sunken item drops into ordinary floating cargo crates while preserving native item data. Active client-owned and unsupported drops wait or remain untouched. Defaults enabled.
+
+[Usage and settings](docs/features/sea-salvage.md) · [Specification](docs/specs/sea-salvage.md)
+
+### HeimMender
+
+Gradually repairs damaged player-built structures with configurable cycles, chance and limits. Administrators can request nearby repairs, and its settings reload during play. Defaults enabled.
+
+[Usage and administration](docs/features/heim-mender.md) · [Specification](docs/specs/heim-mender.md)
 
 ## Setup and compatibility
 
@@ -64,8 +96,8 @@ Follow [server setup](docs/server-setup.md#installation) for Thunderstore Mod Ma
 
 - [Server setup](docs/server-setup.md): installation, configuration and diagnostics.
 - [Safety and limitations](docs/limitations.md): world risks, server observations and client limitations.
-- [World backups](docs/world-backups.md): matching world and SharedMap backups/recovery.
-- [SharedMap](docs/features/shared-map.md): exploration, marker options, uploads and pin administration.
+- [World backups](docs/world-backups.md): matching world, SharedMap and ForestRenewal backups/recovery.
+- Feature guides and specifications: linked under each feature in [Features](#features).
 - [Development](docs/development.md): build and packaging commands.
 - [Architecture](docs/architecture.md): shared design and lifecycle contracts.
 - [Contributing](docs/contributing.md): source/documentation procedures.

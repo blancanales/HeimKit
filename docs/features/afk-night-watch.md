@@ -1,6 +1,6 @@
 # AFKNightWatch
 
-Coordinates majority sleep and excludes inferred-idle players from sleep voting. AFKRaidWatch controls raids independently. See [server setup](../server-setup.md#afknightwatch), [AFK limitations](../limitations.md#afk-detection-sleep-and-raids), and the [specification](../specs/afk-night-watch.md).
+Coordinates majority sleep and excludes inferred-idle players from sleep voting. AFKRaidWatch controls raids independently. See [shared activity settings](../server-setup.md#playeractivity), [AFK limitations](../limitations.md#afk-detection-sleep-and-raids), and the [specification](../specs/afk-night-watch.md).
 
 ![AFKNightWatch: count eligible sleepers and apply the configured majority and grace period](../images/afk-night-watch-workflow.jpg)
 
@@ -29,3 +29,9 @@ Shared idle thresholds and activity signals are defined under [PlayerActivity](.
 ## Diagnostics
 
 Info reports confirmed sleep starts assisted by these rules while some players were outside bed. Debug explains participants, sleepers, exclusions, required count, grace and native timing. Shared PlayerActivity owns named AFK entry/exit notices, visible with debugging off. Sleep and raid diagnostics remain independent.
+
+## HeimKit log topics
+
+- `sleep`: Sleep votes and observed native outcomes.
+
+Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.

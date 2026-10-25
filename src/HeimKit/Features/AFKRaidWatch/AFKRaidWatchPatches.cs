@@ -1,10 +1,16 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using BepInEx.Logging;
 using System.Reflection;
 using HeimKit.Features.AFKRaidWatch.Models;
-using HeimKit.Shared;
 using UnityEngine;
 namespace HeimKit.Features.AFKRaidWatch;
 public sealed class AFKRaidWatchPatches : IDisposable
@@ -40,10 +46,10 @@ public sealed class AFKRaidWatchPatches : IDisposable
             _observers.Patch(target, prefix: prefix == null ? null : new HarmonyMethod(typeof(AFKRaidWatchPatches), prefix), postfix: postfix == null ? null : new HarmonyMethod(typeof(AFKRaidWatchPatches), postfix), finalizer: finalizer == null ? null : new HarmonyMethod(typeof(AFKRaidWatchPatches), finalizer));
             _registered.Add("RandEventSystem." + method + ":observation");
         }
-        catch (Exception error)
+        catch (Exception)
         {
             if (target != null) _observers.Unpatch(target, HarmonyPatchType.All, _observers.Id);
-            if (logger != null) DiagnosticLog.Write(logger, "AFKRaidWatch", DiagnosticEvent.Lifecycle, "Diagnostic hook unavailable; gameplay hooks retained", new (string, object?)[] { ("hook", "RandEventSystem." + method), ("registered", false), ("reason", error.Message) }, level: LogLevel.Warning);
+            if (logger != null) DiagnosticLog.Write(logger, "AFKRaidWatch", "Diagnostic hook unavailable; gameplay hooks retained", level: LogLevel.Warning);
         }
     }
     private static void Enter(out int __state)

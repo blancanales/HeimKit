@@ -1,10 +1,17 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
 using BepInEx.Logging;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 using HeimKit.Features.SharedMap.Models;
 using UnityEngine;
 
@@ -33,9 +40,29 @@ internal sealed class SharedMapController : IDisposable
     private readonly List<ZDO> _sector = new(), _distant = new(), _tables = new();
     private readonly HashSet<ZDOID> _seen = new();
     private readonly HashSet<ZDOID> _changedTables = new();
-    private float _nextSample, _nextTables;
     private int _cursor, _batchDepth, _removed, _invalidExisting, _rejectedIncoming, _rejectedPlayerWrites;
     private int _acceptedChecks;
+    private readonly Dictionary<ZDOID, (byte[]? Payload, SharedMapReconciliationState State)> _reconciled = new();
+    private int _reconciledBytes;
+    private const int ReconciliationBytes = 16 * 1024 * 1024;
+    private IReadOnlyList<MapMarker>? _portalPins;
+    private long _portalPinsRevision = -1;
+    private IReadOnlyList<MapMarker>? _portalInput;
+    private SharedMapReconciliationState? _inputs;
+    private SharedMapReconciliationState Inputs()
+    {
+        var portals = PortalPins(); var resources = _resources?.Read() ?? Array.Empty<MapMarker>();
+        var dungeons = _dungeons?.Read() ?? Array.Empty<MapMarker>();
+        var runestones = _landmarks?.Runestones() ?? Array.Empty<MapMarker>(); var spawners = _landmarks?.Spawners() ?? Array.Empty<MapMarker>();
+        if (_inputs != null && _inputs.Pixels == _exploration.ExploredPixels && _inputs.Pins == _pinState.Revision &&
+            _inputs.Removals == _pinAdministration.Removals.Revision && _inputs.PortalPublications == _portalRefresh.Revision &&
+            _inputs.HideDistance == _settings.ResourceMarkerHideDistanceMeters.Value &&
+            SharedMapReconciliationState.SameMarkers(_inputs.Portals, portals) && SharedMapReconciliationState.SameMarkers(_inputs.Resources, resources) &&
+            SharedMapReconciliationState.SameMarkers(_inputs.Dungeons, dungeons) && SharedMapReconciliationState.SameMarkers(_inputs.Runestones, runestones) &&
+            SharedMapReconciliationState.SameMarkers(_inputs.Spawners, spawners)) return _inputs;
+        return _inputs = new(_exploration.ExploredPixels, _pinState.Revision, _pinAdministration.Removals.Revision,
+            _portalRefresh.Revision, _settings.ResourceMarkerHideDistanceMeters.Value, portals, resources, dungeons, runestones, spawners);
+    }
 
     internal bool Running => ReferenceEquals(Active, this) && _module.IsActive &&
         ReferenceEquals(_manager, ZDOMan.instance) && _presence.HasJoinedPlayers == true &&
@@ -74,7 +101,7 @@ internal sealed class SharedMapController : IDisposable
         catch { Dispose(); throw; }
     }
 
-    internal ZNetPeer? ReadyPeer(ZRpc rpc) => _presence.Peers.FirstOrDefault(peer => peer.IsReady() && ReferenceEquals(peer.m_rpc, rpc));
+    internal ZNetPeer? ReadyPeer(ZRpc rpc) => PlayerPeerLookup.Ready(_presence.Peers, rpc);
     internal float ResourceHealthBaseline(ZDO zdo) => _resources?.HealthBaseline(zdo) ?? float.NaN;
     internal bool ObservesResourceRecord(int prefab) => _resources?.Observes(prefab) == true;
     internal void AcceptedResourceRecord(ZDO zdo, MapReplicationSnapshot before) => _resources?.Accepted(zdo, before);
@@ -101,10 +128,9 @@ internal sealed class SharedMapController : IDisposable
         BeginBatch();
         try { _pinAdministration.Tick(now); }
         finally { EndBatch(); }
-        if (now >= _nextSample)
+        if (ModuleScheduler.Current.Due(this, "sampling", now, _exploration.Interval))
         {
-            _nextSample = now + _exploration.Interval;
-            foreach (var peer in _presence.Peers)
+            for (int rosterIndex1 = 0; rosterIndex1 < _presence.Peers.Count && _presence.Peers[rosterIndex1] is var peer; rosterIndex1++)
                 if (TryCharacter(peer, out var position, allowInterior: true))
                 {
                     if (Character.InInterior(position))
@@ -121,8 +147,7 @@ internal sealed class SharedMapController : IDisposable
         _resources?.Tick(now);
         _dungeons?.Tick(now);
         _landmarks?.Tick(now);
-        if (now < _nextTables) return;
-        _nextTables = now + _settings.TableIntervalSeconds.Value;
+        if (!ModuleScheduler.Current.Due(this, "tables", now, _settings.TableIntervalSeconds.Value)) return;
         if (_settings.PortalMarkerSync.Value) _portals.Refresh();
         CollectTables(out int usablePlayers);
         BeginBatch();
@@ -235,12 +260,29 @@ internal sealed class SharedMapController : IDisposable
         if (!Running || !table.IsValid() || table.GetPrefab() != TablePrefab) return;
         byte[]? merged;
         int removed;
-        try { merged = MergeTable(table.GetByteArray(ZDOVars.s_data), out removed); }
+        var data = table.GetByteArray(ZDOVars.s_data);
+        var inputs = Inputs();
+        if (_reconciled.TryGetValue(table.m_uid, out var cached) && Equal(data, cached.Payload) && inputs.Same(cached.State)) return;
+        try { merged = MergeTable(data, out removed); }
         catch (Exception error) when (PayloadError(error))
         {
             if (_batchDepth > 0) _invalidExisting++;
             else _diagnostics.InvalidTables(Time.unscaledTime, 1, false);
             return;
+        }
+        // Only retain successful reconciliation; incoming uploads always validate.
+        // Any merge side effects must force another pass before cache reuse.
+        var finalPayload = merged ?? data;
+        int length = finalPayload?.Length ?? 0;
+        if (_reconciled.TryGetValue(table.m_uid, out var prior))
+        { _reconciledBytes -= prior.Payload?.Length ?? 0; _reconciled.Remove(table.m_uid); }
+        if (length <= ReconciliationBytes)
+        {
+            if (_reconciled.Count >= 64 || _reconciledBytes + length > ReconciliationBytes)
+            { _reconciled.Clear(); _reconciledBytes = 0; }
+            // Pre-merge inputs make side effects force a fresh pass before reuse.
+            _reconciled[table.m_uid] = (finalPayload == null ? null : (byte[])finalPayload.Clone(), inputs);
+            _reconciledBytes += length;
         }
         if (merged == null) return;
         var previous = table.GetByteArray(ZDOVars.s_data);
@@ -253,7 +295,13 @@ internal sealed class SharedMapController : IDisposable
     {
         if (!_settings.PortalMarkerSync.Value) return Array.Empty<MapMarker>();
         var markers = _portals.Read(_settings.PortalClusterDistanceMeters.Value);
-        var published = _portalRefresh.Apply(markers);
+        IReadOnlyList<MapMarker> published;
+        if (ReferenceEquals(markers, _portalInput) && _portalPins != null && _portalPinsRevision == _portalRefresh.Revision) published = _portalPins;
+        else
+        {
+            published = _portalRefresh.Apply(markers);
+            _portalInput = markers; _portalPins = published; _portalPinsRevision = _portalRefresh.Revision;
+        }
         _diagnostics.PortalCatalog(_portals.RegisteredCount, _portals.EligibleCount, published,
             _settings.PortalClusterDistanceMeters.Value);
         return published;
@@ -309,12 +357,12 @@ internal sealed class SharedMapController : IDisposable
     private void CollectTables(out int usablePlayers)
     {
         _tables.Clear(); _seen.Clear(); usablePlayers = 0;
-        foreach (var peer in _presence.Peers)
+        for (int rosterIndex2 = 0; rosterIndex2 < _presence.Peers.Count && _presence.Peers[rosterIndex2] is var peer; rosterIndex2++)
         {
             if (!TryCharacter(peer, out var position)) continue;
             usablePlayers++;
             _sector.Clear(); _distant.Clear();
-            _manager.FindSectorObjects(ZoneSystem.GetZone(position), peer.m_simulationDistance, _sector, _distant);
+            WorldObjectProvider.Current.For("SharedMap").Query(ZoneSystem.GetZone(position), peer.m_simulationDistance, _sector, _distant);
             foreach (var table in _sector)
                 if (_tables.Count < MaximumCandidates && table.IsValid() && table.GetPrefab() == TablePrefab && _seen.Add(table.m_uid))
                     _tables.Add(table);
@@ -329,6 +377,6 @@ internal sealed class SharedMapController : IDisposable
             try { try { _resources?.Dispose(); } finally { try { _dungeons?.Dispose(); } finally { _landmarks?.Dispose(); } } }
             finally { try { _pinAdministration.Dispose(); } finally { _patches.Dispose(); } }
         }
-        finally { _tables.Clear(); _sector.Clear(); _distant.Clear(); _seen.Clear(); _changedTables.Clear(); _batchDepth = 0; }
+        finally { _reconciled.Clear(); _portalPins = null; _portalInput = null; _tables.Clear(); _sector.Clear(); _distant.Clear(); _seen.Clear(); _changedTables.Clear(); _batchDepth = 0; }
     }
 }

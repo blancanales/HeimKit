@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -50,7 +57,7 @@ internal sealed class SharedMapLandmarkPrefab
         {
             // Asset roots may be inactive for soft-reference storage; descendants must be active.
             if (node != root && !node.gameObject.activeSelf) return false;
-            foreach (var behaviour in node.GetComponents<MonoBehaviour>())
+            foreach (var behaviour in PrefabRegistry.Components<MonoBehaviour>(node))
             {
                 if (behaviour == null) return false;
                 if (!behaviour.enabled) continue;
@@ -61,20 +68,21 @@ internal sealed class SharedMapLandmarkPrefab
                     behaviour.GetType().Name != "HoverText" && behaviour.GetType().Name != "DropOnDestroyed" &&
                     behaviour.GetType().Name != "TriggerPersistentEventOnDestroy") return false;
             }
-            if (node.GetComponents<Component>().Any(c => c == null || c.GetType().Name == "Animator" || c.GetType().Name == "Animation")) return false;
+            if (PrefabRegistry.Components<Component>(node).Any(c => c == null || c.GetType().Name == "Animator" || c.GetType().Name == "Animation")) return false;
             if (node == root) return true;
         }
         return false;
     }
     public static SharedMapLandmarkPrefab? ReadRunestone(GameObject prefab)
     {
-        if (!Runestones.TryGetValue(prefab.name, out string label) || prefab.GetComponent<Location>() == null) return null;
+        PrefabRegistry.Current.Observe(prefab);
+        if (!Runestones.TryGetValue(prefab.name, out string label) || PrefabRegistry.Component<Location>(prefab) == null) return null;
         var points = new List<(string, string, Vector3)>();
-        foreach (var stone in prefab.GetComponentsInChildren<RuneStone>(true))
+        foreach (var stone in PrefabRegistry.Children<RuneStone>(prefab, true))
         {
-            if (!stone.enabled || stone.GetComponent<ZNetView>() != null || stone.GetComponent<Destructible>() != null ||
-                stone.GetComponent<LodFadeInOut>() == null || stone.GetComponent<StaticPhysics>() == null ||
-                stone.GetComponent<Vegvisir>() != null || !Active(prefab.transform, stone.transform, true)) continue;
+            if (!stone.enabled || PrefabRegistry.Component<ZNetView>(stone) != null || PrefabRegistry.Component<Destructible>(stone) != null ||
+                PrefabRegistry.Component<LodFadeInOut>(stone) == null || PrefabRegistry.Component<StaticPhysics>(stone) == null ||
+                PrefabRegistry.Component<Vegvisir>(stone) != null || !Active(prefab.transform, stone.transform, true)) continue;
             Vector3 offset = Offset(prefab.transform, stone.transform);
             if (!SharedMapDungeonPrefab.Finite(offset) || Math.Abs(offset.y) >= 1000 || offset.sqrMagnitude > 128 * 128) continue;
             points.Add((Path(prefab.transform, stone.transform), label, offset));
@@ -89,7 +97,7 @@ internal sealed class SharedMapLandmarkPrefab
             if (node != root && !node.gameObject.activeSelf) return false;
             // Decorative flicker/animation and an Aoe on a physical hitbox do not
             // turn a destroyable source into a hidden population instruction.
-            foreach (var behaviour in node.GetComponents<MonoBehaviour>())
+            foreach (var behaviour in PrefabRegistry.Components<MonoBehaviour>(node))
                 if (behaviour == null || behaviour.enabled && (behaviour is RandomSpawn || behaviour is RandomObject || behaviour is SnapToGround)) return false;
             if (node == root) return true;
         }
@@ -101,7 +109,7 @@ internal sealed class SharedMapLandmarkPrefab
         // root. Walk explicitly, stopping at the nearest view and prefab boundary.
         for (var node = part; node != null; node = node.parent)
         {
-            var owner = node.GetComponent<ZNetView>();
+            var owner = PrefabRegistry.Component<ZNetView>(node);
             if (owner != null) return owner == view;
             if (node == root) return false;
         }
@@ -112,15 +120,15 @@ internal sealed class SharedMapLandmarkPrefab
         rejection = "outside_physical_allowlist";
         if (!SourceLabels.TryGetValue(prefab.name, out string label)) return null;
         rejection = "missing_or_invalid_destructible";
-        var destructible = prefab.GetComponent<Destructible>();
+        var destructible = PrefabRegistry.Component<Destructible>(prefab);
         if (destructible == null || !destructible.enabled || !SharedMapExploration.Finite(destructible.m_health) || destructible.m_health <= 0) return null;
-        var view = prefab.GetComponent<ZNetView>();
+        var view = PrefabRegistry.Component<ZNetView>(prefab);
         rejection = "unsupported_root_metadata";
-        if (view == null || !view.m_persistent || prefab.GetComponent<Character>() != null || prefab.GetComponent<ItemDrop>() != null ||
-            prefab.GetComponent<Piece>() != null || prefab.GetComponent<Rigidbody>() is Rigidbody body && !body.isKinematic) return null;
+        if (view == null || !view.m_persistent || PrefabRegistry.Component<Character>(prefab) != null || PrefabRegistry.Component<ItemDrop>(prefab) != null ||
+            PrefabRegistry.Component<Piece>(prefab) != null || PrefabRegistry.Component<Rigidbody>(prefab) is Rigidbody body && !body.isKinematic) return null;
         // The allowlist is audited against physical game assets. Rendering data is
         // not a server-side eligibility signal; retain actual damage/collision metadata.
-        bool hittable = prefab.GetComponentsInChildren<Collider>(true).Any(c => c.enabled && !c.isTrigger &&
+        bool hittable = PrefabRegistry.Children<Collider>(prefab, true).Any(c => c.enabled && !c.isTrigger &&
             OwnedByRoot(prefab.transform, c.transform, view) && PhysicalPartActive(prefab.transform, c.transform));
         rejection = "missing_owned_hit_collider";
         if (!hittable) return null;
@@ -130,17 +138,17 @@ internal sealed class SharedMapLandmarkPrefab
         {
             if (!source.enabled || !Active(prefab.transform, source.transform, false) || !transforms.Add(source.transform)) return;
             var eligible = creatures.Where(c => c != null).ToArray();
-            if (eligible.Length == 0 || eligible.Any(c => c.GetComponent<Character>() == null && c.GetComponent<Fish>() == null)) return;
+            if (eligible.Length == 0 || eligible.Any(c => PrefabRegistry.Component<Character>(c) == null && PrefabRegistry.Component<Fish>(c) == null)) return;
             Vector3 offset = Offset(prefab.transform, source.transform);
             if (label.Contains("$") || System.Text.Encoding.UTF8.GetByteCount(label) > 128 || !SharedMapDungeonPrefab.Finite(offset) || offset.sqrMagnitude > 128 * 128) return;
             points.Add((Path(prefab.transform, source.transform), label, offset));
         }
-        foreach (var area in prefab.GetComponentsInChildren<SpawnArea>(true))
+        foreach (var area in PrefabRegistry.Children<SpawnArea>(prefab, true))
             if (OwnedByRoot(prefab.transform, area.transform, view) && Repeating(area.m_spawnIntervalSec) && area.m_maxNear > 0 && area.m_maxTotal > 0 &&
                 area.m_prefabs.Count > 0 && area.m_prefabs.All(p => p.m_prefab != null && SharedMapExploration.Finite(p.m_weight) && p.m_weight > 0))
                 Add(area, area.m_prefabs.Select(p => p.m_prefab));
-        foreach (var source in prefab.GetComponentsInChildren<CreatureSpawner>(true))
-            if (source.GetComponent<ZNetView>() == view && Repeating(source.m_respawnTimeMinuts) && source.m_creaturePrefab != null)
+        foreach (var source in PrefabRegistry.Children<CreatureSpawner>(prefab, true))
+            if (PrefabRegistry.Component<ZNetView>(source) == view && Repeating(source.m_respawnTimeMinuts) && source.m_creaturePrefab != null)
                 Add(source, new[] { source.m_creaturePrefab });
         var scale = prefab.transform.localScale;
         rejection = "invalid_scale";

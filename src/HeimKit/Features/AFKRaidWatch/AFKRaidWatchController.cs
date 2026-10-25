@@ -1,8 +1,14 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
-using HeimKit.Shared;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 using HeimKit.Features.AFKRaidWatch.Models;
 using UnityEngine;
 namespace HeimKit.Features.AFKRaidWatch;
@@ -30,7 +36,7 @@ public sealed class AFKRaidWatchController : IDisposable
             _patches = new(logger); Active = this;
         }
         catch { Dispose(); throw; }
-        if (DebugEnabled) DiagnosticLog.Write(logger, module.Name, DiagnosticEvent.Detail, "Native raid hooks registered", new (string, object?)[] { ("raid_hooks", _patches.RegisteredHooks) }, LogLevel.Debug);
+        if (DebugEnabled) if (DiagnosticLog.DebugAvailable(logger, module.Name)) DiagnosticLog.Write(logger, module.Name, AFKRaidWatchLogTopics.Raids, "Registered native raid hooks.", new (string, object?)[] { ("raid_hooks", _patches.RegisteredHooks) }, LogLevel.Debug);
     }
     internal List<Vector3> Filter(RandomEvent ev, List<Vector3> points)
     {
@@ -76,8 +82,8 @@ public sealed class AFKRaidWatchController : IDisposable
     internal void Fail(Exception error) => _module.Fail(error);
     public void Tick(float now)
     {
-        if (!DebugEnabled) { _lastOutcome = null; _schedule = null; }
-        _diagnostics.Report(now, () => new RaidWatchStatus { Connected = _players.Presence.ConnectedCount, Candidates = _candidates, Suppressed = _suppressed, Hooks = _hooks, Outcome = _lastOutcome, Schedule = _schedule });
+        if (!DebugEnabled) { _lastOutcome = null; _schedule = null; _diagnostics.SuspendReports(); return; }
+        if (_diagnostics.ReadyToPoll(now)) _diagnostics.Report(now, () => new RaidWatchStatus { Connected = _players.Presence.ConnectedCount, Candidates = _candidates, Suppressed = _suppressed, Hooks = _hooks, Outcome = _lastOutcome, Schedule = _schedule });
     }
     public void Dispose()
     {

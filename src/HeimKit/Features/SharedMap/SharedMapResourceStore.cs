@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -17,7 +24,7 @@ public sealed class SharedMapResourceStore
     private readonly List<ResourceDeposit> _deposits = new();
     private readonly Dictionary<(int, int), List<ResourceDeposit>> _cells = new();
     private long _revision, _savedRevision;
-    private float _nextSave;
+    private readonly ScheduleToken _nextSave = new();
     public string FilePath { get; }
     public long Revision => _revision;
     public IReadOnlyList<ResourceDeposit> Deposits => _deposits;
@@ -147,8 +154,8 @@ public sealed class SharedMapResourceStore
 
     public bool SaveIfDue(float now, float interval)
     {
-        if (now < _nextSave) return false;
-        _nextSave = now + interval; return Save();
+        if (!_nextSave.Ready(now)) return false;
+        _nextSave.Postpone(now, interval); return Save();
     }
 
     public bool Save()

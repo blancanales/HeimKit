@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,16 +18,18 @@ namespace HeimKit.Features.SharedMap;
 internal sealed class SharedMapDungeons : IDisposable
 {
     private readonly ZDOMan _world;
+    private CandidateSubscription? _index;
     private readonly SharedMapDungeonStore _store;
     private readonly SharedMapExploration _map;
     private readonly SharedMapSettings _settings;
     private readonly SharedMapDiagnostics _diagnostics;
-    private readonly Dictionary<int, SharedMapDungeonPrefab> _prefabs = new();
+    private readonly PrefabCatalog<SharedMapDungeonPrefab> _prefabs = PrefabRegistry.Current.Catalog<SharedMapDungeonPrefab>("SharedMapDungeons._prefabs");
     private readonly List<ZDO> _near = new(), _scan = new();
     private readonly Queue<(SharedMapDungeonPrefab Prefab, DungeonGateway Gateway, Vector3 Root, Quaternion Rotation, Vector3? Player)> _pending = new();
     private readonly string _proxyName;
     private readonly int _proxyHash;
-    private float _maximumOffset, _nextScan;
+    private float _maximumOffset;
+    private readonly ScheduleToken _nextScan = new();
     private int _sector, _scanCursor, _added;
     private bool _scanComplete;
     private readonly SharedMapDungeonLoot? _loot;
@@ -31,7 +40,7 @@ internal sealed class SharedMapDungeons : IDisposable
         _world = world; _store = store; _map = map; _settings = settings; _diagnostics = diagnostics;
         if (settings.DungeonLootProgress.Value) _loot = new SharedMapDungeonLoot(world, store, diagnostics);
         var proxy = ZoneSystem.instance.m_locationProxyPrefab;
-        if (proxy == null || proxy.GetComponent<LocationProxy>() == null || proxy.GetComponent<ZNetView>() == null)
+        if (proxy == null || PrefabRegistry.Component<LocationProxy>(proxy) == null || PrefabRegistry.Component<ZNetView>(proxy) == null)
             throw new InvalidOperationException("Native dungeon location-proxy metadata is unavailable.");
         _proxyName = proxy.name; _proxyHash = _proxyName.GetStableHashCode();
         var unavailable = new List<string>();
@@ -79,7 +88,8 @@ internal sealed class SharedMapDungeons : IDisposable
             throw new InvalidOperationException("Unsupported native dungeon-sector geometry.");
         _near.Clear();
         int radius = (int)Math.Ceiling((_map.Radius + _maximumOffset) / zoneSize) + 1;
-        _world.FindSectorObjects(ZoneSystem.GetZone(player), new SimulationDistance(radius, 0, true), _near);
+        _index ??= WorldObjectProvider.Current.Subscribe("SharedMap", z => z.GetPrefab() == _proxyHash);
+        _index.Read(player, radius, _near, classic: true);
         foreach (var zdo in _near) Enqueue(zdo, player);
     }
 
@@ -90,7 +100,8 @@ internal sealed class SharedMapDungeons : IDisposable
         if (!SharedMapDungeonPrefab.Finite(player) || !Character.InInterior(player)) return;
         var zone = ZoneSystem.GetZone(player);
         _near.Clear();
-        _world.FindSectorObjects(zone, new SimulationDistance(0, 0, true), _near);
+        _index ??= WorldObjectProvider.Current.Subscribe("SharedMap", z => z.GetPrefab() == _proxyHash);
+        _index.Read(player, 0, _near, classic: true);
         if (_near.Count > 65536) return;
         ZDO? match = null;
         foreach (var zdo in _near)
@@ -108,7 +119,7 @@ internal sealed class SharedMapDungeons : IDisposable
         int visited = 0;
         foreach (var gateway in prefab.Gateways)
         {
-            string identity = SharedMapDungeonIdentity.Create(prefab.Name, root.x, root.y, root.z, gateway.Path);
+            string identity = GatewayIdentity(prefab, root, gateway.Path);
             if (_store.Visit(identity)) visited++;
             if (_store.Contains(identity)) TrackLoot(identity, prefab, root, rotation, gateway);
         }
@@ -140,13 +151,13 @@ internal sealed class SharedMapDungeons : IDisposable
     public void Tick(float now)
     {
         // Queue real observations, including their original usable player position, before deferring evaluation.
-        if ((_settings.DungeonDiscoverPreviouslyExplored.Value || _store.Count > 0 && _loot != null) && now >= _nextScan && _pending.Count < 32768)
+        if ((_settings.DungeonDiscoverPreviouslyExplored.Value || _store.Count > 0 && _loot != null) && _nextScan.Ready(now) && _pending.Count < 32768)
         {
             if (_scanCursor == _scan.Count)
             {
                 if (_scanComplete)
                 {
-                    _scanComplete = false; _sector = 0; _nextScan = now + _settings.TableIntervalSeconds.Value;
+                    _scanComplete = false; _sector = 0; _nextScan.Postpone(now, _settings.TableIntervalSeconds.Value);
                 }
                 else
                 {
@@ -164,9 +175,14 @@ internal sealed class SharedMapDungeons : IDisposable
             var candidate = _pending.Dequeue();
             Vector3 point = candidate.Root + candidate.Rotation * candidate.Gateway.Offset;
             if (!SharedMapDungeonPrefab.Finite(point) || Character.InInterior(point)) continue;
-            string identity = SharedMapDungeonIdentity.Create(candidate.Prefab.Name,
-                candidate.Root.x, candidate.Root.y, candidate.Root.z, candidate.Gateway.Path);
+            string identity = GatewayIdentity(candidate.Prefab, candidate.Root, candidate.Gateway.Path);
             if (_store.Contains(identity)) { TrackLoot(identity, candidate.Prefab, candidate.Root, candidate.Rotation, candidate.Gateway); continue; }
+            if (candidate.Player.HasValue)
+            {
+                double dx = (double)point.x - candidate.Player.Value.x, dz = (double)point.z - candidate.Player.Value.z;
+                if (dx * dx + dz * dz > (double)_map.Radius * _map.Radius) continue;
+            }
+            else if (!_settings.DungeonDiscoverPreviouslyExplored.Value || !_map.IsExplored(point.x, point.z)) continue;
             var marker = new MapMarker(candidate.Prefab.Label, point.x, point.y, point.z, identity);
             bool added = candidate.Player.HasValue
                 ? _store.DiscoverNearby(marker, candidate.Player.Value.x, candidate.Player.Value.z, _map.Radius)
@@ -179,10 +195,26 @@ internal sealed class SharedMapDungeons : IDisposable
         if (DungeonDB.instance != null) _loot?.Tick(now, _settings.TableIntervalSeconds.Value);
     }
 
+    private readonly Dictionary<(string Name, Vector3 Root), string[]> _gatewayIdentities = new();
+    private string[] GatewayIdentities(SharedMapDungeonPrefab prefab, Vector3 root)
+    {
+        var key = (prefab.Name, root);
+        if (_gatewayIdentities.TryGetValue(key, out var identities)) return identities;
+        if (_gatewayIdentities.Count >= SharedMapDungeonStore.MaximumDiscoveries) throw new InvalidOperationException("Dungeon placed-source cache limit exceeded.");
+        identities = new string[prefab.Gateways.Count];
+        for (int index = 0; index < identities.Length; index++)
+            identities[index] = SharedMapDungeonIdentity.Create(prefab.Name, root.x, root.y, root.z, prefab.Gateways[index].Path);
+        _gatewayIdentities.Add(key, identities); return identities;
+    }
+    private string GatewayIdentity(SharedMapDungeonPrefab prefab, Vector3 root, string path)
+    {
+        var identities = GatewayIdentities(prefab, root);
+        for (int index = 0; index < prefab.Gateways.Count; index++) if (prefab.Gateways[index].Path == path) return identities[index];
+        throw new InvalidOperationException("Dungeon gateway is outside its validated template.");
+    }
     private void TrackLoot(string identity, SharedMapDungeonPrefab prefab, Vector3 root, Quaternion rotation, DungeonGateway gateway)
     {
-        _store.ShareVisits(prefab.Gateways.Select(g =>
-            SharedMapDungeonIdentity.Create(prefab.Name, root.x, root.y, root.z, g.Path)).ToArray());
+        _store.ShareVisits(GatewayIdentities(prefab, root));
         if (new[] { "Crypt2", "Crypt3", "Crypt4", "Hildir_crypt", "Mistlands_DvergrTownEntrance1", "Mistlands_DvergrTownEntrance2", "MountainCave02", "Hildir_cave", "TheHole01", "MorkBorg" }.Contains(prefab.Name))
             _loot?.Track(identity, prefab, root, rotation, root + rotation * gateway.InteriorOffset);
     }
@@ -197,5 +229,5 @@ internal sealed class SharedMapDungeons : IDisposable
     }
 
     public void Dispose()
-    { _pending.Clear(); _scan.Clear(); _near.Clear(); _prefabs.Clear(); _added = 0; }
+    { _index?.Dispose(); _index = null; _pending.Clear(); _gatewayIdentities.Clear(); _scan.Clear(); _near.Clear(); _prefabs.Clear(); _added = 0; }
 }

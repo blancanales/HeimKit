@@ -1,12 +1,13 @@
 # Server setup
 
-Install HeimKit on a Windows Valheim dedicated server. Players use unmodified clients. Feature guides cover [torches](features/infinite-torches.md), [weather protection](features/weather-guard.md), [sleep](features/afk-night-watch.md), [raids](features/afk-raid-watch.md) and [SharedMap](features/shared-map.md). Read [safety and limitations](limitations.md) before enabling the mod.
+Install HeimKit on a Windows Valheim dedicated server. Players use unmodified clients. Each feature's guide is linked under [Default configuration](#default-configuration). Read [safety and limitations](limitations.md) before enabling the mod.
 
 ## Supported environment
 
 | Item | Current baseline |
 | --- | --- |
 | HeimKit release baseline | 0.1.55 |
+| HeimKit development build | 0.2.0-rebuild.15 |
 | Valheim Dedicated Server | 1.0.20; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
@@ -15,15 +16,19 @@ Install HeimKit on a Windows Valheim dedicated server. Players use unmodified cl
 
 This section is the sole documentation source for HeimKit's supported game, loader, runtime and framework versions. Other documents link here rather than repeating version values. Update this baseline when code guards and dependencies change.
 
-## SharedMap module
+## Live building-restoration settings
 
-SharedMap saves community exploration and shares portal, outdoor-resource, exterior-dungeon, lore-runestone and recurring-spawner markers through vanilla **Read Map**. The module and all five marker options default enabled. Enabled runestone and recurring-spawner markers automatically include eligible points in community-explored terrain; confirmed destroyed spawners are hidden. Resource and dungeon retrospective discovery defaults off; player uploads default allowed. DungeonLootProgress defaults on and can hide pickup percentages independently of DungeonMarkerSync. ResourceMarkerHideDistanceMeters defaults to 10 metres, with zero disabling resource-marker hiding near other generated landmarks. Spawner markers require visible, player-destructible sources; hidden creature-spawn points are excluded. Sharing player X checkmarks defaults off. The [SharedMap guide](features/shared-map.md) owns settings, pin administration and storage details. Include its separate files in [world backups](world-backups.md#sharedmap-data).
+[HeimMender](features/heim-mender.md) owns live reload of its section in the existing config file, including enabled/debug controls and a numbered administrative repair request. Save a complete valid section; malformed values retain current settings. Other sections require their documented restart.
+
+## SharedMap data
+
+SharedMap keeps its own data files in addition to the world save. Include them in [world backups](world-backups.md#sharedmap-data); the [SharedMap guide](features/shared-map.md) covers its settings, pin administration and storage.
 
 ## Installation
 
 ### Before either installation route
 
-1. Stop the server and [back up the world](world-backups.md), SharedMap data and existing configuration.
+1. Stop the server and [back up the world](world-backups.md), SharedMap and ForestRenewal data and existing configuration.
 2. Locate the dedicated-server folder containing `valheim_server.exe`. In Steam, use **Valheim Dedicated Server > Properties > Installed Files > Browse**.
 3. Obtain `HeimKit.dll` or follow [building from source](development.md#building-from-source). Use the versions in [Supported environment](#supported-environment).
 4. Keep one HeimKit DLL in the active server installation/profile.
@@ -63,9 +68,11 @@ Absent values use the audited baseline. Invalid/unreadable values warn once and 
 
 Shared sections `[Diagnostics]` and `[PlayerActivity]` precede feature sections. Startup preserves existing values and adds missing defaults. Use [config/heimkit.cfg](../config/heimkit.cfg) as a reference; keep the active file when upgrading.
 
-Feature controls are documented in their guides: [InfiniteTorches](features/infinite-torches.md#configuration), [WeatherGuard](features/weather-guard.md#scope-and-configuration), [AFKNightWatch](features/afk-night-watch.md#configuration), [AFKRaidWatch](features/afk-raid-watch.md#configuration) and [SharedMap](features/shared-map.md#configuration). Stop the server before configuration edits and restart afterward.
+Feature controls are documented in their guides: [InfiniteTorches](features/infinite-torches.md#configuration), [WeatherGuard](features/weather-guard.md#scope-and-configuration), [AFKNightWatch](features/afk-night-watch.md#configuration), [AFKRaidWatch](features/afk-raid-watch.md#configuration), [SharedMap](features/shared-map.md#configuration), [TameTravel](features/tame-travel.md#configuration), [DoorKeeper](features/door-keeper.md#configuration), [ForestRenewal](features/forest-renewal.md#configuration), [SeaSalvage](features/sea-salvage.md#configuration) and [HeimMender](features/heim-mender.md) (live reload). Stop the server before configuration edits and restart afterward.
 
 ### Diagnostics
+
+`[Diagnostics] DebugVerbosity = Normal` selects the shared evidence tier. `Verbose` adds detailed topic records when the feature's effective DebugMode permits them; it does not enable debugging or bypass hidden suppression, budgets or the empty-server pause. Restart applies changes. HeimKit prefixes every line with local `HH:mm:ss`; startup also includes the full date. Shared player topics are `presence` and `afk`; see the [logging contract](architecture.md#logging).
 
 `[Diagnostics] DebugMode` enables optional diagnostics across features. Each feature and PlayerActivity has its own DebugMode, default false, for selective output. A false feature switch inherits global Debug. Startup adds missing keys even for disabled features.
 
@@ -73,17 +80,9 @@ BepInEx independently filters severity. Add `Debug` to the existing `LogLevels` 
 
 Info covers enablement, readiness, meaningful results and explicit reports. Warnings/errors remain visible with debugging off. A startup Debug declaration identifies the effective global/feature/suppression source. Automatic Debug output pauses after five minutes without connected players and resumes on connection, subject to stream budgets. See [logging](architecture.md#logging) for formats and [log interpretation](limitations.md#server-observations-and-logs).
 
-### AFKNightWatch
-
-Enabled controls sleep. MajoritySleepEnabled and ExcludeAFKFromSleep independently select quorum and idle exclusion. Defaults require strictly more than half after exclusion and a 30-second continuous-quorum grace while anyone remains outside bed. Everyone in bed bypasses the grace. See [sleep settings](features/afk-night-watch.md#configuration).
-
-### AFKRaidWatch
-
-Enabled independently controls automatic raid-candidate protection for idle-only locations. See [raid rules](features/afk-raid-watch.md).
-
 ### PlayerActivity
 
-Sleep exclusion and raid protection share one detector. They do not kick players. Health changes are not activity; movement, replicated body rotation, equipment/emotes, station/bed use and authenticated routed actions supply observations.
+[AFKNightWatch](features/afk-night-watch.md) sleep exclusion and [AFKRaidWatch](features/afk-raid-watch.md) raid protection share one detector. They do not kick players. Health changes are not activity; movement, replicated body rotation, equipment/emotes, station/bed use and authenticated routed actions supply observations.
 
 | Setting in PlayerActivity | Default | Range/purpose |
 | --- | --- | --- |
@@ -131,4 +130,4 @@ Each enabled module reports Ready once when native services are available. After
 
 Read the active `BepInEx/LogOutput.log` and confirm the launch route, configuration path, build identity and compatibility notices. Remove credentials/join codes before sharing logs. Feature guides explain processing fields; [limitations](limitations.md) explains visibility and timing.
 
-To disable a module, stop the server, set its Enabled=false and restart. To remove HeimKit, stop the server and remove its DLL from the active profile/server installation. Torch fuel remains ordinary native data. WeatherGuard releases ownership and adds no persisted protection/creator flag. Preserve SharedMap stores for later use or matching recovery.
+To disable HeimMender, save Enabled=false in its live section. For other modules, stop the server, set Enabled=false and restart. To remove HeimKit, stop the server and remove its DLL from the active profile/server installation. Torch fuel remains ordinary native data. WeatherGuard releases ownership and adds no persisted protection/creator flag. Preserve SharedMap and ForestRenewal stores for later use or matching recovery.

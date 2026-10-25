@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Reflection;
 using HarmonyLib;
@@ -12,9 +19,7 @@ internal sealed class SharedMapPatches : IDisposable
     [ThreadStatic] private static int _internalWrite;
     [ThreadStatic] private static ZNetPeer? _receivingPeer;
 
-    private static MethodInfo Target(Type type, string name, params Type[] parameters) =>
-        type.GetMethod(name, BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-            null, parameters, null) ?? throw new MissingMethodException(type.Name + "." + name);
+    private static MethodInfo Target(Type type, string name, params Type[] parameters) => NativeAccess.Target(type, name, parameters);
     private static HarmonyMethod Hook(string name) => new(typeof(SharedMapPatches), name);
 
     public static void CheckCompatibility()

@@ -13,7 +13,7 @@ internal static class ConfigurationLoaderTests
     {
         int diagnostics = contents.IndexOf("[Diagnostics]", StringComparison.Ordinal);
         int activity = contents.IndexOf("[PlayerActivity]", StringComparison.Ordinal);
-        foreach (string feature in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch", "SharedMap" })
+        foreach (string feature in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch", "SharedMap", "DoorKeeper", "ForestRenewal", "SeaSalvage", "TameTravel", "HeimMender" })
         {
             int at = contents.IndexOf("[" + feature + "]", StringComparison.Ordinal);
             if (diagnostics < 0 || activity < 0 || at < 0 || diagnostics > at || activity > at)
@@ -57,6 +57,11 @@ internal static class ConfigurationLoaderTests
                 _ = new AFKNightWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new AFKRaidWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new SharedMap(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.DoorKeeper.DoorKeeper(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.ForestRenewal.ForestRenewal(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.SeaSalvage.SeaSalvage(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.TameTravel.TameTravel(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.HeimMender.HeimMender(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 return config;
             });
             if (complete.Count != reference.Count || complete.Any(entry =>
@@ -77,6 +82,11 @@ internal static class ConfigurationLoaderTests
                 _ = new AFKNightWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new AFKRaidWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new SharedMap(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.DoorKeeper.DoorKeeper(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.ForestRenewal.ForestRenewal(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.SeaSalvage.SeaSalvage(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.TameTravel.TameTravel(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.HeimMender.HeimMender(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 return config;
             });
             var reordered = File.ReadAllText(complete.ConfigFilePath);

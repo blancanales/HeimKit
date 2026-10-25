@@ -1,6 +1,12 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using BepInEx.Logging;
-using HeimKit.Shared;
 using HeimKit.Features.AFKNightWatch.Models;
 namespace HeimKit.Features.AFKNightWatch;
 
@@ -20,8 +26,7 @@ public sealed class AFKNightWatchSleepNotices
         _skipping = active;
         if (!active || vote == null || !vote.AllowedAfterDelay || vote.Unknown ||
             vote.Sleepers >= vote.Participants + vote.ExcludedIdle) return;
-        DiagnosticLog.Write(_logger, "AFKNightWatch", DiagnosticEvent.Result,
-            "Sleep started under the configured rules while some players were not in bed.");
+        DiagnosticLog.Write(_logger, "AFKNightWatch", "Sleep started under the configured rules while some players were not in bed.");
         _evidence?.Invoke(vote);
     }
     public void Reset() { _known = false; _skipping = false; }

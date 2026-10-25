@@ -58,6 +58,9 @@ try {
     Write-Text $plugin ($pluginText.Replace('"' + $version + '"', '"9.9.9"'))
     Expect-Failure 'Plugin source mismatch' { & $publish @options } 'BepInPlugin version'
     Write-Text $plugin $pluginText
+    Write-Text $plugin ($pluginText.Replace("Starting version $version at", 'Starting version 9.9.9 at'))
+    Expect-Failure 'Startup version mismatch' { & $publish @options } 'Plugin startup version'
+    Write-Text $plugin $pluginText
     Write-Text $setup ($setupText.Replace("| HeimKit release baseline | $version |", '| HeimKit release baseline | 9.9.9 |'))
     Expect-Failure 'Documented build mismatch' { & $publish @options } 'Synchronize the HeimKit release baseline'
     Write-Text $setup $setupText

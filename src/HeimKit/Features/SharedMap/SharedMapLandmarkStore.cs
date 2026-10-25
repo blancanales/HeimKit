@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -20,7 +27,7 @@ public sealed class SharedMapLandmarkStore
     private Dictionary<string, MapMarker> _records = new(StringComparer.Ordinal);
     private HashSet<string> _retired = new(StringComparer.Ordinal);
     private bool _dirty;
-    private float _nextSave;
+    private readonly ScheduleToken _nextSave = new();
     private IReadOnlyList<MapMarker>? _activeMarkers, _historicalMarkers;
     public string FilePath { get; }
     public int Count => _records.Count;
@@ -111,7 +118,7 @@ public sealed class SharedMapLandmarkStore
         if (fields.BaseStream.Position != fields.BaseStream.Length) throw new InvalidDataException("Trailing landmark data.");
         _records = loaded; _retired = retired; _dirty = false; _activeMarkers = _historicalMarkers = null; return true;
     }
-    public bool SaveIfDue(float now, float interval) { if (now < _nextSave) return false; _nextSave = now + interval; return Save(); }
+    public bool SaveIfDue(float now, float interval) { if (!_nextSave.Ready(now)) return false; _nextSave.Postpone(now, interval); return Save(); }
     public bool Save()
     {
         if (!_dirty) return false;

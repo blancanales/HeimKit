@@ -1,9 +1,15 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.IO;
 using System.Runtime.CompilerServices;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using HeimKit.Shared;
 
 namespace HeimKit.Configuration;
 
@@ -43,7 +49,7 @@ public sealed class GameVersionCompatibility
     public bool Supports(string gameVersion) => string.Equals(gameVersion, RequiredVersion, StringComparison.Ordinal);
 
     private static void Warn(ManualLogSource logger, string message) =>
-        DiagnosticLog.Write(logger, "HeimKit", DiagnosticEvent.Lifecycle, message, level: LogLevel.Warning);
+        DiagnosticLog.Write(logger, "HeimKit", message, level: LogLevel.Warning);
 
     private static string? Read(ConfigFile config)
     {

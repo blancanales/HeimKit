@@ -1,10 +1,16 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using HeimKit.Shared;
 
 namespace HeimKit.Configuration;
 
@@ -42,9 +48,7 @@ public static class DebugLoggingResolver
             if (state.Invalid && !state.Warned && logger != null)
             {
                 state.Warned = true;
-                DiagnosticLog.Write(logger, "HeimKit", DiagnosticEvent.Lifecycle,
-                    "Invalid or unreadable feature debug override; feature diagnostics suppressed until corrected and restarted",
-                    new (string, object?)[] { ("section", section), ("key", Key), ("fallback", "suppress_debug") }, LogLevel.Warning);
+                DiagnosticLog.Write(logger, "HeimKit", "Invalid or unreadable feature debug override; feature diagnostics suppressed until corrected and restarted", level: LogLevel.Warning);
             }
             return new DebugLoggingPolicy(global, state.Suppressed, feature);
         }

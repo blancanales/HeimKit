@@ -23,14 +23,15 @@ if ($taskVersion -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 if ($taskProject.Project.PropertyGroup.IncludeSourceRevisionInInformationalVersion -ne 'false') {
     throw 'Disable the automatic source-revision suffix before building.'
 }
-$taskTestsPath = Join-Path $PSScriptRoot 'tests/HeimKit/HeimKit.Tests.csproj'
+$taskTestsPath = Join-Path $PSScriptRoot 'tests/HeimKit2/HeimKit.Tests.csproj'
+$taskTestsDirectory = Split-Path -Parent $taskTestsPath
 $taskTests = [xml][IO.File]::ReadAllText($taskTestsPath)
 $taskTestsFramework = [string]$taskTests.Project.PropertyGroup.TargetFramework
 $taskBuildArgs = @('build', $taskTestsPath, '-c', 'Debug', "-p:ServerPath=$ServerPath")
 if ($BepInExCore) { $taskBuildArgs += "-p:BepInExCore=$BepInExCore" }
 & dotnet @taskBuildArgs
 if ($LASTEXITCODE -ne 0) { throw 'Release preparation stopped: automated-check build failed.' }
-& dotnet (Join-Path $PSScriptRoot "tests/HeimKit/bin/Debug/$taskTestsFramework/HeimKit.Tests.dll")
+& dotnet (Join-Path $taskTestsDirectory "bin/Debug/$taskTestsFramework/HeimKit.Tests.dll")
 if ($LASTEXITCODE -ne 0) { throw 'Release preparation stopped: automated checks failed.' }
 
 if (!$ReadmeBaseUrl) { $ReadmeBaseUrl = "https://github.com/blancanales/HeimKit/blob/v$taskVersion" }

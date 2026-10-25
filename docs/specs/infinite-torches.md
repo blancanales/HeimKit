@@ -54,13 +54,13 @@ The module initializes only when enabled and the audited game-version guard pass
 
 ## Logging
 
-All messages follow the [shared logging contract](../architecture.md#logging). Info uses concise configuration, effective startup state and readiness messages; Warning uses concise problem messages. Settings and prefab-processing details belong in Debug; Error and exception evidence retain structured output. Optional diagnostics use BepInEx Debug severity. The shared [repetition and volume limits](../architecture.md#repetition-and-volume-limits) govern all streams. DebugMode permits at most one changed-state SUMMARY per 60 seconds with explicitly labeled latest-pass/current counts, interval refill-request and reconciliation-outcome counts and omitted-message counts.
+All messages follow the [shared logging contract](../architecture.md#logging). Info uses concise configuration, effective startup state and readiness messages; Warning uses concise problem messages. Settings and prefab-processing details belong in Debug; Error and exception evidence retain structured output. Optional diagnostics use BepInEx Debug severity. The shared [repetition and volume limits](../architecture.md#repetition-and-volume-limits) govern all streams. DebugMode permits at most one changed-state scope summary per 60 seconds with explicitly labeled latest-pass/current counts, interval refill-request and reconciliation-outcome counts and omitted-message counts.
 
 Each reconciliation pass with sufficient replicated fuel increases emits one concise Info entry: `InfiniteTorches: Fuel increase observed for N light sources.` A single update uses singular wording. All observed updates in that pass share the entry, independently of DebugMode and optional sample limits. The pending tracker returns the observed-update count after clearing completed requests, preventing repeated notices for unchanged fuel. Empty passes, requests merely sent, insufficient increases, timeouts, missing objects and owner changes do not produce a successful-update summary. The count covers pending requests confirmed by the existing sufficient-progress criteria, not all world light sources. Responses observed in different passes have separate summaries; results follow the shared log interpretation rules. Pause/shutdown clears pending state.
 
-Refill ACTION records are limited to four per 60 seconds. They identify object, prefab, position, prior fuel and target; they identify the sent native request. Pending-operation RESULT records are limited to six per 60 seconds. They identify observed fuel increase, timeout, owner change or missing object, with prior/target/observed fuel and elapsed wait. An owner-change result includes the owners needed to explain that transition. Missing observed data is `unknown`.
+Refill request sample records are limited to four per 60 seconds. They identify object, prefab, position, prior fuel and target; they identify the sent native request. Pending-operation outcome sample records are limited to six per 60 seconds. They identify observed fuel increase, timeout, owner change or missing object, with prior/target/observed fuel and elapsed wait. An owner-change result includes the owners needed to explain that transition. Unknown observed data is omitted from HeimKit fields.
 
-Every reconciliation outcome is counted by the controller, even when its individual RESULT message is omitted. There is no unbounded per-pass request message or direct pending-refill logging bypass. SUMMARY counters labeled `_pass` refer to the latest examined pass, not every torch in the world; `_interval` counters cover activity since the preceding emitted summary.
+Every reconciliation outcome is counted by the controller, even when its individual outcome sample message is omitted. There is no unbounded per-pass request message or direct pending-refill logging bypass. Scope summary sentences identify the latest examined pass and the activity window since the preceding emitted summary; current counts describe the examined scope.
 
 ## Limits
 
@@ -76,13 +76,10 @@ Request budgets bound sends rather than sector enumeration. Removing the plugin 
 | InfiniteTorchesRefillRules.cs | Prefab fuel eligibility and the exact brazier and configurable fireplace wet-flame exceptions. |
 | InfiniteTorchesPendingRefills.cs | Duplicate suppression, reconciliation, timeout and capacity control. |
 | InfiniteTorchesDiagnostics.cs | Bounded diagnostic output using the global-or-feature debug policy. |
+| InfiniteTorchesLogTopics.cs | Feature log topic. |
 | Models/RefillObservation.cs | Observed owner and fuel data for reconciliation. |
 | Models/RefillRequest.cs | Pending request owner, fuel target and timing data. |
 | Models/RefillResult.cs | Reconciled request outcome, observed state and elapsed wait. |
-
-User installation and general configuration belong in [server setup](../server-setup.md); feature usage and troubleshooting belong in the [feature guide](../features/infinite-torches.md). Project design belongs in [architecture.md](../architecture.md); file placement and development procedures belong in [contributing.md](../contributing.md).
-
-ConfigurationLoader manages the shared file, and DiagnosticsSettings binds the common debug switch. The main class activates the controller only after enable and compatibility checks pass; the controller performs gameplay work and reports processing failures to the main class.
 
 ## Player-service integration
 
@@ -95,3 +92,7 @@ Prefab lookup combines all unsupported entries into one Warning containing the t
 ## Game-version compatibility
 
 Use the shared [compatibility contract](../architecture.md#configuration) before activation.
+
+## HeimKit Core integration
+
+The performance rebuild in `src/HeimKit/Features/` consumes near-only owner-filtered CandidateSubscription, PrefabRegistry fireplace metadata and ModuleScheduler refill cadence; no ownership lease. Discovery uses native ready-owner sector geometry, activation/area-entry seeding and local/replicated updates. Fuel, state and owner are checked live at the refill interval. Pending requests reconcile independently of discovery; ownership changes do not discard eligible light definitions. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.

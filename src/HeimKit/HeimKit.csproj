@@ -4,12 +4,16 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AssemblyName>HeimKit</AssemblyName>
-    <Version>0.1.55</Version>
+    <RootNamespace>HeimKit</RootNamespace>
+    <Product>HeimKit</Product>
+    <Title>HeimKit</Title>
+    <Version>0.2.0-rebuild.15</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <GameManaged>$(ServerPath)\valheim_server_Data\Managed</GameManaged>
     <BepInExCore Condition="'$(BepInExCore)' == ''">$(ServerPath)\BepInEx\core</BepInExCore>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="HeimKit.Tests" />
     <None Include="..\..\config\heimkit.cfg" Link="heimkit.cfg" CopyToOutputDirectory="PreserveNewest" />
     <Reference Include="BepInEx"><HintPath>$(BepInExCore)\BepInEx.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="0Harmony"><HintPath>$(BepInExCore)\0Harmony.dll</HintPath><Private>false</Private></Reference>

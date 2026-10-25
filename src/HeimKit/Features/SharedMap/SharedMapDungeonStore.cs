@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -19,7 +26,7 @@ public sealed class SharedMapDungeonStore
     private readonly Dictionary<string, (int Total, int Picked)> _progress = new(StringComparer.Ordinal);
     private readonly HashSet<string> _visited = new(StringComparer.Ordinal);
     private long _revision, _savedRevision;
-    private float _nextSave;
+    private readonly ScheduleToken _nextSave = new();
     private IReadOnlyList<MapMarker>? _markers;
     public string FilePath { get; }
     public int Count => _discoveries.Count;
@@ -45,8 +52,9 @@ public sealed class SharedMapDungeonStore
     public int ShareVisits(IReadOnlyList<string> locationGateways)
     {
         // The caller supplies gateways from one validated placed location, never nearby locations.
-        if (!locationGateways.Any(Visited)) return 0;
-        int changed = 0; foreach (string gateway in locationGateways) if (Visit(gateway)) changed++;
+        bool visited = false; for (int index = 0; index < locationGateways.Count; index++) if (Visited(locationGateways[index])) { visited = true; break; }
+        if (!visited) return 0;
+        int changed = 0; for (int index = 0; index < locationGateways.Count; index++) if (Visit(locationGateways[index])) changed++;
         return changed;
     }
     public (int Total, int Picked) ProgressState(string identity) => _progress.TryGetValue(identity, out var value) ? value : (0, -1);
@@ -154,8 +162,8 @@ public sealed class SharedMapDungeonStore
 
     public bool SaveIfDue(float now, float interval)
     {
-        if (now < _nextSave) return false;
-        _nextSave = now + interval; return Save();
+        if (!_nextSave.Ready(now)) return false;
+        _nextSave.Postpone(now, interval); return Save();
     }
 
     public bool Save()

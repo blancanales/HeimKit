@@ -1,9 +1,16 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using HeimKit.Features.SharedMap.Models;
 using UnityEngine;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 
 namespace HeimKit.Features.SharedMap;
 
@@ -19,7 +26,7 @@ internal sealed class SharedMapResources : IDisposable
     private readonly SharedMapSettings _settings;
     private readonly SharedMapDiagnostics _diagnostics;
     private readonly Action<Exception> _failed;
-    private readonly Dictionary<int, SharedMapResourcePrefab> _prefabs = new();
+    private readonly PrefabCatalog<SharedMapResourcePrefab> _prefabs = PrefabRegistry.Current.Catalog<SharedMapResourcePrefab>("SharedMapResources._prefabs");
     private readonly List<SharedMapResourcePrefab> _scanPrefabs = new();
     private readonly List<ZDO> _near = new(), _scan = new();
     private readonly List<ZDOID> _candidates = new();
@@ -27,7 +34,8 @@ internal sealed class SharedMapResources : IDisposable
     private readonly Dictionary<long, int> _playerCursors = new();
     private readonly Queue<ZDOID> _retrospective = new();
     private long _markerRevision = -1;
-    private float _distance = -1, _nextRetro;
+    private float _distance = -1;
+    private readonly ScheduleToken _nextRetro = new();
     private bool _removeDepleted, _disposed;
     private int _prefabCursor, _sectorCursor, _added, _retired;
     private IReadOnlyList<MapMarker> _markers = Array.Empty<MapMarker>();
@@ -85,14 +93,26 @@ internal sealed class SharedMapResources : IDisposable
             SharedMapExploration.Finite(position.z) && !Character.InInterior(position);
     }
 
+    private readonly Dictionary<ZDOID, (ZDO Record, SharedMapResourcePrefab Prefab, uint Revision, MiningProgress? Value)> _progressCache = new();
+    private MiningProgress? Progress(ZDO zdo, SharedMapResourcePrefab prefab)
+    {
+        if (_progressCache.TryGetValue(zdo.m_uid, out var previous) && ReferenceEquals(previous.Record, zdo) &&
+            ReferenceEquals(previous.Prefab, prefab) && previous.Revision == zdo.DataRevision) return previous.Value;
+        var progress = prefab.Progress(zdo);
+        if (_progressCache.Count < SharedMapResourceStore.MaximumDeposits || _progressCache.ContainsKey(zdo.m_uid))
+            _progressCache[zdo.m_uid] = (zdo, prefab, zdo.DataRevision, progress);
+        return progress;
+    }
+    private bool? Depleted(ZDO zdo, SharedMapResourcePrefab prefab)
+    { var progress = Progress(zdo, prefab); return progress.HasValue ? progress.Value.RemainingSections == 0 : (bool?)null; }
     private void Observe(ZDO zdo, SharedMapResourcePrefab prefab, Vector3 position, bool discoverSilver = false, MiningProgress? handoff = null)
     {
         int before = _store.Deposits.Count;
         var old = _store.Find(prefab.Kind, position.x, position.y, position.z, out _);
         bool wasDepleted = old?.Depleted == true;
         bool wasHidden = old != null && prefab.Kind == ResourceKind.Silver && !old.SilverDiscovered;
-        MiningProgress? progress = prefab.Kind == ResourceKind.Copper || prefab.Kind == ResourceKind.Silver ? handoff ?? prefab.Progress(zdo) : null;
-        bool? depleted = progress.HasValue ? progress.Value.RemainingSections == 0 : prefab.Depleted(zdo);
+        MiningProgress? progress = prefab.Kind == ResourceKind.Copper || prefab.Kind == ResourceKind.Silver ? handoff ?? Progress(zdo, prefab) : null;
+        bool? depleted = progress.HasValue ? progress.Value.RemainingSections == 0 : Depleted(zdo, prefab);
         var accepted = _store.Observe(prefab.Kind, position.x, position.y, position.z, depleted, true, progress, discoverSilver);
         _added += _store.Deposits.Count - before;
         if (accepted != null && wasHidden && accepted.SilverDiscovered) _added++;
@@ -119,25 +139,25 @@ internal sealed class SharedMapResources : IDisposable
             // A direct Silver hit identifies that vein even when its centre lies outside the proximity radius.
             if (direct != null && Eligible(direct, out var prefab, out var position) && prefab.Kind == ResourceKind.Silver)
             {
-                if (prefab.Depleted(direct) == false) Observe(direct, prefab, position, true);
+                if (Depleted(direct, prefab) == false) Observe(direct, prefab, position, true);
                 else if (prefab.ReplacesWithMining && prefab.HealthBaseline(direct) <= 0)
                     Observe(direct, prefab, position, true, prefab.InitialProgress);
                 return;
             }
             // Damage to creatures, buildings, or loose items is not discovery evidence.
-            var target = direct == null ? null : ZNetScene.instance.GetPrefab(direct.GetPrefab());
-            if (target == null || direct!.GetLong(ZDOVars.s_creator) != 0 || target.GetComponent<Character>() != null ||
-                target.GetComponent<Piece>() != null || target.GetComponent<ItemDrop>() != null ||
-                target.GetComponent<MineRock>() == null && target.GetComponent<MineRock5>() == null && target.GetComponent<Destructible>() == null) return;
+            var target = direct == null ? null : PrefabRegistry.Current.Prefab(direct.GetPrefab());
+            if (target == null || direct!.GetLong(ZDOVars.s_creator) != 0 || PrefabRegistry.Component<Character>(target) != null ||
+                PrefabRegistry.Component<Piece>(target) != null || PrefabRegistry.Component<ItemDrop>(target) != null ||
+                PrefabRegistry.Component<MineRock>(target) == null && PrefabRegistry.Component<MineRock5>(target) == null && PrefabRegistry.Component<Destructible>(target) == null) return;
         }
         float radius = _settings.SilverDiscoveryRadiusMeters.Value;
         _miningNear.Clear();
         int sectors = (int)Math.Ceiling(radius / ZoneSystem.instance.m_zoneSize) + 1;
-        _world.FindSectorObjects(ZoneSystem.GetZone(point), new SimulationDistance(sectors, 0, true), _miningNear);
+        WorldObjectProvider.Current.For("SharedMap").Query(ZoneSystem.GetZone(point), new SimulationDistance(sectors, 0, true), _miningNear);
         ZDO? nearest = null; double best = (double)radius * radius;
         foreach (var zdo in _miningNear)
         {
-            if (!Eligible(zdo, out var prefab, out var p) || prefab.Kind != ResourceKind.Silver || prefab.Depleted(zdo) != false ||
+            if (!Eligible(zdo, out var prefab, out var p) || prefab.Kind != ResourceKind.Silver || Depleted(zdo, prefab) != false ||
                 _store.Find(ResourceKind.Silver, p.x, p.y, p.z, out _)?.SilverDiscovered == true) continue;
             double dx = (double)p.x - point.x, dz = (double)p.z - point.z, distance = dx * dx + dz * dz;
             if (distance > best) continue;
@@ -154,7 +174,7 @@ internal sealed class SharedMapResources : IDisposable
         if (!SharedMapExploration.Finite(ZoneSystem.instance.m_zoneSize) || ZoneSystem.instance.m_zoneSize < 16)
             throw new InvalidOperationException("Unsupported native resource-sector geometry.");
         int radius = (int)Math.Ceiling(_map.Radius / ZoneSystem.instance.m_zoneSize) + 1;
-        _world.FindSectorObjects(ZoneSystem.GetZone(position), new SimulationDistance(radius, 0, true), _near);
+        WorldObjectProvider.Current.For("SharedMap").Query(ZoneSystem.GetZone(position), new SimulationDistance(radius, 0, true), _near);
         double range = (double)_map.Radius * _map.Radius;
         foreach (var zdo in _near)
         {
@@ -176,7 +196,7 @@ internal sealed class SharedMapResources : IDisposable
     public void Tick(float now)
     {
         if (_disposed) return;
-        if (_settings.ResourceDiscoverPreviouslyExplored.Value && _scanPrefabs.Count > 0 && now >= _nextRetro)
+        if (_settings.ResourceDiscoverPreviouslyExplored.Value && _scanPrefabs.Count > 0 && _nextRetro.Ready(now))
         {
             if (_retrospective.Count == 0)
             {
@@ -189,7 +209,7 @@ internal sealed class SharedMapResources : IDisposable
                 {
                     _sectorCursor = 0;
                     if (++_prefabCursor == _scanPrefabs.Count)
-                    { _prefabCursor = 0; _nextRetro = now + _settings.TableIntervalSeconds.Value; }
+                    { _prefabCursor = 0; _nextRetro.Postpone(now, _settings.TableIntervalSeconds.Value); }
                 }
             }
             for (int i = 0; i < 256 && _retrospective.Count > 0; i++)
@@ -231,7 +251,7 @@ internal sealed class SharedMapResources : IDisposable
     }
 
     public void Dispose()
-    {
+    { _progressCache.Clear();
         if (_disposed) return;
         _disposed = true; _world.m_onZDODestroyed -= Destroyed;
         _silverDiscovery.Dispose(); _miningNear.Clear();

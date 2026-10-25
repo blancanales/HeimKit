@@ -1,7 +1,13 @@
-using HeimKit.Shared.Players;
-using HeimKit.Shared.Players.Models;
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
+using HeimKit.Core.Players;
+using HeimKit.Core.Players.Models;
 using HeimKit.Features.AFKNightWatch.Models;
-using HeimKit.Shared;
 using System;
 using System.Linq;
 using System.Collections.Generic;
@@ -17,6 +23,15 @@ public static class AFKNightWatchSleepVoteCoordinator
     private static readonly Harmony Hooks = new("heimkit.sleep_vote");
     private static readonly Harmony Observers = new("heimkit.sleep_vote.diagnostics");
     private static readonly List<string> Registered = new();
+    private static readonly List<PlayerActivityObservation> FallbackActors = new();
+    private static readonly List<PlayerActivityView> FallbackVotes = new();
+    private static IReadOnlyList<PlayerActivityView> ReadFallback()
+    {
+        PlayerActivityService.ReadActorsInto(_presence!, 0, FallbackActors, null);
+        FallbackVotes.Clear();
+        foreach (var actor in FallbackActors) FallbackVotes.Add(new PlayerActivityView { Peer = actor.Peer, Known = actor.Known, Alive = actor.Alive, InBed = actor.InBed });
+        return FallbackVotes;
+    }
     public static string RegisteredHooks => string.Join(",", Registered);
     private static Func<(int Percentage, bool Strict)>? _majority;
     private static IPlayerActivityObservations? _activity;
@@ -69,10 +84,10 @@ public static class AFKNightWatchSleepVoteCoordinator
             Observers.Patch(target, prefix: prefix == null ? null : new HarmonyMethod(typeof(AFKNightWatchSleepVoteCoordinator), prefix), postfix: postfix == null ? null : new HarmonyMethod(typeof(AFKNightWatchSleepVoteCoordinator), postfix), finalizer: finalizer == null ? null : new HarmonyMethod(typeof(AFKNightWatchSleepVoteCoordinator), finalizer));
             Registered.Add(type.Name + "." + method + ":observation");
         }
-        catch (Exception error)
+        catch (Exception)
         {
             if (target != null) Observers.Unpatch(target, HarmonyPatchType.All, Observers.Id);
-            if (_logger != null) DiagnosticLog.Write(_logger, _logName, DiagnosticEvent.Lifecycle, "Diagnostic hook unavailable; gameplay hook retained", new (string, object?)[] { ("hook", type.Name + "." + method), ("registered", false), ("reason", error.Message) }, level: LogLevel.Warning);
+            if (_logger != null) DiagnosticLog.Write(_logger, _logName, "Diagnostic hook unavailable; gameplay hook retained", level: LogLevel.Warning);
         }
     }
     private static void UninstallUnused()
@@ -83,7 +98,7 @@ public static class AFKNightWatchSleepVoteCoordinator
         finally
         {
             try { Hooks.UnpatchSelf(); }
-            finally { Registered.Clear(); _logger = null; }
+            finally { Registered.Clear(); FallbackActors.Clear(); FallbackVotes.Clear(); _logger = null; }
         }
     }
     private static bool Vote(ref bool __result)
@@ -93,14 +108,16 @@ public static class AFKNightWatchSleepVoteCoordinator
         try
         {
             var players = _activity != null ? _activity.Snapshot(Time.unscaledTime) :
-                PlayerActivityService.ReadActors(_presence!).Select(p => new PlayerActivityView { Peer = p.Peer, Known = p.Known, Alive = p.Alive, InBed = p.InBed }).ToArray();
+                ReadFallback();
             if (_activity != null && !_activity.Reliable) { SleepDelay.Reset(); _acceptedVote = null; Notify("vote_not_ready_fallback"); return true; }
-            if (!players.Any(p => p.Known && p.Alive && p.InBed)) { SleepDelay.Reset(); _acceptedVote = null; Notify("no_living_sleeper_votes"); __result = false; return false; }
+            bool livingSleeper = false, everyoneInBed = true;
+            for (int index = 0; index < players.Count; index++) { var p = players[index]; livingSleeper |= p.Known && p.Alive && p.InBed; everyoneInBed &= p.Known && p.InBed; }
+            if (!livingSleeper) { SleepDelay.Reset(); _acceptedVote = null; Notify("no_living_sleeper_votes"); __result = false; return false; }
             _lastAttemptAt = Time.unscaledTime;
             var settings = _majority?.Invoke() ?? (100, false);
             var decision = AFKNightWatchSleepQuorumRules.Evaluate(players, settings.Item1, settings.Item2, _activity != null);
             decision.AllowedAfterDelay = SleepDelay.Allow(Time.unscaledTime, decision.Met,
-                players.All(p => p.Known && p.InBed), _delaySeconds?.Invoke() ?? 30);
+                everyoneInBed, _delaySeconds?.Invoke() ?? 30);
             decision.DelayRemaining = SleepDelay.Remaining;
             _acceptedVote = decision.AllowedAfterDelay ? decision : null;
             _result?.Invoke(decision);
@@ -126,7 +143,7 @@ public static class AFKNightWatchSleepVoteCoordinator
         float now = Time.unscaledTime;
         if (now >= _lastWarning && now - _lastWarning < 300) return;
         _lastWarning = now;
-        if (_logger != null) DiagnosticLog.Write(_logger, _logName, DiagnosticEvent.Lifecycle, "Diagnostic observation unavailable; native behavior unchanged: " + error.Message, level: LogLevel.Warning);
+        if (_logger != null) DiagnosticLog.Write(_logger, _logName, "Diagnostic observation unavailable; native behavior unchanged: " + error.Message, level: LogLevel.Warning);
     }
     private static void VoteReturned(bool __result) => Notify(__result ? "vote_returned_true" : "vote_returned_false");
     private static Exception? VoteFinished(Exception? __exception) { if (__exception != null) Notify("native_vote_exceptions"); return __exception; }

@@ -1,9 +1,15 @@
-using HeimKit.Shared.Players;
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
+using HeimKit.Core.Players;
 using HeimKit.Features.InfiniteTorches.Models;
 using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
-using HeimKit.Shared;
 
 
 namespace HeimKit.Features.InfiniteTorches;
@@ -17,8 +23,9 @@ internal sealed class InfiniteTorchesController : IDisposable
     private readonly InfiniteTorchesSettings _settings;
     private readonly InfiniteTorchesDiagnostics _diagnostics;
     private readonly InfiniteTorchesPendingRefills _pending = new();
-    private readonly Dictionary<int, Fireplace> _torches = new();
+    private readonly PrefabCatalog<Fireplace> _torches = PrefabRegistry.Current.Catalog<Fireplace>("InfiniteTorchesController._torches");
     private readonly List<ZDO> _sector = new();
+    private CandidateSubscription? _index;
     private readonly List<ZDO> _distant = new();
     private readonly List<ZDO> _candidates = new();
     private readonly HashSet<ZDOID> _seen = new();
@@ -26,81 +33,69 @@ internal sealed class InfiniteTorchesController : IDisposable
     private ZNetScene? _scene;
     private string _configuredNames = "";
     private int _configuredFireplaces;
-    private float _nextTick;
     private int _cursor;
+    private float _reconcileNow;
+    private readonly Func<ZDOID, RefillObservation?> _observeRefill;
+    private readonly Action<RefillResult> _reportRefill;
     private bool _announced;
     private readonly Dictionary<string, long> _outcomes = new();
 
     public InfiniteTorchesController(InfiniteTorches module, InfiniteTorchesSettings settings, ManualLogSource logger, IPlayerPresence presence)
     {
         _logger = logger;
+        _observeRefill = ObserveRefill;
         _presence = presence;
         _module = module;
         _settings = settings;
         _diagnostics = new InfiniteTorchesDiagnostics(() => _settings.DebugLogging.Enabled, logger, () => new Dictionary<string, long>(_outcomes));
+        _reportRefill = result => { Count(result.Outcome); _diagnostics.Result(_reconcileNow, result); };
     }
 
     internal string SettingsDescription => _diagnostics.SettingsDescription;
 
     public void Tick(float now)
     {
-        if (now < _nextTick) return;
-        _nextTick = now + _settings.IntervalSeconds.Value;
+        if (!ModuleScheduler.Current.Due(this, "processing", now, _settings.IntervalSeconds.Value)) return;
         var net = ZNet.instance;
         var scene = ZNetScene.instance;
         var manager = ZDOMan.instance;
         var routed = ZRoutedRpc.instance;
-        if (net == null || scene == null || manager == null || routed == null)
-        {
-            _diagnostics.Report(now, () => "Waiting for world services. Unavailable: " +
-                $"{(net == null ? "network " : "")}{(scene == null ? "scene " : "")}" +
-                $"{(manager == null ? "world-object data " : "")}{(routed == null ? "RPC routing" : "")}".TrimEnd() + ".");
-            return;
-        }
-        if (!net.IsServer() || !net.IsDedicated())
-        {
-            _diagnostics.Report(now, () => "Not running in a dedicated-server network session.");
-            return;
-        }
+        if (!WorldServices.World) { ReportUnavailableWorld(now); return; }
 
         string operation = "resolving configured light-source prefabs";
+        ZNetPeer? scanningPeer = null;
         try
         {
             operation = "checking pending refill results";
-            int fuelUpdates = _pending.Reconcile(now, id =>
-            {
-                var objectData = manager.GetZDO(id);
-                return objectData != null && objectData.IsValid()
-                    ? new RefillObservation(objectData.GetOwner(), objectData.GetFloat(ZDOVars.s_fuel, -1f))
-                    : (RefillObservation?)null;
-            }, result => { Count(result.Outcome); _diagnostics.Result(now, result); });
+            _reconcileNow = now;
+            int fuelUpdates = _pending.Reconcile(now, _observeRefill, _reportRefill);
             _diagnostics.RefillSummary(fuelUpdates);
             operation = "resolving configured light-source prefabs";
             if (_scene != scene || _configuredNames != _settings.Prefabs.Value || _configuredFireplaces != _settings.FireplaceSelection) LoadPrefabs(scene);
             if (_torches.Count == 0)
             {
-                _diagnostics.Report(now, () => "No supported light-source prefabs configured. Check Torches.Prefabs and startup warnings.");
+                if (_diagnostics.SummaryReady(now)) _diagnostics.Report(now, () => "No supported light-source prefabs configured. Check Torches.Prefabs and startup warnings.");
                 return;
             }
             _owners.Clear();
-            foreach (var peer in _presence.Peers)
+            for (int rosterIndex1 = 0; rosterIndex1 < _presence.Peers.Count && _presence.Peers[rosterIndex1] is var peer; rosterIndex1++)
                 if (peer.IsReady() && !peer.m_characterID.IsNone()) _owners[peer.m_uid] = peer;
 
             _candidates.Clear();
             _seen.Clear();
             if (_owners.Count == 0)
             {
-                _diagnostics.Report(now, () => "No ready connected players with character IDs.");
+                if (_diagnostics.SummaryReady(now)) _diagnostics.Report(now, () => "No ready connected players with character IDs.");
                 return;
             }
             int sectorRecords = 0;
             // The dedicated server need not instantiate a Fireplace. Look up ZDOs in each owner's active sectors.
             foreach (var peer in _owners.Values)
             {
-                operation = $"scanning sectors for owner {peer.m_uid} at {peer.m_refPos}";
+                operation = "scanning sectors"; scanningPeer = peer;
                 _sector.Clear();
                 _distant.Clear();
-                manager.FindSectorObjects(ZoneSystem.GetZone(peer.m_refPos), peer.m_simulationDistance, _sector, _distant);
+                _index!.Read(peer.m_refPos, peer.m_simulationDistance.NearSimulationDistance, _sector, peer.m_simulationDistance.IsClassic, includeDistant: false);
                 sectorRecords += _sector.Count;
                 foreach (var zdo in _sector)
                 {
@@ -112,7 +107,7 @@ internal sealed class InfiniteTorchesController : IDisposable
             if (_candidates.Count == 0)
             {
                 _cursor = 0;
-                _diagnostics.Report(now, () => $"No eligible client-owned light sources in players' nearby areas; ready_players_now={_owners.Count}; prefab_types_now={_torches.Count}; sector_records_pass={sectorRecords}.");
+                if (_diagnostics.SummaryReady(now)) ReportEmptyScope(now, sectorRecords);
                 return;
             }
 
@@ -146,9 +141,33 @@ internal sealed class InfiniteTorchesController : IDisposable
                 catch { _pending.Remove(zdo.m_uid); throw; }
                 sent++;
                 Count("requests_sent");
-                if (_diagnostics.IsDebugEnabled) _diagnostics.Request(now, zdo.m_uid.ToString(), prefab.gameObject.name, string.Join(",", position.x.ToString(System.Globalization.CultureInfo.InvariantCulture), position.y.ToString(System.Globalization.CultureInfo.InvariantCulture), position.z.ToString(System.Globalization.CultureInfo.InvariantCulture)), fuel, prefab.m_maxFuel);
+                if (_diagnostics.IsDebugEnabled) _diagnostics.Request(now, zdo.m_uid.ToString(), prefab.gameObject.name, position, fuel, prefab.m_maxFuel);
             }
-            _diagnostics.Report(now, () =>
+            if (_diagnostics.SummaryReady(now)) ReportScan(now, sent, examined, sufficientFuel, stateOff, invalidFuel, changedOwner, pendingSkipped, trackingFull);
+        }
+        catch (Exception ex)
+        {
+            if (operation == "scanning sectors" && scanningPeer != null) operation = $"scanning sectors for owner {scanningPeer.m_uid} at {scanningPeer.m_refPos}";
+            _module.Fail(ex, operation);
+        }
+    }
+
+    private void ReportUnavailableWorld(float now)
+    {
+        if (!_diagnostics.SummaryReady(now)) return;
+        var net = ZNet.instance; var scene = ZNetScene.instance;
+        var manager = ZDOMan.instance; var routed = ZRoutedRpc.instance;
+        if (net == null || scene == null || manager == null || routed == null)
+            _diagnostics.Report(now, () => "Waiting for world services. Unavailable: " +
+                $"{(net == null ? "network " : "")}{(scene == null ? "scene " : "")}" +
+                $"{(manager == null ? "world-object data " : "")}{(routed == null ? "RPC routing" : "")}".TrimEnd() + ".");
+        else _diagnostics.Report(now, () => "Not running in a dedicated-server network session.");
+    }
+    private void ReportEmptyScope(float now, int sectorRecords) => _diagnostics.Report(now, () =>
+        $"No eligible client-owned light sources in players' nearby areas; ready_players_now={_owners.Count}; prefab_types_now={_torches.Count}; sector_records_pass={sectorRecords}.");
+    private void ReportScan(float now, int sent, int examined, int sufficientFuel, int stateOff, int invalidFuel, int changedOwner, int pendingSkipped, int trackingFull)
+    {
+            if (_diagnostics.SummaryReady(now)) _diagnostics.Report(now, () =>
             {
                 string reason = sent > 0 ? "Refill requests sent this pass; client application is unconfirmed."
                     : sufficientFuel == examined ? "All examined light sources have enough fuel (at least 75%)."
@@ -159,17 +178,17 @@ internal sealed class InfiniteTorchesController : IDisposable
                     $"pending_now={_pending.Count}; duplicates_suppressed_pass={pendingSkipped}; tracking_capacity_skips_pass={trackingFull}; " +
                     $"deferred_pass={_candidates.Count - examined}.";
             });
-        }
-        catch (Exception ex)
-        {
-            _module.Fail(ex, operation);
-        }
     }
-
+    private RefillObservation? ObserveRefill(ZDOID id)
+    {
+        var data = ZDOMan.instance.GetZDO(id);
+        return data != null && data.IsValid() ? new RefillObservation(data.GetOwner(), data.GetFloat(ZDOVars.s_fuel, -1)) : (RefillObservation?)null;
+    }
     private void Count(string kind) { _outcomes.TryGetValue(kind, out long count); _outcomes[kind] = count + 1; }
 
     private void LoadPrefabs(ZNetScene scene)
     {
+        _index?.Dispose(); _index = null;
         _torches.Clear();
         var rejected = new Dictionary<string, int>();
         int rejectionCount = 0;
@@ -182,8 +201,8 @@ internal sealed class InfiniteTorchesController : IDisposable
         {
             string name = raw.Trim();
             if (name.Length == 0) continue;
-            var go = scene.GetPrefab(name);
-            var fire = go != null ? go.GetComponent<Fireplace>() : null;
+            var go = PrefabRegistry.Current.Prefab(name);
+            var fire = go != null ? PrefabRegistry.Component<Fireplace>(go) : null;
             string? rejection = go == null ? "prefab not found" : fire == null ? "no Fireplace component"
                 : InfiniteTorchesRefillRules.RejectionReason(name, fire.m_canRefill, fire.m_infiniteFuel,
                     fire.m_canTurnOff, fire.m_enabledObjectLow != null || fire.m_enabledObjectHigh != null,
@@ -196,21 +215,22 @@ internal sealed class InfiniteTorchesController : IDisposable
             _torches[scene.GetPrefabHash(go!)] = fire!;
         }
         _diagnostics.UnsupportedPrefabs(rejectionCount, rejected);
+        _index = WorldObjectProvider.Current.Subscribe("InfiniteTorches", z => _torches.ContainsKey(z.GetPrefab()));
         _scene = scene;
         _configuredNames = _settings.Prefabs.Value;
         _configuredFireplaces = _settings.FireplaceSelection;
         if (!_announced)
         {
             if (_torches.Count > 0) _module.ProcessingReady();
-            else DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Lifecycle,
-                "No supported light-source prefabs are available; refilling is unavailable.", level: LogLevel.Warning);
+            else DiagnosticLog.Write(_logger, "InfiniteTorches", "No supported light-source prefabs are available; refilling is unavailable.", level: LogLevel.Warning);
             if (_diagnostics.IsDebugEnabled)
-                DiagnosticLog.Write(_logger, "InfiniteTorches", DiagnosticEvent.Detail, "Light-source prefabs resolved", new (string, object?)[] { ("prefab_types", _torches.Count) }, LogLevel.Debug);
+                if (DiagnosticLog.DebugAvailable(_logger, "InfiniteTorches")) DiagnosticLog.Write(_logger, "InfiniteTorches", InfiniteTorchesLogTopics.Refill, "Resolved light-source prefab definitions.", new (string, object?)[] { ("prefab_types", _torches.Count) }, LogLevel.Debug);
             _announced = true;
         }
     }
     public void Dispose()
     {
+        _index?.Dispose(); _index = null;
         _torches.Clear();
         _sector.Clear();
         _distant.Clear();
@@ -219,7 +239,6 @@ internal sealed class InfiniteTorchesController : IDisposable
         _owners.Clear();
         _scene = null;
         _configuredNames = "";
-        _nextTick = 0f;
         _cursor = 0;
         _announced = false;
         _diagnostics.Reset();

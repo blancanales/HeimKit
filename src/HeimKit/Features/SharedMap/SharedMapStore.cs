@@ -1,9 +1,17 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace HeimKit.Features.SharedMap;
 
@@ -13,7 +21,9 @@ public sealed class SharedMapStore
     private readonly long _world;
     private readonly SharedMapExploration _map;
     private int _savedPixels;
-    private float _nextSave;
+    private readonly ScheduleToken _nextSave = new();
+    private Task? _write;
+    private int _writingPixels;
     public string FilePath { get; }
 
     public SharedMapStore(string directory, long world, SharedMapExploration map)
@@ -49,27 +59,58 @@ public sealed class SharedMapStore
 
     public bool SaveIfDue(float now, float interval)
     {
-        if (now < _nextSave) return false;
-        _nextSave = now + interval;
-        return Save();
+        bool saved = Poll();
+        if (_write != null) return saved;
+        if (!_nextSave.Ready(now)) return saved;
+        _nextSave.Postpone(now, interval);
+        if (_savedPixels != _map.ExploredPixels)
+        {
+            _writingPixels = _map.ExploredPixels;
+            byte[] snapshot = Snapshot();
+            _write = Task.Run(() => Write(snapshot));
+        }
+        return saved;
+    }
+
+    private bool Poll(bool wait = false)
+    {
+        if (_write == null || !wait && !_write.IsCompleted) return false;
+        // Never acknowledge live state newer than the immutable snapshot.
+        var write = _write; _write = null;
+        write.GetAwaiter().GetResult();
+        _savedPixels = _writingPixels;
+        return true;
     }
 
     public bool Save(bool initialize = false)
     {
-        if (!initialize && _savedPixels == _map.ExploredPixels) return false;
+        bool saved = Poll(wait: true);
+        if (!initialize && _savedPixels == _map.ExploredPixels) return saved;
+        int pixels = _map.ExploredPixels;
+        Write(Snapshot());
+        _savedPixels = pixels;
+        return true;
+    }
+
+    private byte[] Snapshot()
+    {
+        byte[] packed = _map.ExportPacked();
+        using var body = new MemoryStream();
+        using (var writer = new BinaryWriter(body, Encoding.UTF8, true))
+        {
+            writer.Write(Magic); writer.Write(1); writer.Write(_world);
+            writer.Write(_map.Size); writer.Write(_map.PixelSize); writer.Write(packed.Length); writer.Write(packed);
+        }
+        return body.ToArray();
+    }
+
+    private void Write(byte[] bytes)
+    {
         string directory = Path.GetDirectoryName(FilePath)!;
         Directory.CreateDirectory(directory);
         string temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            byte[] packed = _map.ExportPacked();
-            using var body = new MemoryStream();
-            using (var writer = new BinaryWriter(body, Encoding.UTF8, true))
-            {
-                writer.Write(Magic); writer.Write(1); writer.Write(_world);
-                writer.Write(_map.Size); writer.Write(_map.PixelSize); writer.Write(packed.Length); writer.Write(packed);
-            }
-            byte[] bytes = body.ToArray();
             using var sha = SHA256.Create();
             byte[] checksum = sha.ComputeHash(bytes);
             using (var destination = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
@@ -79,8 +120,6 @@ public sealed class SharedMapStore
             }
             if (File.Exists(FilePath)) File.Replace(temporary, FilePath, FilePath + ".bak");
             else File.Move(temporary, FilePath);
-            _savedPixels = _map.ExploredPixels;
-            return true;
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }

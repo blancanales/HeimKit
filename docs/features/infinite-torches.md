@@ -45,3 +45,9 @@ Bonfires = false
 ## Diagnostics
 
 Info groups observed fuel increases into one result per pass. Empty/unchanged passes stay quiet. Debug includes candidates, requests, skip reasons, pending records and deferred work; refill-request details are capped at four per minute. See the [logging contract](../architecture.md#logging) for shared formatting and budgets.
+
+## HeimKit log topics
+
+- `refill`: Native fuel requests and observed results.
+
+Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.
