@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0
+
+- Rebuilt shared server processing to reduce repeated world scans, prefab lookups and temporary memory allocations while retaining independent feature settings.
+- Reduced repeated SharedMap table processing and moved routine community-exploration disk writes into background work.
+- Added TameTravel: supported following tames can accompany players through linked player-built portals outside dungeons. Includes follow, stay and portal-wait commands, adjustable follow spacing, checked arrival placement and cleanup on logout/restart. Fresh follow commands can reclaim an offline player's stale follower.
+- Added DoorKeeper: closes eligible player-built doors and gates after a configurable delay when the doorway is clear.
+- Added ForestRenewal: renews supported stumps and confirmed cleared-stump locations with matching vanilla saplings, configurable delay/chance and clearance rules, and persistent renewal decisions.
+- Added SeaSalvage: recovers eligible settled sunken loose items into floating cargo crates while preserving item data. Tombstones are excluded.
+- Added HeimMender: gradually repairs damaged player-built structures without materials, with configurable cycles and nearby administrative repair requests. HeimMender settings reload during play.
+- DoorKeeper, ForestRenewal, SeaSalvage, TameTravel and HeimMender default enabled and can each be disabled independently. Existing configuration values are preserved; missing settings are added automatically.
+- Fixed SharedMap dungeon percentages and marker labels losing established progress while temporary empty pickup scans await confirmation.
+- Redesigned logging with local timestamps, clear feature topics and Normal/Verbose debug detail. Repeated unchanged dungeon observations stay quiet, and failures retain their underlying exception details.
+- Combined WeatherGuard's routine weather-prevention output into nonempty ten-minute summaries, flushing pending results when protection pauses or stops.
+- Refreshed branding, documentation and feature illustrations, including workflows for all five new features and clearer SharedMap marker labels.
+
 ## 0.1.55
 
 - Added optional InfiniteTorches refilling for campfires, hearths and bonfires. IncludeFireplaces defaults off, with separate Campfires, Hearths and Bonfires controls for choosing which types receive free fuel.
