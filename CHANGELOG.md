@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Updated the built-in Valheim compatibility requirement to the current [supported server environment](https://github.com/blancanales/HeimKit/blob/v0.2.1/docs/server-setup.md#supported-environment).
+- Reduced WeatherGuard protection interruptions caused by unloaded creatures and loose items. Context checks now follow the game's roof/support collision layers while retaining support-giving pieces and shields as dependencies.
+- After a game update, server owners can manually set `[Compatibility] SupportedValheimVersion` in the active `heimkit.cfg` to permit loading on another exact game version, subject to the existing runtime API checks. See [version override instructions](https://github.com/blancanales/HeimKit/blob/v0.2.1/docs/server-setup.md#hidden-version-override) for the setting, accepted format and restart behavior, and [compatibility limitations](https://github.com/blancanales/HeimKit/blob/v0.2.1/docs/limitations.md#server-observations-and-logs) for what the override does and does not establish.
+- See [WeatherGuard coverage limitations](https://github.com/blancanales/HeimKit/blob/v0.2.1/docs/limitations.md#weatherguard-and-infinitetorches) for remaining terrain, instance-loading and vertically separated context constraints.
+
 ## 0.2.0
 
 - Rebuilt shared server processing to reduce repeated world scans, prefab lookups and temporary memory allocations while retaining independent feature settings.

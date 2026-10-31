@@ -6,8 +6,8 @@ Install HeimKit on a Windows Valheim dedicated server. Players use unmodified cl
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit release baseline | 0.2.0 |
-| Valheim Dedicated Server | 1.0.20; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
+| HeimKit release baseline | 0.2.1 |
+| Valheim Dedicated Server | 1.0.21; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
 | Plugin target framework | netstandard2.1 |
@@ -60,6 +60,13 @@ Startup generates `BepInEx/config/heimkit.cfg` in the active loader location and
 ### Hidden version override
 
 The manual-only `[Compatibility] SupportedValheimVersion = <exact-game-version>` selects one exact requirement for all modules. Use canonical `major.minor.patch`: three nonnegative decimal components, no leading zeros, suffixes, wildcards or lists. Surrounding whitespace is ignored.
+
+Add the section and key manually to the active loader's `heimkit.cfg`, using the exact game version reported in the server startup log. This is the server folder's configuration for manual installations or the active server profile's configuration for mod-manager installations. Preserve your other settings. Replace the placeholder in this example with that exact version:
+
+```ini
+[Compatibility]
+SupportedValheimVersion = <exact-game-version>
+```
 
 Absent values use the audited baseline. Invalid/unreadable values warn once and fall back; a different valid value warns once. Existing supplied values are preserved. The key/section is not generated. Restart applies changes. The [compatibility contract](architecture.md#configuration) defines API/readiness checks; see [limitations](limitations.md#server-observations-and-logs) for the override's meaning.
 
