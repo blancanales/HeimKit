@@ -10,6 +10,8 @@ See [server setup](../server-setup.md), [safety and limitations](../limitations.
 
 Eligible pieces are static player-built structural categories with native weather wear. World-created structures, containers, moving objects, non-building categories and already weather-immune materials are excluded. Repairing a world-created piece does not claim it.
 
+Protection waits for nearby terrain, roof and support geometry, and shields to load. Unloaded drops or creatures outside the game's roof/support collision layers do not interrupt protection unless they provide structural support or shielding. Items with a wear component but no support function are treated the same way.
+
 Settings belong under `[WeatherGuard]`. Stop the server before editing and restart to apply changes. Existing values are preserved.
 
 | Setting | Default | Purpose |

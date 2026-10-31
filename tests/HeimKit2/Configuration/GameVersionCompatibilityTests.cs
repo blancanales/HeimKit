@@ -38,7 +38,7 @@ internal static class GameVersionCompatibilityTests
                         new AFKNightWatch(config, logger, players), new AFKRaidWatch(config, logger, players) };
                     return (Config: config, Modules: modules, Policy: GameVersionCompatibility.Resolve(config, logger));
                 });
-                string expected = value?.Trim() switch { "1.0.21" => "1.0.21", "0.0.0" => "0.0.0", "2.10.300" => "2.10.300", _ => "1.0.20" };
+                string expected = value?.Trim() switch { "1.0.20" => "1.0.20", "1.0.21" => "1.0.21", "0.0.0" => "0.0.0", "2.10.300" => "2.10.300", _ => GameVersionCompatibility.AuditedVersion };
                 bool invalid = value != null && value.Trim() != expected;
                 Check(loaded.Policy.RequiredVersion == expected, "Version override validation/fallback: " + value);
                 Check(warnings.Count == (value == null || value.Trim() == GameVersionCompatibility.AuditedVersion ? 0 : 1), "Shared policy must warn only once across all modules.");
@@ -53,8 +53,8 @@ internal static class GameVersionCompatibilityTests
                         Check(module.IsActive, module.Name + " did not accept the effective exact requirement.");
                         module.Initialize("9.9.9");
                         Check(!module.IsActive, module.Name + " treated override as a blanket bypass.");
-                        module.Initialize("1.0.20");
-                        Check(module.IsActive == (expected == "1.0.20"), module.Name + " treated override as an additional allowed version.");
+                        module.Initialize(GameVersionCompatibility.AuditedVersion);
+                        Check(module.IsActive == (expected == GameVersionCompatibility.AuditedVersion), module.Name + " treated override as an additional allowed version.");
                     }
                 }
                 finally { foreach (var module in loaded.Modules) module.Shutdown(); }

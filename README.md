@@ -86,7 +86,7 @@ Gradually repairs damaged player-built structures with configurable cycles, chan
 
 ## Setup and compatibility
 
-Windows dedicated servers with BepInExPack Valheim are supported. See [supported environment](docs/server-setup.md#supported-environment) for exact requirements and [safety and limitations](docs/limitations.md) for gameplay/client constraints.
+Windows dedicated servers with BepInExPack Valheim are supported. See [supported environment](docs/server-setup.md#supported-environment) for exact requirements and [safety and limitations](docs/limitations.md) for gameplay/client constraints. Server owners can select another exact game version through the manual [version override](docs/server-setup.md#hidden-version-override); see [compatibility limitations](docs/limitations.md#server-observations-and-logs).
 
 ![Server installation: HeimKit and BepInEx belong on the dedicated server; clients remain unmodified](docs/images/server-installation.jpg)
 

@@ -15,7 +15,7 @@ namespace HeimKit.Configuration;
 
 public sealed class GameVersionCompatibility
 {
-    public const string AuditedVersion = "1.0.20";
+    public const string AuditedVersion = "1.0.21";
     private const string Section = "Compatibility";
     private const string Key = "SupportedValheimVersion";
     private static readonly ConditionalWeakTable<ConfigFile, GameVersionCompatibility> Policies = new();

@@ -61,7 +61,7 @@ internal static class PlayerServicesTests
             var settings = new AFKNightWatchSettings(config, log); settings.Enabled.Value = sleepEnabled; settings.MajoritySleepEnabled.Value = majority; settings.ExcludeAFKFromSleep.Value = exclusion;
             var rs = new AFKRaidWatchSettings(config, log); rs.Enabled.Value = raidEnabled;
             var hub = new PlayerServices(config, log); var sleep = new AFKNightWatch(config, log, hub); var raid = new AFKRaidWatch(config, log, hub);
-            sleep.Initialize("1.0.20"); raid.Initialize("1.0.20");
+            sleep.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); raid.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
             Check(sleep.IsActive == (sleepEnabled && (majority || exclusion)) && raid.IsActive == raidEnabled, "Feature independence");
             Check(hub.Events.Subscribers == (sleep.IsActive ? 1 : 0) + (raidEnabled ? 1 : 0), "Disabled/inactive modules subscribed or enabled modules missed presence");
             sleep.Shutdown(); sleep.Shutdown(); Check(hub.Events.Subscribers == (raidEnabled ? 1 : 0), "Sleep shutdown lost another presence subscription"); Check(raid.IsActive == raidEnabled, "Sleep shutdown stopped raid module"); raid.Shutdown(); raid.Shutdown(); hub.Dispose(); hub.Dispose();

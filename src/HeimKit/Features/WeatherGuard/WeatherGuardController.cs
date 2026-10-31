@@ -41,6 +41,8 @@ internal sealed class WeatherGuardController : IDisposable
     private readonly Dictionary<ZDOID, ZDO> _protected = new();
     private readonly Dictionary<Vector2s, bool> _readyContexts = new();
     private readonly PrefabCatalog<bool> _contextPrefabs = PrefabRegistry.Current.Catalog<bool>("WeatherGuardController._contextPrefabs");
+    private readonly Func<int> _nativeContextMask = NativeAccess.StaticField<int>(typeof(WearNTear), "s_rayMask");
+    private int _classifiedContextMask;
     private readonly List<ZDO> _contextObjects = new();
     private readonly List<ZDOID> _release = new();
     private readonly Dictionary<string, int> _exclusions = new();
@@ -633,6 +635,7 @@ internal sealed class WeatherGuardController : IDisposable
     }
     private bool ContextReady(ZDO zdo, ZNetScene scene, ZoneSystem zones)
     {
+        RefreshContextMask();
         var sector = zdo.GetSector();
         if (_readyContexts.TryGetValue(sector, out bool ready)) return ready;
         ready = TerrainReady(zdo, zones);
@@ -648,16 +651,33 @@ internal sealed class WeatherGuardController : IDisposable
     }
     private bool RequiresContext(ZDO zdo, ZNetScene scene)
     {
+        int mask = RefreshContextMask();
         int id = zdo.GetPrefab();
         if (_contextPrefabs.TryGetValue(id, out bool required)) return required;
         var prefab = PrefabRegistry.Current.Prefab(id);
         if (prefab == null) return false;
-        // Roof/support physics need collider-bearing objects. Do not wait for
-        // collider-free sounds/VFX, but retain wear and shield dependencies.
-        required = WeatherGuardRules.RequiresContext(PrefabRegistry.Children<Collider>(prefab, true).Length,
-            PrefabRegistry.Component<WearNTear>(prefab) != null, PrefabRegistry.Component<ShieldGenerator>(prefab) != null);
+        // Match native roof/support query layers, including inactive variants and triggers.
+        // Items can carry WearNTear without supplying structural support.
+        int relevantColliders = 0;
+        foreach (var collider in PrefabRegistry.Children<Collider>(prefab, true))
+            if (collider != null && WeatherGuardRules.ColliderUsesContextMask(collider.gameObject.layer, mask))
+            { relevantColliders = 1; break; }
+        var wear = PrefabRegistry.Component<WearNTear>(prefab);
+        required = WeatherGuardRules.RequiresContext(relevantColliders,
+            wear != null && wear.m_supports, PrefabRegistry.Component<ShieldGenerator>(prefab) != null);
         _contextPrefabs.Add(id, required);
         return required;
+    }
+    private int RefreshContextMask()
+    {
+        int mask = _nativeContextMask();
+        if (mask != _classifiedContextMask)
+        {
+            _contextPrefabs.Clear();
+            _readyContexts.Clear();
+            _classifiedContextMask = mask;
+        }
+        return mask;
     }
     private bool Ready(ZDO zdo, ZNetScene scene, ZoneSystem zones)
         => scene.FindInstance(zdo) != null && ContextReady(zdo, scene, zones);

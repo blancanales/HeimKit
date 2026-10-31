@@ -52,8 +52,11 @@ public static class WeatherGuardRules
     }
     public static bool MayAcquire(bool instanceLoaded, bool terrainReady, bool surroundingObjectsReady, bool withinCapacity)
         => instanceLoaded && terrainReady && surroundingObjectsReady && withinCapacity;
-    public static bool RequiresContext(int colliders, bool wear, bool shield)
-        => colliders != 0 || wear || shield;
+    public static bool RequiresContext(int colliders, bool supports, bool shield)
+        => colliders != 0 || supports || shield;
+    public static bool ColliderUsesContextMask(int layer, int mask)
+        // Before native initialization, retain every potentially relevant collider.
+        => mask == 0 || layer < 0 || layer > 31 || (mask & (1 << layer)) != 0;
     public static Routing Route(int method, long target, long server)
     {
         if (method == "RPC_HealthChanged".GetStableHashCode() || method == "RPC_SetSnow".GetStableHashCode() || method == "RPC_CreateFragments".GetStableHashCode())

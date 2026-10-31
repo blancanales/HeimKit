@@ -44,7 +44,7 @@ internal static class DebugLoggingStartupTests
                     new AFKNightWatch(config, logger, players), new AFKRaidWatch(config, logger, players)
                 };
                 DiagnosticLog.StartSession(); records.Clear();
-                foreach (var module in modules) module.Initialize("1.0.20");
+                foreach (var module in modules) module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
                 var declarations = records.Where(r => r.Text.Contains("Debug logging ")).ToArray();
                 int expected = global ? 4 : local || suppressed ? 1 : 0;
                 Check(declarations.Length == expected && declarations.All(r => r.Level == LogLevel.Debug), "Per-feature startup policy count/severity incorrect");
@@ -107,7 +107,7 @@ internal static class DebugLoggingStartupTests
                             };
                             return settings;
                         });
-                        foreach (var module in modules) module.Initialize("1.0.20");
+                        foreach (var module in modules) module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
                         new WeatherGuardDiagnostics(logger, selected.DebugLogging, selected.DebugLogLevel.Value, false)
                             .Report(0, () => new WeatherGuardStatus());
                         Check(!selected.GlobalDebugMode.Value && selected.DebugMode.Value && selected.DebugLogging.ConfiguredEnabled,
