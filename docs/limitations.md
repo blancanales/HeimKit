@@ -54,7 +54,7 @@ Idle is an inference, not proof of human absence. Camera-only movement and unsen
 
 ## WeatherGuard and InfiniteTorches
 
-WeatherGuard coverage depends on loaded server context and ownership. Roof samples and coverage reports describe their stated regions and ages, not the whole world. Server weather is not a measurement of each client's local rain or Wet status; prevention waits for native damage timing.
+WeatherGuard coverage depends on loaded server context and ownership. Roof samples and coverage reports describe their stated regions and ages, not the whole world. Server weather is not a measurement of each client's local rain or Wet status; prevention waits for native damage timing. Context readiness currently examines horizontal sectors without separating vertically distant geometry; an unloaded interior or other elevated object sharing those sectors can delay outdoor protection even when it cannot affect the building. Missing terrain or relevant server instances also leaves eligible pieces waiting until that context is ready.
 
 Torch refilling can wait for loaded records, ownership and replication. Late delivery can overlap timeout retries. Native water, smoke and obstruction checks still affect whether a fueled light burns. Simultaneous manual refilling can consume its normal material, and an observed fuel increase cannot uniquely identify which operation caused it.
 

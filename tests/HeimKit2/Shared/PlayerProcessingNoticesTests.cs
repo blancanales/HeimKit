@@ -48,7 +48,7 @@ internal static class PlayerProcessingNoticesTests
         using var hub = new PlayerServices(config, logger);
         var torch = new InfiniteTorches(config, logger, hub);
         var controller = typeof(InfiniteTorches).GetField("_controller", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        torch.Initialize("1.0.20"); MarkServerReady(torch); messages.Clear();
+        torch.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); MarkServerReady(torch); messages.Clear();
         hub.Events.Observe(false);
         Check(messages.Count == 1 && messages[^1].Text == EmptyNotice && controller.GetValue(torch) == null, "Feature did not confirm actual paused state");
         hub.Events.Observe(false); Check(messages.Count == 1, "Unchanged empty polls repeated module notice");
@@ -69,9 +69,9 @@ internal static class PlayerProcessingNoticesTests
             new HeimKit.Features.AFKNightWatch.AFKNightWatch(config, logger, allPlayers),
             new HeimKit.Features.AFKRaidWatch.AFKRaidWatch(config, logger, allPlayers)
         };
-        foreach (var module in modules) { module.Initialize("1.0.20"); if (module.IsActive) MarkServerReady(module); }
+        foreach (var module in modules) { module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); if (module.IsActive) MarkServerReady(module); }
         // Replay startup without marking any module ready: occupancy alone must stay quiet.
-        foreach (var module in modules) module.Initialize("1.0.20");
+        foreach (var module in modules) module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
         messages.Clear(); allPlayers.Events.Observe(false);
         Check(messages.Count == 0, "Empty presence preceded feature server readiness");
         foreach (var module in modules.Take(3)) MarkServerReady(module);
@@ -136,7 +136,7 @@ internal static class PlayerProcessingNoticesTests
             HeimKit.Core.Scheduling.IServerModule module = raid
                 ? new HeimKit.Features.AFKRaidWatch.AFKRaidWatch(config, logger, players)
                 : new HeimKit.Features.AFKNightWatch.AFKNightWatch(config, logger, players);
-            module.Initialize("1.0.20"); players.Events.Observe(true);
+            module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); players.Events.Observe(true);
             using var activity = new PlayerActivityService(new(5, 2, .5f, 10, 1), logger, players.Presence,
                 observer: install => { if (!install) throw new InvalidOperationException("observer removal failed"); });
             var type = raid ? typeof(HeimKit.Features.AFKRaidWatch.AFKRaidWatchController) : typeof(HeimKit.Features.AFKNightWatch.AFKNightWatchController);
@@ -166,7 +166,7 @@ internal static class PlayerProcessingNoticesTests
             };
             string[] sections = { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" };
             for (int i = 0; i < modules.Length; i++) config.Bind(sections[i], "Enabled", true).Value = (mask & (1 << i)) != 0;
-            foreach (var module in modules) { module.Initialize("1.0.20"); if (module.IsActive) MarkServerReady(module); }
+            foreach (var module in modules) { module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); if (module.IsActive) MarkServerReady(module); }
             messages.Clear(); players.Events.Observe(false); players.Events.Observe(false);
             Check(messages.Count == 1 && messages[0].Text == EmptyNotice, "Enabled subset did not combine empty notice: " + mask);
             foreach (var module in modules) module.Shutdown();

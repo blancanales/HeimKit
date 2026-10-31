@@ -17,7 +17,7 @@ internal static class GameCompatibilityTests
     public static void Run()
     {
         foreach (bool enabled in new[] { false, true })
-        foreach (string version in new[] { "1.0.20", "1.0.17", "1.0.18", "1.0.19", "1.0.21", "" })
+        foreach (string version in new[] { "1.0.20", "1.0.17", "1.0.18", "1.0.19", "1.0.21", "1.0.22", "" })
         {
             var config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
             foreach (string section in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" })
@@ -33,10 +33,10 @@ internal static class GameCompatibilityTests
                 foreach (var module in modules)
                 {
                     module.Initialize(version);
-                    if (module.IsActive != (enabled && version == "1.0.20"))
+                    if (module.IsActive != (enabled && version == "1.0.21"))
                         throw new Exception(module.Name + " accepted an unsupported version or ignored Enabled: " + version);
                     bool warned = warnings.Any(message => message.Contains(module.Name + ":") && message.Contains("unsupported"));
-                    if (warned != (enabled && version != "1.0.20"))
+                    if (warned != (enabled && version != "1.0.21"))
                         throw new Exception(module.Name + " compatibility warning does not match its startup state.");
                 }
             }

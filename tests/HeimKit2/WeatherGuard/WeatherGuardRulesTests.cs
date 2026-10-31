@@ -43,8 +43,25 @@ internal static class WeatherGuardRulesTests
         Check(WeatherGuardRules.Eligible(111, true, true, true, 234f, true, false), "player-built piece is primary candidate");
         Check(!WeatherGuardRules.RequiresContext(0, false, false), "collider-free sounds do not interrupt structure processing");
         Check(WeatherGuardRules.RequiresContext(1, false, false), "non-piece collider context still required for roof/support physics");
-        Check(WeatherGuardRules.RequiresContext(0, true, false), "wear dependency still required even without prefab colliders");
+        Check(WeatherGuardRules.RequiresContext(0, true, false), "support-giving wear dependency still required even without prefab colliders");
         Check(WeatherGuardRules.RequiresContext(0, false, true), "shield dependency still required even without prefab colliders");
+        int nativeMask = (1 << 0) | (1 << 8) | (1 << 31);
+        for (int layer = 0; layer < 32; layer++)
+            Check(WeatherGuardRules.ColliderUsesContextMask(layer, nativeMask) == (layer == 0 || layer == 8 || layer == 31),
+                "native context mask must include exactly its collision layers, including the sign bit");
+        foreach (int layer in new[] { -1, 0, 12, 31, 32 })
+            Check(WeatherGuardRules.ColliderUsesContextMask(layer, 0), "uninitialized native mask must retain dependencies");
+        Check(WeatherGuardRules.ColliderUsesContextMask(-1, nativeMask) && WeatherGuardRules.ColliderUsesContextMask(32, nativeMask),
+            "unknown collider layers must retain dependencies");
+        // Cloudberry has WearNTear but m_supports=false and item-layer colliders.
+        bool itemColliderRelevant = WeatherGuardRules.ColliderUsesContextMask(12, nativeMask);
+        Check(!WeatherGuardRules.RequiresContext(itemColliderRelevant ? 1 : 0, false, false),
+            "out-of-mask drops with non-supporting wear must not block building protection");
+        Check(WeatherGuardRules.RequiresContext(itemColliderRelevant ? 1 : 0, true, false) &&
+            WeatherGuardRules.RequiresContext(itemColliderRelevant ? 1 : 0, false, true),
+            "support-giving wear and shields must remain dependencies outside collider query layers");
+        Check(typeof(WearNTear).GetField("s_rayMask", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)?.FieldType == typeof(int) &&
+            typeof(WearNTear).GetField("m_supports", flags)?.FieldType == typeof(bool), "native context mask and support flag retain their audited types");
         Check(!WeatherGuardRules.Eligible(0, true, true, true, 234f, true, false), "world piece is unchanged");
         Check(WeatherGuardRules.Exclusion(0, true, true, true, 234f, true, false) == "world-created", "world control reason");
         Check(WeatherGuardRules.Exclusion(0, true, true, true, 234f, true, true) == "container", "container exclusion takes precedence over creator");

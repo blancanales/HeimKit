@@ -115,14 +115,14 @@ internal static class WeatherGuardControlsTests
             var moduleConfig = new ConfigFile(configPath, false) { SaveOnConfigSet = false };
             moduleConfig.Bind("WeatherGuard", "Enabled", true).Value = false;
             var module = new WeatherGuard(moduleConfig, logger, PlayerServicesTests.For(moduleConfig, logger));
-            module.Initialize("1.0.20");
+            module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
             File.WriteAllText(requestPath, ""); module.Tick(10);
             Check(!module.IsActive && messages[^1].Text.Contains("module_inactive") && !File.Exists(requestPath), "Inactive module ignored explicit coverage request.");
             module.Shutdown();
             // Gameplay stays gated while operator requests survive every presence state.
             var hub = PlayerServicesTests.For(moduleConfig, logger);
             moduleConfig.Bind("WeatherGuard", "Enabled", false).Value = true;
-            module.Initialize("1.0.20");
+            module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
             var controller = typeof(WeatherGuard).GetField("_controller", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
             Check(controller.GetValue(module) == null, "Unknown presence initialized WeatherGuard gameplay.");
             Check(module.IsActive && hub.Events.Subscribers == 1, "WeatherGuard did not subscribe while enabled.");
@@ -141,7 +141,7 @@ internal static class WeatherGuardControlsTests
             Check(!module.IsActive && hub.Events.Subscribers == 0, "WeatherGuard failure retained its registration.");
             hub.Events.Observe(false); hub.Events.Observe(true);
             Check(!module.IsActive, "Failed WeatherGuard restarted on connection.");
-            module.Initialize("1.0.20"); module.Shutdown(); module.Shutdown();
+            module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); module.Shutdown(); module.Shutdown();
             Check(hub.Events.Subscribers == 0, "Repeated WeatherGuard shutdown retained its registration.");
         }
         finally
