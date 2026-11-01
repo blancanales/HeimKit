@@ -100,7 +100,7 @@ Follow [server setup](docs/server-setup.md#installation) for Thunderstore Mod Ma
 - [Safety and limitations](docs/limitations.md): world risks, server observations and client limitations.
 - [World backups](docs/world-backups.md): automatic upgrade checkpoints and matching world, SharedMap and ForestRenewal recovery.
 - [Server upgrade specification](docs/specs/server-upgrade-compatibility.md): compatibility policy, startup backups and persistent failure protection.
-- [Changelog](CHANGELOG.md): upcoming changes and release history.
+- [Changelog](CHANGELOG.md): release changes and history.
 - Feature guides and specifications: linked under each feature in [Features](#features).
 - [Development](docs/development.md): build and packaging commands.
 - [Architecture](docs/architecture.md): shared design and lifecycle contracts.

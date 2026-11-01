@@ -1,12 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
-- HeimKit now attempts to run after Valheim updates by default. The new `[Compatibility] AllowUnverifiedVersions` switch replaces the manual exact-version override; set it to `false` to require the audited baseline. See [server upgrade settings](docs/server-setup.md#server-upgrades).
-- Before enabling features on a newer, unverified Valheim version, HeimKit creates a verified backup of the complete local world, current configuration and existing SharedMap/ForestRenewal data. A persistent record reuses that checkpoint across restarts for the same world and HeimKit/Valheim version combination. See [automatic world backups](docs/world-backups.md#automatic-upgrade-backups).
-- Features that encounter disabling errors during startup or later play remain disabled on subsequent starts for that world/version combination, overriding `Enabled = true` without rewriting configuration. Healthy features continue independently. Logs identify the failure record and associated checkpoint; see [persistent feature disables](docs/server-setup.md#persistent-feature-disables).
+- HeimKit now attempts to run after Valheim updates by default. The new `[Compatibility] AllowUnverifiedVersions` switch replaces the manual exact-version override; set it to `false` to require the audited baseline. See [server upgrade settings](https://github.com/blancanales/HeimKit/blob/v0.2.2/docs/server-setup.md#server-upgrades).
+- Before enabling features on a newer, unverified Valheim version, HeimKit creates a verified backup of the complete local world, current configuration and existing SharedMap/ForestRenewal data. A persistent record reuses that checkpoint across restarts for the same world and HeimKit/Valheim version combination. See [automatic world backups](https://github.com/blancanales/HeimKit/blob/v0.2.2/docs/world-backups.md#automatic-upgrade-backups).
+- Features that encounter disabling errors during startup or later play remain disabled on subsequent starts for that world/version combination, overriding `Enabled = true` without rewriting configuration. Healthy features continue independently. Logs identify the failure record and associated checkpoint; see [persistent feature disables](https://github.com/blancanales/HeimKit/blob/v0.2.2/docs/server-setup.md#persistent-feature-disables).
 - Installing a different HeimKit version automatically retries features enabled in configuration using a separate failure record, preserving earlier failure history. Old disable decisions do not block the upgraded mod.
-- Existing configuration files are migrated automatically: the obsolete `SupportedValheimVersion` entry is removed, the new switch is added when missing, and existing feature values are preserved. See [configuration migration](docs/server-setup.md#configuration-migration) and [compatibility limitations](docs/limitations.md#server-observations-and-logs).
+- Existing configuration files are migrated automatically: the obsolete `SupportedValheimVersion` entry is removed, the new switch is added when missing, and existing feature values are preserved. See [configuration migration](https://github.com/blancanales/HeimKit/blob/v0.2.2/docs/server-setup.md#configuration-migration) and [compatibility limitations](https://github.com/blancanales/HeimKit/blob/v0.2.2/docs/limitations.md#server-observations-and-logs).
 
 ## 0.2.1
 
