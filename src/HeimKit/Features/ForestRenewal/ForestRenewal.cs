@@ -40,6 +40,7 @@ public sealed class ForestRenewal : IServerModule
         Shutdown();
         Log(_settings.Enabled.Value ? "Enabled." : "Disabled.");
         _settings.DebugLogging.ReportStartup(_logger, Name, _settings.Enabled.Value);
+        if (!ModuleFailureProtection.MayStart(Name)) return;
         if (!_settings.Enabled.Value) return;
         if (!_compatibility.Supports(gameVersion)) { Log("DISABLED: unsupported game version " + gameVersion + "; required version " + _compatibility.RequiredVersion, LogLevel.Warning); return; }
         IsActive = true;
@@ -90,7 +91,7 @@ public sealed class ForestRenewal : IServerModule
         var controller = _controller; _controller = null; if (controller != null) ModuleScheduler.Current.Forget(controller);
         try { controller?.Dispose(); } finally { WorldObjectProvider.Current?.ReleaseOwner(Name); }
     }
-    internal void Fail(Exception error) { if (!IsActive) return; DiagnosticLog.Write(_logger, Name, CoreLogTopics.Lifecycle, "Disabled after a runtime failure.", level: LogLevel.Error, error: error); Shutdown(); }
+    internal void Fail(Exception error) { if (!IsActive) return; ModuleFailureProtection.Record(Name, error, "controller/native callback or runtime processing"); DiagnosticLog.Write(_logger, Name, CoreLogTopics.Lifecycle, "Disabled after a runtime failure.", level: LogLevel.Error, error: error); Shutdown(); }
     private void Log(string message, LogLevel level = LogLevel.Info) => DiagnosticLog.Write(_logger, Name, message, level: level);
     public void Shutdown()
     {

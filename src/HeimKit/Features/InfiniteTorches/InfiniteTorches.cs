@@ -41,6 +41,7 @@ public sealed class InfiniteTorches : IServerModule
         Shutdown();
         DiagnosticLog.Write(_logger, Name, _settings.Enabled.Value ? "Enabled." : "Disabled.");
         _settings.DebugLogging.ReportStartup(_logger, Name, _settings.Enabled.Value);
+        if (!ModuleFailureProtection.MayStart(Name)) return;
         if (!_settings.Enabled.Value)
         {
             return;
@@ -94,7 +95,7 @@ public sealed class InfiniteTorches : IServerModule
 
     internal void Fail(Exception error, string operation)
     {
-        DiagnosticLog.Write(_logger, "InfiniteTorches", CoreLogTopics.Lifecycle, $"Disabled after runtime error while {operation}.", level: LogLevel.Error, error: error);
+        ModuleFailureProtection.Record(Name, error, operation); DiagnosticLog.Write(_logger, "InfiniteTorches", CoreLogTopics.Lifecycle, $"Disabled after runtime error while {operation}.", level: LogLevel.Error, error: error);
         Shutdown();
     }
 

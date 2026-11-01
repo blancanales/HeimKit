@@ -20,6 +20,8 @@ Run("TameTravelRecoveryTests", TameTravelRecoveryTests.Run);
 Run("TameTravelStopTests", TameTravelStopTests.Run);
 Run("TameTravelReviewTests", TameTravelReviewTests.Run);
 Run("GameVersionCompatibilityTests", GameVersionCompatibilityTests.Run);
+Run("StartupBackupTests", StartupBackupTests.Run);
+Run("ModuleFailureProtectionTests", ModuleFailureProtectionTests.Run);
 Run("SharedMapTests", SharedMapTests.Run);
 Run("SharedMapExplorationTests", SharedMapExplorationTests.Run);
 Run("SharedMapStoreTests", SharedMapStoreTests.Run);

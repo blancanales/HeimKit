@@ -140,7 +140,7 @@ internal static class DebugLoggingResolverTests
                 }
             }
             // Suppression leaves ordinary lifecycle and version warnings visible.
-            File.WriteAllText(path, "[Diagnostics]\nDebugMode = true\n[Torches]\nEnabled = true\nDisableDebugLogging = true\n[WeatherGuard]\nEnabled = true\nDisableDebugLogging = true\n");
+            File.WriteAllText(path, "[Compatibility]\nAllowUnverifiedVersions = false\n[Diagnostics]\nDebugMode = true\n[Torches]\nEnabled = true\nDisableDebugLogging = true\n[WeatherGuard]\nEnabled = true\nDisableDebugLogging = true\n");
             var config = new ConfigFile(path, false) { SaveOnConfigSet = false };
             var torches = new InfiniteTorches(config, logger, PlayerServicesTests.For(config, logger));
             var weather = new WeatherGuard(config, logger, PlayerServicesTests.For(config, logger));

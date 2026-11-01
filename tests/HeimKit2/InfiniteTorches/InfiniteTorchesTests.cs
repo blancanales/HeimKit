@@ -28,6 +28,7 @@ internal static class InfiniteTorchesTests
             {
                 SaveOnConfigSet = false
             };
+            config.Bind("Compatibility", "AllowUnverifiedVersions", false);
             config.Bind("Torches", "Enabled", test.Enabled);
             using var logger = new ManualLogSource("HeimKit checks");
             var messages = new List<string>();

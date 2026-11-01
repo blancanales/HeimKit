@@ -100,7 +100,7 @@ Physics and follow hooks return before component lookup when no matching leases/
 
 ## Player-service integration
 
-Follow the [required hookup](../architecture.md#required-feature-hookup). Plugin injects its PlayerServices; TameTravel owns one presence subscription and its controller owns routed-message observation, native hooks, consent, traversal, context, bounded server-controlled following and transaction authority. No AFK activity lease is acquired. Enabled, shared exact-version compatibility, joined presence and native ZNet/ZDOMan/ZNetScene/ZoneSystem/ZRoutedRpc readiness are separate gates. False/unknown presence disposes gameplay resources before pause acknowledgement; the presence registration remains. World replacement, failure and shutdown invalidate observations and release resources. There is no offline gameplay exception. Cleanup attempts all owned releases and propagates errors without disabling unrelated modules.
+Follow the [required hookup](../architecture.md#required-feature-hookup). Plugin injects its PlayerServices; TameTravel owns one presence subscription and its controller owns routed-message observation, native hooks, consent, traversal, context, bounded server-controlled following and transaction authority. No AFK activity lease is acquired. Enabled, the shared [server upgrade compatibility policy](server-upgrade-compatibility.md), joined presence and native ZNet/ZDOMan/ZNetScene/ZoneSystem/ZRoutedRpc readiness are separate gates. False/unknown presence disposes gameplay resources before pause acknowledgement; the presence registration remains. World replacement, failure and shutdown invalidate observations and release resources. There is no offline gameplay exception. Cleanup attempts all owned releases and propagates errors without disabling unrelated modules.
 
 ## Logging and acceptance criteria
 
@@ -139,3 +139,5 @@ Reservation-end diagnostics capture a controller-owned snapshot before cleanup, 
 The performance rebuild in `src/HeimKit/Features/` consumes CandidateSubscription for portals, animals and placement context, PrefabRegistry native animal/portal geometry, NativeAccess FieldRefs/delegates, ObjectAuthority/ZdoPackets/ZdoReplication, PlayerServices routed/position observations and ModuleScheduler. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
 
 Native field access is supplied by Core NativeAccess through runtime-compatible cached ref-getters; feature controllers retain the existing field types and gameplay operations.
+
+Module-disabling exceptions follow the shared [persistent failure protection contract](server-upgrade-compatibility.md#persistent-feature-failure-protection), including future-start enable overrides.

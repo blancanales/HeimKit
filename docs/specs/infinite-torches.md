@@ -96,3 +96,5 @@ Use the shared [compatibility contract](../architecture.md#configuration) before
 ## HeimKit Core integration
 
 The performance rebuild in `src/HeimKit/Features/` consumes near-only owner-filtered CandidateSubscription, PrefabRegistry fireplace metadata and ModuleScheduler refill cadence; no ownership lease. Discovery uses native ready-owner sector geometry, activation/area-entry seeding and local/replicated updates. Fuel, state and owner are checked live at the refill interval. Pending requests reconcile independently of discovery; ownership changes do not discard eligible light definitions. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
+
+Module-disabling exceptions follow the shared [persistent failure protection contract](server-upgrade-compatibility.md#persistent-feature-failure-protection), including future-start enable overrides.

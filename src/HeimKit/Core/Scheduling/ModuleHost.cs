@@ -24,13 +24,17 @@ internal sealed class ModuleHost : IDisposable
     internal void Register(Func<IServerModule> create, string name)
     {
         try { _modules.Add(create()); }
-        catch (Exception error) { DiagnosticLog.Write(_log, name, CoreLogTopics.Lifecycle, $"Disabled after configuration construction error.", level: LogLevel.Error, error: error); }
+        catch (Exception error)
+        {
+            ModuleFailureProtection.Record(name, error, "configuration construction");
+            DiagnosticLog.Write(_log, name, CoreLogTopics.Lifecycle, $"Disabled after configuration construction error.", level: LogLevel.Error, error: error);
+        }
     }
     internal void Initialize(string version)
     {
         _failures.Clear();
         foreach (var module in _modules)
-            try { module.Initialize(version); }
+            try { if (ModuleFailureProtection.MayStart(module.Name)) module.Initialize(version); }
             catch (Exception error) { Fail(module, error, "startup", 0); }
     }
     internal void Tick(float now)
@@ -39,6 +43,7 @@ internal sealed class ModuleHost : IDisposable
             // Shutdown gates gameplay; inactive ticks still serve local reports.
             try
             {
+                if (!ModuleFailureProtection.MayStart(module.Name)) continue;
                 module.Tick(now);
                 if (_failures.Count > 0 && module.IsActive) _failures.Remove(module);
             }
@@ -46,6 +51,7 @@ internal sealed class ModuleHost : IDisposable
     }
     private void Fail(IServerModule module, Exception error, string stage, float now)
     {
+        ModuleFailureProtection.Record(module.Name, error, stage);
         ModuleCleanup.Run(_log, module.Name, module.Shutdown);
         var cause = error.GetBaseException();
         bool changed = !_failures.TryGetValue(module, out var incident) || incident.Stage != stage ||

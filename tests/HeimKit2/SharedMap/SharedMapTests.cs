@@ -51,7 +51,7 @@ internal static class SharedMapTests
             Check(!config.ContainsKey(new ConfigDefinition("SharedMap", "DisableDebugLogging")), "Hidden suppression key was generated.");
 
             settings.Enabled.Value = true;
-            module.Initialize("unsupported");
+            module.Initialize("");
             Check(!module.IsActive && players.Events.Subscribers == 0, "Version mismatch activated SharedMap.");
             module.Initialize(GameVersionCompatibility.AuditedVersion);
             Check(module.IsActive && players.Events.Subscribers == 1, "Enabled module missed presence hookup. " + string.Join(" | ", messages));
