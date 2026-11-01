@@ -54,3 +54,5 @@ Use the shared [compatibility contract](../architecture.md#configuration) before
 The performance rebuild in `src/HeimKit/Features/` consumes PlayerServices presence/activity leases, Core native target resolution and shared diagnostic budgets; no world subscription. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
 
 Fallback sleep votes reuse actor/vote collection buffers. Shared activity sampling reuses temporary collections and caches exact equipment-field snapshots before formatting changed equipment strings. Quorum, uncertainty handling, grace and AFK transitions retain their existing rules.
+
+Module-disabling exceptions follow the shared [persistent failure protection contract](server-upgrade-compatibility.md#persistent-feature-failure-protection), including future-start enable overrides.

@@ -22,6 +22,7 @@ internal static class WeatherGuardTests
         foreach (string version in new[] { HeimKit.Configuration.GameVersionCompatibility.AuditedVersion, "1.0.18" })
         {
             var config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
+            config.Bind("Compatibility", "AllowUnverifiedVersions", false);
             config.Bind("Torches", "Enabled", torchesOn);
             config.Bind("WeatherGuard", "Enabled", weatherOn);
             using var log = new ManualLogSource("WeatherGuard lifecycle checks");

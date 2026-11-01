@@ -7,7 +7,8 @@ Install HeimKit on a Windows Valheim dedicated server. Players use unmodified cl
 | Item | Current baseline |
 | --- | --- |
 | HeimKit release baseline | 0.2.1 |
-| Valheim Dedicated Server | 1.0.21; built-in audited version. See the [hidden version override](#hidden-version-override) for an operator-selected requirement. |
+| HeimKit development build | 0.2.1-upgrade-safety.1 |
+| Valheim Dedicated Server | 1.0.21; built-in audited baseline. Other versions follow [server upgrade policy](#server-upgrades). |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
 | Plugin target framework | netstandard2.1 |
@@ -57,22 +58,40 @@ Startup generates `BepInEx/config/heimkit.cfg` in the active loader location and
 
 ## Configuration
 
-### Hidden version override
+### Server upgrades
 
-The manual-only `[Compatibility] SupportedValheimVersion = <exact-game-version>` selects one exact requirement for all modules. Use canonical `major.minor.patch`: three nonnegative decimal components, no leading zeros, suffixes, wildcards or lists. Surrounding whitespace is ignored.
-
-Add the section and key manually to the active loader's `heimkit.cfg`, using the exact game version reported in the server startup log. This is the server folder's configuration for manual installations or the active server profile's configuration for mod-manager installations. Preserve your other settings. Replace the placeholder in this example with that exact version:
+`[Compatibility] AllowUnverifiedVersions` defaults to `true` and is generated automatically. It lets HeimKit attempt to operate after a server update without entering a new version number. The [supported environment](#supported-environment) still identifies the audited baseline. Feature enable switches and runtime compatibility checks continue to apply independently; a failed feature stops while healthy features continue.
 
 ```ini
 [Compatibility]
-SupportedValheimVersion = <exact-game-version>
+AllowUnverifiedVersions = true
 ```
 
-Absent values use the audited baseline. Invalid/unreadable values warn once and fall back; a different valid value warns once. Existing supplied values are preserved. The key/section is not generated. Restart applies changes. The [compatibility contract](architecture.md#configuration) defines API/readiness checks; see [limitations](limitations.md#server-observations-and-logs) for the override's meaning.
+A permitted server version newer than the tested baseline requires a completed, verified world checkpoint before HeimKit features activate. HeimKit records that checkpoint for the world/save location and HeimKit/Valheim version pair. Later restarts verify and reuse it, rather than make another backup. The record does not mark the game version as tested. See [automatic upgrade backups](world-backups.md#automatic-upgrade-backups) for timing, location, contents and recovery. A backup failure leaves HeimKit inactive for that startup while vanilla server loading continues.
+
+Set the switch to `false` to require the audited baseline instead. Both modes reject missing, blank, control-character-containing or overlong observed version identifiers; permissive mode does not require the current numeric version format. An invalid or unreadable switch uses strict mode. Restart applies policy edits. Existing installations receive [automatic configuration migration](#configuration-migration). See [compatibility limitations](limitations.md#server-observations-and-logs).
+
+### Configuration migration
+
+Keep the active `heimkit.cfg` when replacing the DLL. On startup, HeimKit removes the obsolete `[Compatibility] SupportedValheimVersion` entry and adds `AllowUnverifiedVersions = true` if the new switch is missing. An existing value for the new switch is retained; an invalid or unreadable value uses the strict fallback described above. Existing feature settings are preserved and missing defaults are added. No manual config replacement is needed.
+
+The known retired diagnostics keys `LogStatus`, `StatusIntervalSeconds`, `LogRefillDetails` and `LogRefillRequests` are also removed from `[Diagnostics]`. Unrecognized entries are otherwise preserved. Supplied hidden `DisableDebugLogging` settings remain intact; absent hidden settings are not generated. Startup logs the full active configuration path and removal of a nonempty version override.
+
+### Persistent feature disables
+
+An exception that disables a feature during startup or later play is saved in `HeimKit/Backups/upgrade-<identity>.failures.xml` under the active BepInEx configuration directory. The record identifies the world/save location, full HeimKit build and Valheim version. Each feature entry includes its first failure's UTC time, operation, exception evidence and the world-upgrade backup paths when a checkpoint was required. Normal warnings, readiness waits and intentionally disabled features do not create entries.
+
+On later starts for that same world and version combination, recorded features remain disabled even with `Enabled = true`. The configuration file stays unchanged. Startup logs name each blocked feature and its record; other features continue. HeimMender's live enable switch also respects this override. Check the release notes for the latest HeimKit release documented as compatible with the running Valheim version.
+
+Installing a different HeimKit version automatically uses a separate failure record: features enabled in configuration are attempted again, and the previous version's disable entries remain as history without blocking the new build. Features configured as disabled stay disabled. A feature that fails again receives a new entry for the new world/version combination. A different Valheim version likewise uses its own record. Replacing the DLL with the same build identity or simply restarting does not clear a disable. When the installed release identifies the running Valheim version as its audited baseline, no unverified-version world checkpoint is required; see [backup behavior](world-backups.md#automatic-upgrade-backups).
+
+For a deliberate retry, stop the server, preserve the failure record, and remove only the affected feature's complete `<Module>...</Module>` element from the file named in the log. Keep the root and world/version fields intact. Removing the whole `.failures.xml` file resets every feature decision for that combination. Restart to apply the reset. Leave the separate backup-completion XML and ZIP intact; resetting a feature does not require another world copy. Changing Enabled alone does not reset a failure.
+
+An unreadable or malformed failure record keeps HeimKit inactive. A failure to save a newly disabled feature emits an immediate error and stops shared processing after feature cleanup. See [log interpretation](limitations.md#server-observations-and-logs).
 
 ### Default configuration
 
-Shared sections `[Diagnostics]` and `[PlayerActivity]` precede feature sections. Startup preserves existing values and adds missing defaults. Use [config/heimkit.cfg](../config/heimkit.cfg) as a reference; keep the active file when upgrading.
+Shared sections `[Compatibility]`, `[Diagnostics]` and `[PlayerActivity]` precede feature sections. Startup preserves existing values and adds missing defaults. Use [config/heimkit.cfg](../config/heimkit.cfg) as a reference; keep the active file when upgrading.
 
 Feature controls are documented in their guides: [InfiniteTorches](features/infinite-torches.md#configuration), [WeatherGuard](features/weather-guard.md#scope-and-configuration), [AFKNightWatch](features/afk-night-watch.md#configuration), [AFKRaidWatch](features/afk-raid-watch.md#configuration), [SharedMap](features/shared-map.md#configuration), [TameTravel](features/tame-travel.md#configuration), [DoorKeeper](features/door-keeper.md#configuration), [ForestRenewal](features/forest-renewal.md#configuration), [SeaSalvage](features/sea-salvage.md#configuration) and [HeimMender](features/heim-mender.md) (live reload). Stop the server before configuration edits and restart afterward.
 
@@ -124,7 +143,7 @@ Create an empty `heimkit-weatherguard-coverage.request` beside the active `heimk
 New-Item -ItemType File -Path 'C:\path\to\active\BepInEx\config\heimkit-weatherguard-coverage.request'
 ```
 
-HeimKit polls once per second, consumes the file and writes one Info report. Requests run without restart, DebugMode or an enabled WeatherGuard controller. A new file requests another report; requests before a poll coalesce. Ensure the filename ends in `.request`, not `.request.txt`, and the server account can delete it. Invalid access warns once until recovery. This is local filesystem administration, not a new in-game console command. See [coverage fields](features/weather-guard.md#coverage-report).
+HeimKit polls once per second, consumes the file and writes one Info report. Requests run without restart, DebugMode or an enabled WeatherGuard controller. A [persistent feature disable](#persistent-feature-disables) suppresses WeatherGuard initialization and ticks, including request-file polling. A new file requests another report; requests before a poll coalesce. Ensure the filename ends in `.request`, not `.request.txt`, and the server account can delete it. Invalid access warns once until recovery. This is local filesystem administration, not a new in-game console command. See [coverage fields](features/weather-guard.md#coverage-report).
 
 ## Feature lifecycle
 

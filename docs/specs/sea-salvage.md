@@ -38,8 +38,10 @@ Each accepted source contributes its complete quantity to exactly one native inv
 
 ## Compatibility and shared criteria
 
-Use the [supported environment](../server-setup.md#supported-environment) and shared exact-version guard. Each module isolates failure and releases only its own resources. Disabled features bind configuration but install no gameplay hooks and scan nothing. Objects outside verified scope retain native behavior. Acceptance requires independent enablement, repeatable cleanup, native state preservation, bounded retained state and the ownership/persistence rules above. Shared observation and delivery qualifications belong in [limitations](../limitations.md#new-world-features).
+Use the [supported environment](../server-setup.md#supported-environment) and shared [server upgrade policy](server-upgrade-compatibility.md). Each module isolates failure and releases only its own resources. Disabled features bind configuration but install no gameplay hooks and scan nothing. Objects outside verified scope retain native behavior. Acceptance requires independent enablement, repeatable cleanup, native state preservation, bounded retained state and the ownership/persistence rules above. Shared observation and delivery qualifications belong in [limitations](../limitations.md#new-world-features).
 
 ## HeimKit Core integration
 
 The performance rebuild in `src/HeimKit/Features/` consumes CandidateSubscription for loose drops and terrain context, PrefabRegistry item/crate metadata, TerrainContext, NativeWorldObject, ObjectAuthority/ZdoPackets and ModuleScheduler. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
+
+Module-disabling exceptions follow the shared [persistent failure protection contract](server-upgrade-compatibility.md#persistent-feature-failure-protection), including future-start enable overrides.

@@ -6,7 +6,7 @@ Gradually repairs damaged player-built static structures and accepts bounded adm
 
 ## Settings
 
-Settings are in `[HeimMender]` in the loader-provided `heimkit.cfg`. This section reloads during play, including Enabled and DebugMode; other features keep their documented restart requirements. Save a complete edit and allow a few seconds for application. Invalid values retain the previously loaded section and produce a warning.
+Settings are in `[HeimMender]` in the loader-provided `heimkit.cfg`. This section reloads during play, including Enabled and DebugMode; other features keep their documented restart requirements. Save a complete edit and allow a few seconds for application. Invalid values retain the previously loaded section and produce a warning. The shared [persistent feature disable](../server-setup.md#persistent-feature-disables) overrides live Enabled changes after a disabling failure.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |

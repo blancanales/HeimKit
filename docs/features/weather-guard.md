@@ -28,7 +28,7 @@ With both protection channels off, WeatherGuard acquires no pieces. An unprotect
 
 ## Coverage report
 
-Use the [local request file](../server-setup.md#requested-weatherguard-coverage) for an Info report, including when debugging is off or the module is paused/disabled. It describes recently retained ready-player regions.
+Use the [local request file](../server-setup.md#requested-weatherguard-coverage) for an Info report, including when debugging is off or the module is paused or disabled through configuration. A [persistent failure disable](../server-setup.md#persistent-feature-disables) also stops request polling. The report describes recently retained ready-player regions.
 
 | Field | Meaning |
 | --- | --- |

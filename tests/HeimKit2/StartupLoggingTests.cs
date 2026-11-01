@@ -53,7 +53,7 @@ internal static class StartupLoggingTests
                     throw new Exception("Waiting must be gated Debug and readiness must require actual initialization: " + factory.Name);
                 feature.Shutdown();
                 messages.Clear();
-                feature.Initialize("unsupported");
+                feature.Initialize("");
                 if (feature.IsActive || messages.Count(m => m.Level == LogLevel.Warning) != (enabled ? 1 : 0) ||
                     messages.Any(m => m.Level != LogLevel.Debug && (m.Text.Contains("elapsed_s") || m.Text.Contains("Ready."))))
                     throw new Exception("Compatibility issue must be concise and visible without false readiness: " + factory.Name);

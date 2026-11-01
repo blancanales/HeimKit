@@ -41,13 +41,14 @@ public sealed class HeimMender : IServerModule
         _requestId = _settings.RepairRequestId.Value;
         Log(_settings.Enabled.Value ? "Enabled." : "Disabled.");
         _settings.DebugLogging.ReportStartup(_logger, Name, _settings.Enabled.Value);
+        if (!ModuleFailureProtection.MayStart(Name)) return;
         if (!_compatible) { if (_settings.Enabled.Value) Log("DISABLED: unsupported game version " + gameVersion + "; required version " + _compatibility.RequiredVersion, LogLevel.Warning); return; }
         _configuration = new(_config, _settings, _logger);
         ApplyEnabled();
     }
     private void ApplyEnabled()
     {
-        bool enabled = _settings.Enabled.Value && _compatible && !_failed;
+        bool enabled = _settings.Enabled.Value && _compatible && !_failed && ModuleFailureProtection.MayStart(Name);
         if (enabled == IsActive) return;
         if (!enabled)
         {
@@ -68,7 +69,7 @@ public sealed class HeimMender : IServerModule
         try
         {
             bool ready = WorldServices.Activity && WorldServices.Terrain;
-            if (_compatible && !_failed && ready && _administration == null) _administration = new(Request, () => _controller?.Status ?? "HeimMender: no active repair scope.");
+            if (_compatible && !_failed && ModuleFailureProtection.MayStart(Name) && ready && _administration == null) _administration = new(Request, () => _controller?.Status ?? "HeimMender: no active repair scope.");
             if (IsActive && ready) _processing.ServerReady();
             if (!IsActive || !_occupied || !ready)
             {
@@ -112,7 +113,7 @@ public sealed class HeimMender : IServerModule
     internal void Fail(Exception error)
     {
         if (_failed) return;
-        _failed = true; DiagnosticLog.Write(_logger, Name, CoreLogTopics.Lifecycle, "Disabled after a runtime failure.", level: LogLevel.Error, error: error);
+        _failed = true; ModuleFailureProtection.Record(Name, error, "controller/native callback or runtime processing"); DiagnosticLog.Write(_logger, Name, CoreLogTopics.Lifecycle, "Disabled after a runtime failure.", level: LogLevel.Error, error: error);
         IsActive = false; _occupied = false;
         var registration = _presenceRegistration; _presenceRegistration = null;
         ModuleCleanup.Run(_logger, Name, () => registration?.Dispose(), StopController, () => _administration?.Dispose());

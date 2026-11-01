@@ -58,6 +58,7 @@ public sealed class SharedMap : IServerModule
         Shutdown();
         Log(_settings.Enabled.Value ? "Enabled." : "Disabled.");
         _settings.DebugLogging.ReportStartup(_logger, Name, _settings.Enabled.Value);
+        if (!ModuleFailureProtection.MayStart(Name)) return;
         if (!_settings.Enabled.Value) return;
         if (!_compatibility.Supports(gameVersion))
         {
@@ -174,7 +175,7 @@ public sealed class SharedMap : IServerModule
     internal void Fail(Exception error)
     {
         if (!IsActive) return;
-        DiagnosticLog.Write(_logger, Name, CoreLogTopics.Lifecycle, "Disabled after a runtime failure.", level: LogLevel.Error, error: error);
+        ModuleFailureProtection.Record(Name, error, "controller/native callback or runtime processing"); DiagnosticLog.Write(_logger, Name, CoreLogTopics.Lifecycle, "Disabled after a runtime failure.", level: LogLevel.Error, error: error);
         Shutdown();
     }
 

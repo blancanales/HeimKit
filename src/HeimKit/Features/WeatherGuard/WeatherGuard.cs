@@ -48,6 +48,7 @@ public sealed class WeatherGuard : IServerModule
         Shutdown();
         DiagnosticLog.Write(_logger, Name, _settings.Enabled.Value ? "Enabled." : "Disabled.");
         _settings.DebugLogging.ReportStartup(_logger, Name, _settings.Enabled.Value);
+        if (!ModuleFailureProtection.MayStart(Name)) return;
         WeatherGuardDiagnostics.StartupSettings(_logger, _settings);
         if (!_settings.Enabled.Value)
         { return; }
@@ -111,7 +112,7 @@ public sealed class WeatherGuard : IServerModule
             RainEnabled = _settings.ProtectRain.Value, UnderwaterEnabled = _settings.ProtectUnderwater.Value });
     internal void Fail(Exception error)
     {
-        DiagnosticLog.Write(_logger, "WeatherGuard", CoreLogTopics.Lifecycle, $"Disabled after controller error; returning pieces to vanilla ownership.", level: LogLevel.Error, error: error);
+        ModuleFailureProtection.Record(Name, error, "controller/native callback or runtime processing"); DiagnosticLog.Write(_logger, "WeatherGuard", CoreLogTopics.Lifecycle, $"Disabled after controller error; returning pieces to vanilla ownership.", level: LogLevel.Error, error: error);
         Shutdown();
     }
     public void Shutdown()

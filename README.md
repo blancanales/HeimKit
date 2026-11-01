@@ -86,7 +86,9 @@ Gradually repairs damaged player-built structures with configurable cycles, chan
 
 ## Setup and compatibility
 
-Windows dedicated servers with BepInExPack Valheim are supported. See [supported environment](docs/server-setup.md#supported-environment) for exact requirements and [safety and limitations](docs/limitations.md) for gameplay/client constraints. Server owners can select another exact game version through the manual [version override](docs/server-setup.md#hidden-version-override); see [compatibility limitations](docs/limitations.md#server-observations-and-logs).
+Windows dedicated servers with BepInExPack Valheim are supported. Players use unmodified clients. See [supported environment](docs/server-setup.md#supported-environment) for exact requirements and [safety and limitations](docs/limitations.md) for gameplay/client constraints.
+
+The default [server upgrade policy](docs/server-setup.md#server-upgrades) lets HeimKit attempt to keep working after Valheim updates, with a recorded world backup for newer server versions that is reused across restarts. [Persistent feature protection](docs/server-setup.md#persistent-feature-disables) disables failing features for the same world and HeimKit/Valheim version combination while healthy features continue. Installing a new HeimKit version retries features enabled in configuration. Server owners can instead restrict operation to the audited baseline. Existing settings receive [automatic configuration migration](docs/server-setup.md#configuration-migration).
 
 ![Server installation: HeimKit and BepInEx belong on the dedicated server; clients remain unmodified](docs/images/server-installation.jpg)
 
@@ -96,7 +98,9 @@ Follow [server setup](docs/server-setup.md#installation) for Thunderstore Mod Ma
 
 - [Server setup](docs/server-setup.md): installation, configuration and diagnostics.
 - [Safety and limitations](docs/limitations.md): world risks, server observations and client limitations.
-- [World backups](docs/world-backups.md): matching world, SharedMap and ForestRenewal backups/recovery.
+- [World backups](docs/world-backups.md): automatic upgrade checkpoints and matching world, SharedMap and ForestRenewal recovery.
+- [Server upgrade specification](docs/specs/server-upgrade-compatibility.md): compatibility policy, startup backups and persistent failure protection.
+- [Changelog](CHANGELOG.md): upcoming changes and release history.
 - Feature guides and specifications: linked under each feature in [Features](#features).
 - [Development](docs/development.md): build and packaging commands.
 - [Architecture](docs/architecture.md): shared design and lifecycle contracts.
