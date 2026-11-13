@@ -20,6 +20,10 @@ internal sealed class TerrainContext : IDisposable
     private static readonly List<TerrainContext> Consumers = new();
     private static readonly Harmony Hooks = new("heimkit.world_terrain_context");
     private static readonly HashSet<ZDOID> InstanceIds = new();
+    private static SceneListPass _scenePass;
+    private static readonly List<ZDO> CreationNear = new(), CreationDistant = new();
+    private static readonly Func<ZDO, bool> CreationReady = CanCreate;
+    private static Exception? _creationFailure;
     private static class Accessors
     {
         static Accessors() { }
@@ -34,6 +38,8 @@ internal sealed class TerrainContext : IDisposable
         internal static readonly AccessTools.FieldRef<TerrainComp, float[]> SmoothDelta = NativeAccess.Field<TerrainComp, float[]>("m_smoothDelta");
         internal static readonly AccessTools.FieldRef<TerrainComp, bool[]> ModifiedPaint = NativeAccess.Field<TerrainComp, bool[]>("m_modifiedPaint");
         internal static readonly AccessTools.FieldRef<TerrainComp, Color[]> PaintMask = NativeAccess.Field<TerrainComp, Color[]>("m_paintMask");
+        internal static readonly MethodInfo CreateNear = NativeAccess.Target(typeof(ZNetScene), "CreateObjectsSorted", typeof(List<ZDO>), typeof(int), typeof(int).MakeByRefType());
+        internal static readonly MethodInfo CreateDistant = NativeAccess.Target(typeof(ZNetScene), "CreateDistantObjects", typeof(List<ZDO>), typeof(int), typeof(int).MakeByRefType());
     }
     internal static void CheckCompatibility() => ValidateNative(() => { _ = Accessors.PopulateZones; _ = Accessors.PaintMask; });
     internal static void ValidateNative(Action resolve)
@@ -46,24 +52,77 @@ internal sealed class TerrainContext : IDisposable
     private readonly PrefabCatalog<bool> _terrainDefinitions = PrefabRegistry.Current.Catalog<bool>("Terrain");
     private readonly List<ZDOID> _expired = new();
     private float _nextPrune;
+    private readonly IDisposable _sceneLease;
     public string? WaitReason { get; private set; }
     public ZDOID WaitObject { get; private set; }
     public TerrainContext()
     {
         CheckCompatibility();
+        ThrowIfFailed();
         if (Consumers.Count == 0)
         {
             try
             {
                 foreach (string method in new[] { "CreateObjects", "RemoveObjects" })
                     Hooks.Patch(AccessTools.Method(typeof(ZNetScene), method), prefix: new HarmonyMethod(typeof(TerrainContext), nameof(Instances)));
+                Hooks.Patch(Accessors.CreateNear, prefix: new HarmonyMethod(typeof(TerrainContext), nameof(FilterNear)));
+                Hooks.Patch(Accessors.CreateDistant, prefix: new HarmonyMethod(typeof(TerrainContext), nameof(FilterDistant)));
             }
             catch { Hooks.UnpatchSelf(); throw; }
         }
         Consumers.Add(this);
+        try { _sceneLease = SceneInstances.Acquire(WorldObjectProvider.Current?.Logger); }
+        catch { Consumers.Remove(this); if (Consumers.Count == 0) Hooks.UnpatchSelf(); throw; }
+    }
+    // Filter at the native loop boundary, AFTER consumers extend scene coverage.
+    // Returning null from CreateObject would destroy the persistent ZDO as an
+    // invalid prefab. Keep removal/retention lists intact, and never mask Update errors.
+    private static void FilterNear(ref List<ZDO> currentNearObjects)
+        => currentNearObjects = AdmitCreation(currentNearObjects, CreationNear);
+    private static void FilterDistant(ref List<ZDO> objects)
+        => objects = AdmitCreation(objects, CreationDistant);
+    private static List<ZDO> AdmitCreation(List<ZDO> source, List<ZDO> buffer)
+    {
+        if (_creationFailure == null)
+            try { return FilterCreation(source, buffer, CreationReady); }
+            catch (Exception error) { _creationFailure = error; }
+        // Native callbacks cannot escape ModuleHost every scene frame. Hold new
+        // creation until the owning controllers observe and report this failure;
+        // existing instances and persistent/removal lists remain untouched.
+        buffer.Clear(); return buffer;
+    }
+    internal static void ThrowIfFailed()
+    {
+        if (_creationFailure != null) throw new InvalidOperationException("Native terrain scene admission failed.", _creationFailure);
+    }
+    internal static List<ZDO> FilterCreation(List<ZDO> source, List<ZDO> buffer, Func<ZDO, bool> ready)
+    {
+        buffer.Clear(); bool filtered = false;
+        for (int i = 0; i < source.Count; i++)
+        {
+            var record = source[i];
+            if (!record.Created && !ready(record))
+            {
+                if (!filtered) { for (int prior = 0; prior < i; prior++) buffer.Add(source[prior]); filtered = true; }
+            }
+            else if (filtered) buffer.Add(record);
+        }
+        return filtered ? buffer : source;
+    }
+    private static bool CanCreate(ZDO record)
+    {
+        var prefab = PrefabRegistry.Current.Prefab(record.GetPrefab());
+        if (prefab == null || PrefabRegistry.Component<TerrainComp>(prefab) == null) return true;
+        var point = record.GetPosition();
+        var map = Heightmap.FindHeightmap(point);
+        return ZoneSystem.instance != null && ZoneSystem.instance.IsZoneLoaded(point) && map != null &&
+            map.GetPaintMask() != null && !map.HaveQueuedRebuild();
     }
     public bool Prepare(Vector3 point, IReadOnlyList<ZDO> scope, float now, float radius = 12)
     {
+        ThrowIfFailed();
+        using var measured = ServerPerformance.MeasureNativeContext();
+        using var timing = PerformanceStages.Measure("Core", "terrain_prepare", scope.Count);
         WaitReason = null; WaitObject = ZDOID.None;
         Prune(now);
         if (!ZoneSystem.instance.LocationsGenerated || Character.InInterior(point)) return false;
@@ -116,6 +175,7 @@ internal sealed class TerrainContext : IDisposable
     }
     private static void Instances(List<ZDO> currentNearObjects, List<ZDO> currentDistantObjects)
     {
+        if (!_scenePass.Enter(Time.frameCount, currentNearObjects, ZDOMan.instance)) return;
         bool any = false;
         foreach (var consumer in Consumers)
         {
@@ -141,6 +201,6 @@ internal sealed class TerrainContext : IDisposable
         foreach (var id in _expired) _retained.Remove(id);
         _expired.Clear();
     }
-    public void Clear() => _retained.Clear();
-    public void Dispose() { Consumers.Remove(this); _retained.Clear(); if (Consumers.Count == 0) Hooks.UnpatchSelf(); }
+    public void Clear() { _retained.Clear(); _scenePass.Clear(); }
+    public void Dispose() { if (!Consumers.Remove(this)) return; _scenePass.Clear(); _sceneLease.Dispose(); _retained.Clear(); if (Consumers.Count == 0) { Hooks.UnpatchSelf(); CreationNear.Clear(); CreationDistant.Clear(); _creationFailure = null; } }
 }

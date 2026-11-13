@@ -65,7 +65,7 @@ public sealed class WeatherGuardDiagnostics : FeatureDiagnostics, IDisposable
     public static void StartupSettings(ManualLogSource logger, WeatherGuardSettings settings)
     {
         if (!settings.DebugLogging.Enabled || settings.DebugLogLevel.Value != DebugLogLevel.Detailed) return;
-        { if (DiagnosticLog.DebugAvailable(logger, "WeatherGuard")) DiagnosticLog.Write(logger, "WeatherGuard", CoreLogTopics.Config, "Loaded settings and processing limits.", new LogField[] { DiagnosticLog.FieldAlways("rain_protection_enabled", settings.ProtectRain.Value), DiagnosticLog.FieldAlways("underwater_protection_enabled", settings.ProtectUnderwater.Value), ("excluded_prefabs", settings.ExcludedPrefabs.Value), ("debug_log_level", settings.DebugLogLevel.Value), DiagnosticLog.FieldAlways("log_world_created_items", settings.LogWorldCreatedItems.Value), ("maximum_regions", WeatherGuardRules.MaximumRegions), ("maximum_objects", WeatherGuardRules.MaximumObjects), ("maximum_protected", WeatherGuardRules.MaximumProtected) }, LogLevel.Debug); if (DiagnosticLog.VerboseConfigured && DiagnosticLog.DebugAvailable(logger, "WeatherGuard", true)) DiagnosticLog.Write(logger, "WeatherGuard", CoreLogTopics.Config, "Additional evidence for the loaded settings and processing limits.", new (string, object?)[] { ("roof_check_max_age_s", WeatherGuardExposureTracking.MaximumObservationAgeSeconds), ("roof_probe_limit_per_scan", WeatherGuardExposureTracking.ProbeLimitPerScan), ("native_wet_timer_threshold_game_s", 60), ("native_weather_damage_percent", 5), ("scope", "eligible_player_built_pieces_in_retained_regions"), ("wetness_source", "server_environment_not_player_local_weather") }, LogLevel.Debug, verbose: true); }
+        { if (DiagnosticLog.DebugAvailable(logger, "WeatherGuard")) DiagnosticLog.Write(logger, "WeatherGuard", CoreLogTopics.Config, "Loaded settings and processing limits.", new LogField[] { DiagnosticLog.FieldAlways("rain_protection_enabled", settings.ProtectRain.Value), DiagnosticLog.FieldAlways("underwater_protection_enabled", settings.ProtectUnderwater.Value), ("excluded_prefabs", settings.ExcludedPrefabs.Value), DiagnosticLog.FieldAlways("reuse_scene_lists", settings.ReuseSceneLists.Value), ("debug_log_level", settings.DebugLogLevel.Value), DiagnosticLog.FieldAlways("log_world_created_items", settings.LogWorldCreatedItems.Value), ("maximum_regions", WeatherGuardRules.MaximumRegions), ("maximum_objects", WeatherGuardRules.MaximumObjects), ("maximum_protected", WeatherGuardRules.MaximumProtected) }, LogLevel.Debug); if (DiagnosticLog.VerboseConfigured && DiagnosticLog.DebugAvailable(logger, "WeatherGuard", true)) DiagnosticLog.Write(logger, "WeatherGuard", CoreLogTopics.Config, "Additional evidence for the loaded settings and processing limits.", new (string, object?)[] { ("roof_check_max_age_s", WeatherGuardExposureTracking.MaximumObservationAgeSeconds), ("roof_probe_limit_per_scan", WeatherGuardExposureTracking.ProbeLimitPerScan), ("native_wet_timer_threshold_game_s", 60), ("native_weather_damage_percent", 5), ("scope", "eligible_player_built_pieces_in_retained_regions"), ("wetness_source", "server_environment_not_player_local_weather") }, LogLevel.Debug, verbose: true); }
     }
     public void CapacityState(bool limited)
     {
@@ -133,6 +133,14 @@ public sealed class WeatherGuardDiagnostics : FeatureDiagnostics, IDisposable
             ["confirmed_preventions"] = Delta(s.ConfirmedPreventions, old.ConfirmedPreventions)
         };
         Write(CoreLogTopics.Scope, "Observed the protection path in the last minute.", steps);
+        if (s.CompletedCycles > 0) Write(CoreLogTopics.Timing, "Observed scan progress and readiness reuse in the last minute.", new()
+        {
+            ["last_cycle_wall_s"] = DiagnosticLog.Kept(s.CycleSeconds), ["last_cycle_slices"] = s.CycleSlices,
+            ["completed_cycles"] = Delta(s.CompletedCycles, old.CompletedCycles),
+            ["context_checks"] = Delta(s.ContextChecks, old.ContextChecks), ["context_reuses"] = Delta(s.ContextReuses, old.ContextReuses),
+            ["scene_list_builds"] = Delta(s.SceneListBuilds, old.SceneListBuilds), ["scene_list_reuses"] = Delta(s.SceneListReuses, old.SceneListReuses),
+            ["scene_candidates"] = s.SceneCandidates, ["probe_pending"] = DiagnosticLog.Kept(s.ProbePending)
+        });
         if (VerboseEnabled)
         {
             var evidence = new Dictionary<string, object?>();

@@ -18,6 +18,7 @@ namespace HeimKit.Features.WeatherGuard;
 internal sealed class WeatherGuardPatches : IDisposable
 {
     private readonly Harmony _harmony = new("heimkit.weatherguard");
+    private IDisposable? _data, _routed;
     [ThreadStatic] private static int _protectedWearDepth;
     [ThreadStatic] private static WearObservation? _wearObservation;
     [ThreadStatic] private static bool _weatherSuppressed;
@@ -31,8 +32,8 @@ internal sealed class WeatherGuardPatches : IDisposable
         Patch(typeof(ZNetScene), "CreateObjects", nameof(Instances));
         Patch(typeof(ZNetScene), "RemoveObjects", nameof(Instances));
         Patch(typeof(ZDO), "SetOwner", nameof(Owner));
-        Patch(typeof(ZDOMan), "RPC_ZDOData", nameof(Data));
-        Patch(typeof(ZRoutedRpc), "RPC_RoutedRPC", nameof(Routed));
+        _data = IncomingPackets.RegisterData<byte>(DataPacket, retained: ProtectedId, failed: PacketFailed, filtering: DataRunning);
+        _routed = IncomingPackets.RegisterRouted<byte>(RoutedPacket, failed: PacketFailed);
         var updater = AccessTools.Method(typeof(WearNTearUpdater), "UpdateWearNTear", new[] { typeof(float), typeof(float) });
         if (updater == null || WearIndex == null) throw new MissingMemberException("WearNTearUpdater wear-sweep APIs");
         _harmony.Patch(updater, prefix: Method(nameof(BeginWearPass)), finalizer: Method(nameof(EndWearPass)));
@@ -72,12 +73,19 @@ internal sealed class WeatherGuardPatches : IDisposable
         if (active == null || !active.Protects(__instance.m_uid) || uid == active.ServerId) return;
         active.OwnerBlocked(__instance, uid); uid = active.ServerId;
     }
+    private static bool DataRunning() => WeatherGuardController.Active?.Running == true;
+    private static bool ProtectedId(ZDOID id) => WeatherGuardController.Active?.Protects(id) == true;
+    private static void PacketFailed(Exception error) => WeatherGuardController.Active?.Fail(error);
+    private static bool DataPacket(IncomingPackets.Context context, ref ZPackage packet, out byte state)
+    { state = 0; return Data(context.Rpc, ref packet); }
+    private static bool RoutedPacket(IncomingPackets.Context context, ref ZPackage packet, out byte state)
+    { state = 0; return Routed(context.Rpc, ref packet); }
     private static bool Data(ZRpc rpc, ref ZPackage pkg)
     {
         var active = WeatherGuardController.Active;
         if (active == null || !active.Running) return true;
         // Only incoming connected client packets; server-generated updates are untouched.
-        if (!Connected(rpc, null)) return true;
+        if (!Connected(rpc, null) || !IncomingPackets.NeedsDataFilter) return true;
         try
         {
             var filtered = WeatherGuardNetworkFilter.FilterData(pkg, active.Protects, out int blocked, active.Reassert);
@@ -88,9 +96,8 @@ internal sealed class WeatherGuardPatches : IDisposable
     }
     private static bool Connected(ZRpc rpc, long? sender)
     {
-        foreach (var peer in ZNet.instance.GetPeers())
-            if (ReferenceEquals(peer.m_rpc, rpc)) return peer.IsReady() && (!sender.HasValue || peer.m_uid == sender.Value);
-        return false;
+        var peer = IncomingPackets.TryPeer(rpc, out var cached) ? cached : HeimKit.Core.Players.PlayerPeerLookup.Ready(ZNet.instance.GetPeers(), rpc);
+        return peer != null && (!sender.HasValue || peer.m_uid == sender.Value);
     }
     private static bool Routed(ZRpc rpc, ref ZPackage pkg)
     {
@@ -164,7 +171,7 @@ internal sealed class WeatherGuardPatches : IDisposable
         try
         {
             bool suppress = active.SuppressWeather(wear, wear.m_noRoofWear);
-            active.WeatherGate(wear, suppress);
+            active.WeatherGate(wear, suppress, view.GetZDO());
             if (_wearObservation != null) _wearObservation.Suppressed = suppress;
             // Do not announce a prevented contribution when final native restrictions
             // would already cancel all wear. The weather contribution is still removed.
@@ -269,6 +276,7 @@ internal sealed class WeatherGuardPatches : IDisposable
     }
     public void Dispose()
     {
+        try { _data?.Dispose(); } finally { _data = null; _routed?.Dispose(); _routed = null; }
         PendingWearSweeps.Clear();
         _wearPass = null;
         _harmony.UnpatchSelf();

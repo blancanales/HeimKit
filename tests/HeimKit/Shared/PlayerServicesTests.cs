@@ -1,11 +1,17 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
 using HeimKit.Features.AFKNightWatch;
 using HeimKit.Features.AFKRaidWatch;
-using HeimKit.Shared;
-using HeimKit.Shared.Players;
-using HeimKit.Shared.Players.Models;
+using HeimKit.Core.Players;
+using HeimKit.Core.Players.Models;
 using System.Runtime.CompilerServices;
 internal static class PlayerServicesTests
 {
@@ -16,7 +22,7 @@ internal static class PlayerServicesTests
     {
         DiagnosticLog.StartSession();
         using var log = new ManualLogSource("Shared activity checks");
-        var records = new List<(LogLevel Level, string Text)>(); log.LogEvent += (_, e) => records.Add((e.Level, e.Data.ToString()!));
+        var records = new List<(LogLevel Level, string Text)>(); log.LogEvent += (_, e) => records.Add((e.Level, LogCapture.Text(e.Data)));
         var rangeConfig = new ConfigFile(Path.Combine(AppContext.BaseDirectory, "activity-range-" + Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         var ranges = new PlayerActivitySettings(rangeConfig);
         ranges.IdleTimeoutSeconds.Value = 99999; ranges.JoinGraceSeconds.Value = -1; ranges.MovementThresholdMeters.Value = 10; ranges.LookThresholdDegrees.Value = 100; ranges.SampleIntervalSeconds.Value = .01f;
@@ -55,7 +61,7 @@ internal static class PlayerServicesTests
             var settings = new AFKNightWatchSettings(config, log); settings.Enabled.Value = sleepEnabled; settings.MajoritySleepEnabled.Value = majority; settings.ExcludeAFKFromSleep.Value = exclusion;
             var rs = new AFKRaidWatchSettings(config, log); rs.Enabled.Value = raidEnabled;
             var hub = new PlayerServices(config, log); var sleep = new AFKNightWatch(config, log, hub); var raid = new AFKRaidWatch(config, log, hub);
-            sleep.Initialize("1.0.20"); raid.Initialize("1.0.20");
+            sleep.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); raid.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
             Check(sleep.IsActive == (sleepEnabled && (majority || exclusion)) && raid.IsActive == raidEnabled, "Feature independence");
             Check(hub.Events.Subscribers == (sleep.IsActive ? 1 : 0) + (raidEnabled ? 1 : 0), "Disabled/inactive modules subscribed or enabled modules missed presence");
             sleep.Shutdown(); sleep.Shutdown(); Check(hub.Events.Subscribers == (raidEnabled ? 1 : 0), "Sleep shutdown lost another presence subscription"); Check(raid.IsActive == raidEnabled, "Sleep shutdown stopped raid module"); raid.Shutdown(); raid.Shutdown(); hub.Dispose(); hub.Dispose();
@@ -99,7 +105,7 @@ internal static class PlayerServicesTests
             () => new() { new PlayerActivityObservation { Peer = 1, Known = true, Alive = true, Character = "a", Health = 100 } }, on => { }))
         {
             using var a = service.Acquire(() => sleepDebug); var b = service.Acquire(() => raidDebug);
-            service.Tick(0); Check(records.Count == 2 && records.All(r => r.Text.StartsWith("PlayerActivity:")), "Shared diagnostic stream duplicated or borrowed feature prefix");
+            service.Tick(0); Check(records.Count == 2 && records.All(r => r.Text.StartsWith("PlayerActivity.")), "Shared diagnostic stream duplicated or borrowed feature prefix");
             b.Dispose(); records.Clear(); service.Tick(60); Check(records.Count == 0, "Released raid debug enabled sleep diagnostics");
             sleepDebug = true; service.Tick(120); Check(records.Count == 2, "Remaining consumer could not enable shared diagnostic output");
             DiagnosticLog.ServerActivity.Observe(300, false); records.Clear(); service.Tick(121); Check(records.Count == 0, "Shared output bypassed empty-server timeout");

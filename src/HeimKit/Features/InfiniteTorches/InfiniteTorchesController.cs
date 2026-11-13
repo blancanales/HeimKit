@@ -24,11 +24,12 @@ internal sealed class InfiniteTorchesController : IDisposable
     private readonly InfiniteTorchesDiagnostics _diagnostics;
     private readonly InfiniteTorchesPendingRefills _pending = new();
     private readonly PrefabCatalog<Fireplace> _torches = PrefabRegistry.Current.Catalog<Fireplace>("InfiniteTorchesController._torches");
-    private readonly List<ZDO> _sector = new();
     private CandidateSubscription? _index;
-    private readonly List<ZDO> _distant = new();
     private readonly List<ZDO> _candidates = new();
     private readonly HashSet<ZDOID> _seen = new();
+    private readonly List<ZDOID> _scanIds = new();
+    private IEnumerator<bool>? _scan;
+    private ZDOMan? _scanWorld;
     private readonly Dictionary<long, ZNetPeer> _owners = new();
     private ZNetScene? _scene;
     private string _configuredNames = "";
@@ -55,7 +56,6 @@ internal sealed class InfiniteTorchesController : IDisposable
 
     public void Tick(float now)
     {
-        if (!ModuleScheduler.Current.Due(this, "processing", now, _settings.IntervalSeconds.Value)) return;
         var net = ZNet.instance;
         var scene = ZNetScene.instance;
         var manager = ZDOMan.instance;
@@ -63,13 +63,17 @@ internal sealed class InfiniteTorchesController : IDisposable
         if (!WorldServices.World) { ReportUnavailableWorld(now); return; }
 
         string operation = "resolving configured light-source prefabs";
-        ZNetPeer? scanningPeer = null;
         try
         {
             operation = "checking pending refill results";
-            _reconcileNow = now;
-            int fuelUpdates = _pending.Reconcile(now, _observeRefill, _reportRefill);
-            _diagnostics.RefillSummary(fuelUpdates);
+            if (ModuleScheduler.Current.Due(this, "confirmations", now, _settings.IntervalSeconds.Value))
+            {
+                _reconcileNow = now;
+                int fuelUpdates = _pending.Reconcile(now, _observeRefill, _reportRefill);
+                _diagnostics.RefillSummary(fuelUpdates);
+            }
+            if (_scan == null && !ModuleScheduler.Current.Due(this, "processing", now, _settings.IntervalSeconds.Value, cooperative: true)) return;
+            if (_scan != null && !ModuleScheduler.Current.Due(this, "scan_slice", now, .03f, cooperative: true)) return;
             operation = "resolving configured light-source prefabs";
             if (_scene != scene || _configuredNames != _settings.Prefabs.Value || _configuredFireplaces != _settings.FireplaceSelection) LoadPrefabs(scene);
             if (_torches.Count == 0)
@@ -85,25 +89,32 @@ internal sealed class InfiniteTorchesController : IDisposable
             _seen.Clear();
             if (_owners.Count == 0)
             {
+                CancelScan();
                 if (_diagnostics.SummaryReady(now)) _diagnostics.Report(now, () => "No ready connected players with character IDs.");
                 return;
             }
-            int sectorRecords = 0;
-            // The dedicated server need not instantiate a Fireplace. Look up ZDOs in each owner's active sectors.
-            foreach (var peer in _owners.Values)
+            if (_scan != null && !ReferenceEquals(_scanWorld, manager)) CancelScan();
+            if (_scan == null)
             {
-                operation = "scanning sectors"; scanningPeer = peer;
-                _sector.Clear();
-                _distant.Clear();
-                _index!.Read(peer.m_refPos, peer.m_simulationDistance.NearSimulationDistance, _sector, peer.m_simulationDistance.IsClassic, includeDistant: false);
-                sectorRecords += _sector.Count;
-                foreach (var zdo in _sector)
-                {
-                    if (zdo.IsValid() && zdo.GetOwner() == peer.m_uid &&
-                        _torches.ContainsKey(zdo.GetPrefab()) && _seen.Add(zdo.m_uid))
-                        _candidates.Add(zdo);
-                }
+                _scanIds.Clear(); _scanWorld = manager;
+                var scopes = new List<(UnityEngine.Vector3 Point, int Radius, bool Classic)>();
+                foreach (var peer in _owners.Values) scopes.Add((peer.m_refPos, peer.m_simulationDistance.NearSimulationDistance, peer.m_simulationDistance.IsClassic));
+                _scan = Scan(scopes).GetEnumerator();
             }
+            operation = "scanning sectors";
+            using (PerformanceStages.Measure("InfiniteTorches", "discovery_slice", _scanIds.Count))
+                if (!WorkSlice.Advance(_scan, 1, 8)) return;
+            _scan.Dispose(); _scan = null;
+            int sectorRecords = _scanIds.Count;
+            foreach (var id in _scanIds)
+            {
+                var zdo = manager.GetZDO(id);
+                if (zdo == null || !zdo.IsValid() || zdo.m_uid != id || !_torches.ContainsKey(zdo.GetPrefab()) || !_seen.Add(id) ||
+                    !_owners.TryGetValue(zdo.GetOwner(), out var owner) || !WorldObjectProvider.Current.WithinNear(owner.m_refPos,
+                        owner.m_simulationDistance.NearSimulationDistance, owner.m_simulationDistance.IsClassic, zdo.GetPosition())) continue;
+                _candidates.Add(zdo);
+            }
+            _scanIds.Clear();
             if (_candidates.Count == 0)
             {
                 _cursor = 0;
@@ -147,10 +158,16 @@ internal sealed class InfiniteTorchesController : IDisposable
         }
         catch (Exception ex)
         {
-            if (operation == "scanning sectors" && scanningPeer != null) operation = $"scanning sectors for owner {scanningPeer.m_uid} at {scanningPeer.m_refPos}";
             _module.Fail(ex, operation);
         }
     }
+
+    private IEnumerable<bool> Scan(List<(UnityEngine.Vector3 Point, int Radius, bool Classic)> scopes)
+    {
+        foreach (var scope in scopes)
+            foreach (bool unit in WorldObjectProvider.Current.CollectIds(_index!, scope.Point, scope.Radius, scope.Classic, _scanIds)) yield return unit;
+    }
+    private void CancelScan() { _scan?.Dispose(); _scan = null; _scanWorld = null; _scanIds.Clear(); }
 
     private void ReportUnavailableWorld(float now)
     {
@@ -188,6 +205,7 @@ internal sealed class InfiniteTorchesController : IDisposable
 
     private void LoadPrefabs(ZNetScene scene)
     {
+        CancelScan();
         _index?.Dispose(); _index = null;
         _torches.Clear();
         var rejected = new Dictionary<string, int>();
@@ -230,10 +248,9 @@ internal sealed class InfiniteTorchesController : IDisposable
     }
     public void Dispose()
     {
+        CancelScan();
         _index?.Dispose(); _index = null;
         _torches.Clear();
-        _sector.Clear();
-        _distant.Clear();
         _candidates.Clear();
         _seen.Clear();
         _owners.Clear();

@@ -31,6 +31,10 @@ public sealed class SharedMapSettings
     public ConfigEntry<bool> DungeonLootProgress { get; }
     public ConfigEntry<bool> RunestoneMarkerSync { get; }
     public ConfigEntry<bool> SpawnerMarkerSync { get; }
+    public ConfigEntry<bool> DvergrGuardTowerMarkerSync { get; }
+    public ConfigEntry<bool> DvergrLighthouseMarkerSync { get; }
+    public ConfigEntry<bool> DvergrExcavationMarkerSync { get; }
+    internal bool StructureMarkersEnabled => DvergrGuardTowerMarkerSync.Value || DvergrLighthouseMarkerSync.Value || DvergrExcavationMarkerSync.Value;
     public ConfigEntry<float> TableIntervalSeconds { get; }
     public ConfigEntry<int> MaxTablesPerPass { get; }
     public ConfigEntry<float> SaveIntervalSeconds { get; }
@@ -46,13 +50,13 @@ public sealed class SharedMapSettings
         PortalClusterDistanceMeters = config.Bind("SharedMap", "PortalClusterDistanceMeters", 60f,
             new ConfigDescription("Group portals within this horizontal distance of a group's first portal into one Multi Portals marker at their centre. Zero shows separate portal markers. Restart after edits.", new AcceptableValueRange<float>(0f, 100f)));
         ResourceMarkerSync = config.Bind("SharedMap", "ResourceMarkerSync", true,
-            "Record outdoor Copper, Tin, Silver, Obsidian and static Flametal deposits and share dot markers through Read Map. Excludes scraps, dungeons, creatures and ordinary stone. Independent of PortalMarkerSync. Restart after edits.");
+            "Record outdoor Copper, Tin, Silver, Obsidian, static Flametal deposits, Black Marble skull/rib remains and discovered Ancient Roots with sap-reserve percentages and share dot markers through Read Map. Excludes scraps, dungeons, creatures and ordinary stone. Independent of PortalMarkerSync. Restart after edits.");
         ResourceDiscoverPreviouslyExplored = config.Bind("SharedMap", "ResourceDiscoverPreviouslyExplored", false,
             "Also discover remaining eligible deposits in previously community-explored terrain without a player revisit. False collects only within current player exploration range. Silver always requires mining discovery evidence. Previously recorded discoveries persist either way. Restart after edits.");
         ResourceClusterDistanceMeters = config.Bind("SharedMap", "ResourceClusterDistanceMeters", 30f,
             new ConfigDescription("Group same-type discoveries within this horizontal distance of a fixed first discovery. Tin groups show remaining discovered node counts; zero disables grouping. Restart after edits.", new AcceptableValueRange<float>(0f, 100f)));
         ResourceMarkerHideDistanceMeters = config.Bind("SharedMap", "ResourceMarkerHideDistanceMeters", 10f,
-            new ConfigDescription("Hide generated resource markers at or within this horizontal distance of published portal, dungeon, runestone or physical-spawner markers. Compare final publication positions; discoveries and depletion tracking are retained. Personal pins and resource-to-resource grouping are unchanged. Zero disables hiding. Restart after edits.", new AcceptableValueRange<float>(0f, 100f)));
+            new ConfigDescription("Hide generated resource markers at or within this horizontal distance of published portal, dungeon, runestone, physical-spawner or Dvergr structure markers. Compare final publication positions; discoveries and depletion tracking are retained. Personal pins and resource-to-resource grouping are unchanged. Zero disables hiding. Restart after edits.", new AcceptableValueRange<float>(0f, 100f)));
         SilverDiscoveryRadiusMeters = config.Bind("SharedMap", "SilverDiscoveryRadiusMeters", 10f,
             new ConfigDescription("Reveal only the nearest undiscovered Silver vein within this horizontal distance of an observed player pickaxe impact. A direct pickaxe hit always selects the struck eligible Silver vein. Old explored terrain cannot bypass mining discovery. Restart after edits.", new AcceptableValueRange<float>(1f, 30f)));
         ResourceRemoveDepleted = config.Bind("SharedMap", "ResourceRemoveDepleted", true,
@@ -71,6 +75,12 @@ public sealed class SharedMapSettings
             "Record validated placed lore runestones within native exploration range or saved community exploration and share dot markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. Restart after edits.");
         SpawnerMarkerSync = config.Bind("SharedMap", "SpawnerMarkerSync", true,
             "Record visible, player-destructible persistent recurring spawner objects within native exploration range or saved community exploration and share dot markers. Hide confirmed destroyed sources. Excludes invisible spawn points, one-shot sources and unassociated interiors. Independent of other marker switches. Restart after edits.");
+        DvergrGuardTowerMarkerSync = config.Bind("SharedMap", "DvergrGuardTowerMarkerSync", true,
+            "Record placed Dvergr guard towers, occupied or ruined, within native exploration range or saved community exploration and share labeled house markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. Restart after edits.");
+        DvergrLighthouseMarkerSync = config.Bind("SharedMap", "DvergrLighthouseMarkerSync", true,
+            "Record placed Dvergr lighthouses, occupied or ruined, within native exploration range or saved community exploration and share labeled house markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. Restart after edits.");
+        DvergrExcavationMarkerSync = config.Bind("SharedMap", "DvergrExcavationMarkerSync", true,
+            "Record placed Dvergr excavations, occupied or ruined, within native exploration range or saved community exploration and share labeled house markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. Restart after edits.");
         TableIntervalSeconds = config.Bind("SharedMap", "TableIntervalSeconds", 10f,
             new ConfigDescription("Seconds between nearby table reconciliation passes.", new AcceptableValueRange<float>(2f, 120f)));
         MaxTablesPerPass = config.Bind("SharedMap", "MaxTablesPerPass", 1,

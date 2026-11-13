@@ -30,7 +30,7 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
     private static PlayerActivityService? _current;
     private readonly PlayerActivityTracker _tracker;
     private readonly PlayerActivityOptions _options;
-    private readonly Harmony _harmony = new("heimkit.player_activity");
+    private IDisposable? _packetObserver;
     private readonly PlayerRoutedMessages? _routedMessages;
     private IDisposable? _routedSubscription;
     private readonly Dictionary<long, (ZDOID Target, float Requested)> _containers = new();
@@ -110,10 +110,10 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
             _routedSubscription = _routedMessages.Subscribe(Observe, error => { Reset("routed observation unavailable"); Incident(Time.unscaledTime, "routed_observation", error); });
             return;
         }
-        if (!install) { if (_current != null && !ReferenceEquals(_current, this)) return; try { _harmony.UnpatchSelf(); } finally { if (ReferenceEquals(_current, this)) _current = null; } return; }
+        if (!install) { if (_current != null && !ReferenceEquals(_current, this)) return; try { _packetObserver?.Dispose(); _packetObserver = null; } finally { if (ReferenceEquals(_current, this)) _current = null; } return; }
         if (_current != null && !ReferenceEquals(_current, this)) throw new InvalidOperationException("An activity observer is already registered.");
         _craftingKey = 438569 + ZSyncAnimation.GetHash("crafting");
-        _harmony.Patch(AccessTools.Method(typeof(ZRoutedRpc), "RPC_RoutedRPC"), prefix: new HarmonyMethod(typeof(PlayerActivityService), nameof(Observe)));
+        _packetObserver = IncomingPackets.RegisterRouted<byte>(Packet, affectsOriginal: false);
         _current = this;
     }
     private void Reset(string reason = "activity tracking stopped")
@@ -229,6 +229,8 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
         }
         return result;
     }
+    private static bool Packet(IncomingPackets.Context context, ref ZPackage packet, out byte state)
+    { state = 0; Observe(context.Rpc, packet); return true; }
     private static void Observe(ZRpc rpc, ZPackage pkg)
     {
         var service = _current;

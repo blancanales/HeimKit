@@ -1,6 +1,6 @@
 # WeatherGuard
 
-Protects existing and newly player-built structures from configured weather wear while preserving their creators. Activation is automatic during play; repair, logout and rejoin are not required. Combat damage, repair, removal and structural support remain native.
+Protects existing and newly player-built structures from configured weather wear while preserving their creators. Activation is automatic during play; repair, logout and rejoin are not required. Combat damage, repair, removal and structural support remain native. Protection scans advance in small batches across server updates, while already-managed structures retain protection between batches. Native terrain and scene coverage continue. Neighborhood readiness is reused until relevant dependencies or scene bindings change; optional geometry observations run separately from protection scans.
 
 ![WeatherGuard: protect player-built structures from rain and underwater wear while preserving combat and support](../images/weather-guard-workflow.jpg)
 
@@ -20,6 +20,7 @@ Settings belong under `[WeatherGuard]`. Stop the server before editing and resta
 | ProtectRain | true | Suppress eligible rain wear. |
 | ProtectUnderwater | true | Suppress eligible underwater wear. |
 | ExcludedPrefabs | empty | Exact case-sensitive prefab identifiers, comma-separated. |
+| ReuseSceneLists | true | Reuses extra scene-list candidates between frames. Set false to query each frame. Restart after editing. |
 | DebugMode | false | Feature diagnostics through the [shared debug policy](../server-setup.md#configuration). |
 | DebugLogLevel | Detailed | Medium gives path summaries; Detailed adds counters and representative observations. |
 | LogWorldCreatedItems | false | Include world-created diagnostic controls without protecting them. |
@@ -41,6 +42,10 @@ Eligible equals protected plus waiting within the reported scope. The report inc
 
 ## Diagnostics
 
+WeatherGuard remains active during raids and detected battles: required protection, support and terrain upkeep continue; optional exposure probes can wait. Extra scene creation focuses on protection dependencies and server-owned objects. Core repairs stale scene bindings without deleting saved objects and reports grouped warnings with example identities. See [shared performance observations](../server-setup.md#performance-observations).
+
+Outdoor terrain loading excludes dungeon player positions. Native zone creation and lifetime refresh retain their existing cadence. The shared [performance window](../server-setup.md#performance-observations) reports native context cost and retained region counts without enabling Debug; terrain compiler creation waits for its own ready heightmap. See [observation limits](../limitations.md#server-observations-and-logs).
+
 Info combines confirmed weather-contribution prevention into one nonempty ten-minute roll-up. One distinct affected piece is named; several pieces produce a combined count. Pausing, failure or shutdown flushes pending prevention once with the window start time. Capacity reduction and recovery remain separate notices.
 
 Medium Debug explains eligibility, management and native processing gates. Detailed adds startup settings, ownership/loading/network counters, representative wetness/roof/timer/health observations and acquisition/release totals. Changed health loss and errors remain visible; unchanged health stays quiet.
@@ -58,3 +63,9 @@ When a native damage, repair or removal handler runs on a protected piece, the `
 - `coverage`: Explicitly requested coverage evidence.
 
 Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.
+
+Shared [player performance context](../server-setup.md#performance-observations) can correlate nearby eligible/protected structures and native rain/underwater wear observations with player location and combat evidence. It uses existing processing rather than additional geometry or water probes.
+
+Optional [arrival diagnostics](../server-setup.md#performance-observations) correlate existing processing with player arrivals. They report passive protection or table-work observations without changing this feature's behavior.
+
+WeatherGuard receives immediate occupied activation ahead of optional startup work. Required protection, native terrain lifetime and support processing retain their existing admission and cadence.

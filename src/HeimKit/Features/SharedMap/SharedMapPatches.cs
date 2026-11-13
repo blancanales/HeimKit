@@ -15,6 +15,7 @@ namespace HeimKit.Features.SharedMap;
 internal sealed class SharedMapPatches : IDisposable
 {
     private readonly Harmony _harmony = new("heimkit.sharedmap");
+    private IDisposable? _packets;
     [ThreadStatic] private static SharedMapController? _receiving;
     [ThreadStatic] private static int _internalWrite;
     [ThreadStatic] private static ZNetPeer? _receivingPeer;
@@ -37,8 +38,7 @@ internal sealed class SharedMapPatches : IDisposable
         CheckCompatibility();
         try
         {
-            _harmony.Patch(Target(typeof(ZDOMan), "RPC_ZDOData", typeof(ZRpc), typeof(ZPackage)),
-                prefix: Hook(nameof(BeginPacket)), finalizer: Hook(nameof(EndPacket)));
+            _packets = IncomingPackets.RegisterData<MapPacketScope?>(BeginData, finalizer: EndPacket, failed: PacketFailed);
             _harmony.Patch(Target(typeof(ZDO), "Deserialize", typeof(ZPackage)),
                 prefix: Hook(nameof(BeforeDeserialize)), postfix: Hook(nameof(AfterDeserialize)));
             _harmony.Patch(Target(typeof(ZDO), "Set", typeof(int), typeof(byte[])),
@@ -48,6 +48,9 @@ internal sealed class SharedMapPatches : IDisposable
         catch { Dispose(); throw; }
     }
 
+    private static void PacketFailed(Exception error) => SharedMapController.Active?.Fail(error);
+    private static bool BeginData(IncomingPackets.Context context, ref ZPackage packet, out MapPacketScope? state)
+    { BeginPacket(context.Rpc, out state); return true; }
     private static void BeginPacket(ZRpc rpc, out MapPacketScope? __state)
     {
         __state = new MapPacketScope(_receiving, _receivingPeer); _receiving = null; _receivingPeer = null;
@@ -154,5 +157,5 @@ internal sealed class SharedMapPatches : IDisposable
         finally { _internalWrite--; }
     }
 
-    public void Dispose() => _harmony.UnpatchSelf();
+    public void Dispose() { try { _packets?.Dispose(); } finally { _packets = null; _harmony.UnpatchSelf(); } }
 }

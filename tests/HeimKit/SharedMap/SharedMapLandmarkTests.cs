@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System.IO.Compression;
 using System.Reflection;
 using System.Text;
@@ -21,6 +28,62 @@ internal static class SharedMapLandmarkTests
         using (var gzip = new GZipStream(output, CompressionLevel.Fastest, true)) raw.WriteTo(gzip);
         return output.ToArray();
     }
+    private static void Structures(string directory, SharedMapSettings settings, SharedMapExploration map)
+    {
+        Check(settings.DvergrGuardTowerMarkerSync.Value && settings.DvergrLighthouseMarkerSync.Value && settings.DvergrExcavationMarkerSync.Value,
+            "Dvergr marker switches must default enabled.");
+        settings.DvergrLighthouseMarkerSync.Value = false;
+        Check(settings.DvergrGuardTowerMarkerSync.Value && settings.DvergrExcavationMarkerSync.Value, "Dvergr marker switches are coupled.");
+
+        Check(SharedMapLandmarkPrefab.StructureLabel("Mistlands_GuardTower1_new") == "Dvergr Guard Tower" &&
+            SharedMapLandmarkPrefab.StructureLabel("Mistlands_GuardTower3_ruined_new") == "Dvergr Guard Tower" &&
+            SharedMapLandmarkPrefab.StructureLabel("Mistlands_Lighthouse1_new") == "Dvergr Lighthouse" &&
+            SharedMapLandmarkPrefab.StructureLabel("Mistlands_Excavation2") == "Dvergr Excavation", "An eligible structure variant was missed.");
+        foreach (string name in new[] { "Mistlands_Harbour1", "Mistlands_DvergrTownEntrance1", "Runestone_Mistlands", "mistlands_GuardTower1_new" })
+            Check(SharedMapLandmarkPrefab.StructureLabel(name) == null, "An unrelated or wrong-case location was admitted: " + name);
+
+        var tower = new MapMarker("Dvergr Guard Tower", 100, 1, 100,
+            SharedMapLandmarkStore.SourceIdentity("Mistlands_GuardTower1_new", 100, 1, 100, "root", false));
+        var light = new MapMarker("Dvergr Lighthouse", 101, 1, 100,
+            SharedMapLandmarkStore.SourceIdentity("Mistlands_Lighthouse1_new", 101, 1, 100, "root", false));
+        var store = new SharedMapLandmarkStore(directory, 126, ".structures", 2, label => label != light.Name);
+        Check(!store.Discover(tower, null, null, 50, map, true), "Unexplored structure was discovered retrospectively.");
+        Check(store.Discover(tower, 100, 100, 50, map, false) && store.Discover(light, 100, 100, 50, map, false) &&
+            store.Count == 2 && store.Read(true).Single().Identity == tower.Identity && !store.Retire(tower.Identity) && store.Save(),
+            "Structure discovery, filtered publication or persistence failed.");
+        var loaded = new SharedMapLandmarkStore(directory, 126, ".structures", 2);
+        Check(loaded.Load() && loaded.Count == 2 && loaded.Read(true).Any(p => p.Identity == light.Identity), "Disabled structure discovery was lost on reload.");
+        foreach (bool spawners in new[] { false, true })
+        {
+            var legacy = new SharedMapLandmarkStore(directory, 126, spawners);
+            string extension = spawners ? ".spawners" : ".runestones";
+            Check(Path.GetFileName(legacy.FilePath) == "world-000000000000007E" + extension, "Legacy landmark filename changed.");
+            Check(legacy.Discover(tower, 100, 100, 50, map, false) && legacy.Save(), "Legacy landmark kind did not persist.");
+            RejectKind(legacy.FilePath, new SharedMapLandmarkStore(directory, 126, ".wrong-legacy" + extension, 2));
+            File.Copy(loaded.FilePath, legacy.FilePath, overwrite: true);
+            try { legacy.Load(); throw new Exception("Legacy landmark kind accepted a structure file."); } catch (InvalidDataException) { }
+        }
+
+        var personalHouse = new MapPin(77, tower.Name, tower.X, tower.Y, tower.Z, 1);
+        var stale = new MapPin(SharedMapTableData.StructureOwner, "Old structure pin", tower.X, tower.Y, tower.Z, 1);
+        var resource = new[] { new MapMarker("Copper", 105, 1, 100, "copper") };
+        var merged = SharedMapTableData.Merge(map, Table(map, personalHouse, stale), out _, resources: resource, structures: store.Read(true))!;
+        var pins = SharedMapTableData.ReadPins(64, merged);
+        Check(pins.Count == 2 && pins.Any(p => p.Owner == 77 && p.Icon == 1) &&
+            pins.Any(p => p.Owner == SharedMapTableData.StructureOwner && p.Icon == 1 && p.Name == tower.Name),
+            "Structure reconciliation retained stale pins, lost the player house pin or failed to hide a nearby resource.");
+        var disabled = SharedMapTableData.Merge(map, merged, out _, resources: resource, structures: Array.Empty<MapMarker>())!;
+        pins = SharedMapTableData.ReadPins(64, disabled);
+        Check(pins.Count == 2 && pins.Any(p => p.Owner == 77) && pins.Any(p => p.Owner == SharedMapTableData.ResourceOwner),
+            "Disabling structures failed to remove the generated house pin or restore the nearby resource.");
+    }
+
+    private static void RejectKind(string source, SharedMapLandmarkStore destination)
+    {
+        File.Copy(source, destination.FilePath);
+        try { destination.Load(); throw new Exception("Structure store accepted a legacy landmark kind."); } catch (InvalidDataException) { }
+    }
+
     public static void Run()
     {
         string directory = Path.Combine(Path.GetTempPath(), "heimkit-landmarks-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
@@ -48,6 +111,7 @@ internal static class SharedMapLandmarkTests
             var labels = (IReadOnlyDictionary<string, string>)type.GetField("Runestones", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
             Check(labels.Count == 11 && labels["Runestone_Boars"] == "Boar Runestone" && !labels.ContainsKey("BossStone_Eikthyr") && !labels.ContainsKey("Vegvisir"), "Lore-stone scope changed.");
             var map = new SharedMapExploration(64, 12, 50, .25f);
+            Structures(directory, settings, map);
             Check(SharedMapLandmarkStore.SourceIdentity("BlackIce_Core", 1, 10, 2, "root", true) ==
                 SharedMapLandmarkStore.SourceIdentity("BlackIce_Core", 1, 2, 2, "root", true), "Vertical native settling changed a persistent spawner identity.");
             Check(SharedMapLandmarkStore.SourceIdentity("Spawner_Hole_double", 1, 2, 3, "0/0", true) !=

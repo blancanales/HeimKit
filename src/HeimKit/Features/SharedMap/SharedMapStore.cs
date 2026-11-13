@@ -22,8 +22,8 @@ public sealed class SharedMapStore
     private readonly SharedMapExploration _map;
     private int _savedPixels;
     private readonly ScheduleToken _nextSave = new();
-    private Task? _write;
-    private int _writingPixels;
+    private SnapshotFile? _snapshotFile;
+    private SnapshotFile Persistence => _snapshotFile ??= new SnapshotFile(FilePath);
     public string FilePath { get; }
 
     public SharedMapStore(string directory, long world, SharedMapExploration map)
@@ -60,25 +60,21 @@ public sealed class SharedMapStore
     public bool SaveIfDue(float now, float interval)
     {
         bool saved = Poll();
-        if (_write != null) return saved;
+        if (Persistence.Pending) return saved;
         if (!_nextSave.Ready(now)) return saved;
         _nextSave.Postpone(now, interval);
         if (_savedPixels != _map.ExploredPixels)
         {
-            _writingPixels = _map.ExploredPixels;
-            byte[] snapshot = Snapshot();
-            _write = Task.Run(() => Write(snapshot));
+            int pixels = _map.ExploredPixels;
+            Persistence.Queue(Snapshot(), pixels);
         }
         return saved;
     }
 
     private bool Poll(bool wait = false)
     {
-        if (_write == null || !wait && !_write.IsCompleted) return false;
-        // Never acknowledge live state newer than the immutable snapshot.
-        var write = _write; _write = null;
-        write.GetAwaiter().GetResult();
-        _savedPixels = _writingPixels;
+        if (!Persistence.Poll(wait)) return false;
+        _savedPixels = checked((int)Persistence.CompletedGeneration);
         return true;
     }
 
@@ -87,7 +83,7 @@ public sealed class SharedMapStore
         bool saved = Poll(wait: true);
         if (!initialize && _savedPixels == _map.ExploredPixels) return saved;
         int pixels = _map.ExploredPixels;
-        Write(Snapshot());
+        Persistence.Write(Snapshot());
         _savedPixels = pixels;
         return true;
     }
@@ -104,23 +100,4 @@ public sealed class SharedMapStore
         return body.ToArray();
     }
 
-    private void Write(byte[] bytes)
-    {
-        string directory = Path.GetDirectoryName(FilePath)!;
-        Directory.CreateDirectory(directory);
-        string temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            using var sha = SHA256.Create();
-            byte[] checksum = sha.ComputeHash(bytes);
-            using (var destination = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                destination.Write(bytes, 0, bytes.Length); destination.Write(checksum, 0, checksum.Length);
-                destination.Flush(true);
-            }
-            if (File.Exists(FilePath)) File.Replace(temporary, FilePath, FilePath + ".bak");
-            else File.Move(temporary, FilePath);
-        }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
-    }
 }

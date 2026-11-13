@@ -15,10 +15,10 @@ internal sealed class HeimMenderDiagnostics : FeatureDiagnostics
     public System.IDisposable Measure(float now, System.Func<int> scope) => _timing.Measure(now, scope);
     private readonly DebugLoggingPolicy _policy;
     public HeimMenderDiagnostics(ManualLogSource log, DebugLoggingPolicy policy) { _log = log; _policy = policy; ConfigureDiagnostics(() => policy.Enabled, log, "HeimMender"); _timing = new(log, "HeimMender", policy); }
-    public void Cycle(float now, string kind, int observed, int damaged, int quiet, int threats, int owners, int selected)
+    public void Cycle(float now, string kind, int observed, int damaged, int quiet, int threats, int owners, int selected, int scheduled = 0)
     {
         if (!DiagnosticsEnabled || !_budget.Reserve(now, "cycles", 12)) return;
-        if (DiagnosticLog.DebugAvailable(_log, "HeimMender")) DiagnosticLog.Write(_log, "HeimMender", CoreLogTopics.Scope, $"Selected {selected} repair requests for the {kind} batch this pass.", new (string, object?)[] { ("kind", kind), ("observations", observed), ("damaged", damaged), ("quiet", quiet), ("threat", threats), ("owner_unavailable", owners), ("selected", selected), ("omitted", _budget.TakeOmitted()) }, LogLevel.Debug);
+        if (DiagnosticLog.DebugAvailable(_log, "HeimMender")) DiagnosticLog.Write(_log, "HeimMender", CoreLogTopics.Scope, $"Selected {selected} repair requests for the {kind} batch this pass.", new (string, object?)[] { ("kind", kind), ("observations", observed), ("damaged", damaged), ("quiet", quiet), ("threat", threats), ("owner_unavailable", owners), ("scheduled", scheduled), ("selected", selected), ("omitted", _budget.TakeOmitted()) }, LogLevel.Debug);
     }
     public void Request(float now, ZDO record, float health, float maximum)
     {

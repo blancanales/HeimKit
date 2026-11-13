@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using HeimKit.Features.WeatherGuard.Models;
 using HeimKit.Features.WeatherGuard;
 using UnityEngine;
@@ -18,8 +25,32 @@ internal static class WeatherGuardRulesTests
         }
         packet.Write(ZDOID.None); packet.SetPos(0); return packet;
     }
+    private static void SceneListReuse()
+    {
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+        int limit = (int)typeof(WeatherGuardController).GetField("SceneReuseFrames", flags)!.GetRawConstantValue()!;
+        bool CanReuse(bool enabled = true, bool stale = false, int elapsed = 29, bool ready = true, bool indexed = true,
+            bool sameSelection = true, long revision = 7, int near = 1, int total = 2, bool classic = false, int zones = 1) =>
+            WeatherGuardRules.CanReuseSceneList(enabled, stale, elapsed, limit, ready, indexed, sameSelection,
+                7, revision, (1, 2, false), (near, total, classic), 1, zones);
+        Check(CanReuse(), "unchanged scene state reuses a list");
+        Check(limit == 30 && !CanReuse(elapsed: 30), "a scene list rebuilds at 30 elapsed frames");
+        Check(!CanReuse(enabled: false) && !CanReuse(stale: true), "disabled reuse and a new protection cycle each rebuild");
+        Check(!CanReuse(ready: false) && !CanReuse(indexed: false) && !CanReuse(sameSelection: false), "scene reuse requires an available indexed selection");
+        Check(!CanReuse(revision: 8), "a membership change rebuilds");
+        Check(!CanReuse(near: 2) && !CanReuse(total: 3) && !CanReuse(classic: true), "a simulation distance change rebuilds");
+        var zone = new Vector2s(1, 2);
+        Check(!CanReuse(zones: 2) && WeatherGuardRules.SameSceneZone(zone, zone) &&
+            !WeatherGuardRules.SameSceneZone(zone, new Vector2s(1, 3)), "a player zone change rebuilds");
+        var record = new ZDOID(71, 1);
+        Check(WeatherGuardRules.CanReuseSceneRecord(true, record, record, true) &&
+            !WeatherGuardRules.CanReuseSceneRecord(true, record, record, false), "a cached distant record losing its flag rebuilds");
+        Check(!WeatherGuardRules.CanReuseSceneRecord(false, record, record, true) &&
+            !WeatherGuardRules.CanReuseSceneRecord(true, new ZDOID(71, 2), record, true), "invalid or re-identified scene records rebuild");
+    }
     public static void Run()
     {
+        SceneListReuse();
         const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
         foreach (string name in new[] { "CreateObjects", "RemoveObjects" })
         {
@@ -36,8 +67,25 @@ internal static class WeatherGuardRulesTests
         Check(WeatherGuardRules.Eligible(111, true, true, true, 234f, true, false), "player-built piece is primary candidate");
         Check(!WeatherGuardRules.RequiresContext(0, false, false), "collider-free sounds do not interrupt structure processing");
         Check(WeatherGuardRules.RequiresContext(1, false, false), "non-piece collider context still required for roof/support physics");
-        Check(WeatherGuardRules.RequiresContext(0, true, false), "wear dependency still required even without prefab colliders");
+        Check(WeatherGuardRules.RequiresContext(0, true, false), "support-giving wear dependency still required even without prefab colliders");
         Check(WeatherGuardRules.RequiresContext(0, false, true), "shield dependency still required even without prefab colliders");
+        int nativeMask = (1 << 0) | (1 << 8) | (1 << 31);
+        for (int layer = 0; layer < 32; layer++)
+            Check(WeatherGuardRules.ColliderUsesContextMask(layer, nativeMask) == (layer == 0 || layer == 8 || layer == 31),
+                "native context mask must include exactly its collision layers, including the sign bit");
+        foreach (int layer in new[] { -1, 0, 12, 31, 32 })
+            Check(WeatherGuardRules.ColliderUsesContextMask(layer, 0), "uninitialized native mask must retain dependencies");
+        Check(WeatherGuardRules.ColliderUsesContextMask(-1, nativeMask) && WeatherGuardRules.ColliderUsesContextMask(32, nativeMask),
+            "unknown collider layers must retain dependencies");
+        // Cloudberry has WearNTear but m_supports=false and item-layer colliders.
+        bool itemColliderRelevant = WeatherGuardRules.ColliderUsesContextMask(12, nativeMask);
+        Check(!WeatherGuardRules.RequiresContext(itemColliderRelevant ? 1 : 0, false, false),
+            "out-of-mask drops with non-supporting wear must not block building protection");
+        Check(WeatherGuardRules.RequiresContext(itemColliderRelevant ? 1 : 0, true, false) &&
+            WeatherGuardRules.RequiresContext(itemColliderRelevant ? 1 : 0, false, true),
+            "support-giving wear and shields must remain dependencies outside collider query layers");
+        Check(typeof(WearNTear).GetField("s_rayMask", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)?.FieldType == typeof(int) &&
+            typeof(WearNTear).GetField("m_supports", flags)?.FieldType == typeof(bool), "native context mask and support flag retain their audited types");
         Check(!WeatherGuardRules.Eligible(0, true, true, true, 234f, true, false), "world piece is unchanged");
         Check(WeatherGuardRules.Exclusion(0, true, true, true, 234f, true, false) == "world-created", "world control reason");
         Check(WeatherGuardRules.Exclusion(0, true, true, true, 234f, true, true) == "container", "container exclusion takes precedence over creator");

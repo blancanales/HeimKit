@@ -21,7 +21,7 @@ internal sealed class DoorKeeperController : IDisposable
     private readonly DoorKeeperDiagnostics _diagnostics;
     private readonly PlayerWorldScope _scope;
     private readonly ObjectAuthority _authority;
-    private readonly DoorKeeperContext _context;
+    private readonly StructureContext _context;
     private readonly DoorKeeperClearance _clearance = new();
     private readonly HashSet<int> _prefabs = new();
     private readonly Dictionary<ZDOID, (float Opened, float Seen, int State)> _doors = new();

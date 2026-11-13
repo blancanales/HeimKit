@@ -47,7 +47,7 @@ public sealed class PlayerConnectionNotices
         }
     }
 
-    private static string CleanName(string? name) => new string((name ?? "").Take(128)
+    internal static string CleanName(string? name) => new string((name ?? "").Take(128)
         .Select(c => char.IsControl(c) ? ' ' : c).ToArray()).Trim();
     private void Write(long id, string name, string action)
     {

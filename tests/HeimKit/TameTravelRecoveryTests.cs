@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System.Collections;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -62,33 +69,49 @@ internal static class TameTravelRecoveryTests
 
     private static void PlacementEvidence()
     {
-        HeimKit.Shared.DiagnosticLog.StartSession();
+        HeimKit.Core.Diagnostics.DiagnosticLog.StartSession();
         using var log = new BepInEx.Logging.ManualLogSource("Placement evidence checks");
-        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(args.Data.ToString()!);
+        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(LogCapture.Text(args.Data));
         var config = new BepInEx.Configuration.ConfigFile(Path.Combine(Path.GetTempPath(), "heimkit-placement-" + Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
-        var debug = config.Bind("Diagnostics", "DebugMode", true);
+        var debug = HeimKit.Configuration.DiagnosticsSettings.Bind(config); debug.Value = true;
         var diagnostics = new TameTravelDiagnostics(log, new HeimKit.Configuration.DebugLoggingPolicy(debug, false), () => 1);
         var peer = (ZNetPeer)RuntimeHelpers.GetUninitializedObject(typeof(ZNetPeer)); peer.m_uid = 91; peer.m_playerName = "Traveller";
         for (int i = 0; i < 20; i++) diagnostics.Traversal(peer, "placement", "gate_" + i);
         Check(lines.Count == 6, "Placement gates exceeded their reserved allowance.");
+        diagnostics.Traversal(peer, "arrival", "linked_exit_observed", transition: true);
+        Check(lines.Count == 7, "Placement waits consumed the entry and arrival allowance.");
         var transfer = new HeimKit.Features.TameTravel.Models.AnimalTransfer {
             Journey = new HeimKit.Features.TameTravel.Models.PortalJourney { Name = "Traveller" },
             PlacementAttempts = 12, PlacementCandidates = 768, PlacementContextMilliseconds = 3, PlacementSearchMilliseconds = 4 };
         transfer.PlacementRejections["solid_overlap"] = 42;
         diagnostics.Transfer(transfer, false, null);
-        Check(lines.Count == 7 && lines[^1].Contains("placement_candidates=768") && lines[^1].Contains("solid_overlap:42") &&
-            lines[^1].Contains("placement_context_ms=3") && lines[^1].Contains("placement_search_ms=4"),
-            "Placement gates consumed final outcome evidence or final rejection/timing totals were omitted.");
+        Check(lines.Count == 8 && lines[^1].Contains("768 candidates") && lines[^1].Contains("context_ms=3.00") && lines[^1].Contains("search_ms=4.00") && !lines[^1].Contains("rejections="),
+            "Normal endings lost the compact outcome or built Verbose placement fields.");
         for (int i = 0; i < 20; i++) diagnostics.Transfer(transfer, false, null);
-        Check(lines.Count == 14, "Transaction endings exceeded their independent allowance.");
+        Check(lines.Count == 15, "Transaction endings exceeded their independent allowance.");
         debug.Value = false; diagnostics.Transfer(transfer, false, null);
-        Check(lines.Count == 14, "Suppressed placement evidence still emitted output.");
-        System.Console.WriteLine("PASS: placement outcomes retain rejection and timing totals after gate-budget exhaustion, with independent bounded endings and debug suppression.");
+        Check(lines.Count == 15, "Suppressed placement evidence still emitted output.");
+        debug.Value = true; HeimKit.Core.Diagnostics.DiagnosticLog.StartSession(); lines.Clear();
+        config.Bind("Diagnostics", "DebugVerbosity", HeimKit.Configuration.DebugVerbosity.Normal).Value = HeimKit.Configuration.DebugVerbosity.Verbose;
+        try
+        {
+            var placed = new TameTravelDiagnostics(log, new HeimKit.Configuration.DebugLoggingPolicy(debug, false), () => 1);
+            var moved = new HeimKit.Features.TameTravel.Models.AnimalTransfer {
+                Journey = new HeimKit.Features.TameTravel.Models.PortalJourney { Name = "Traveller", DestinationRotation = Quaternion.identity },
+                Moved = true, Placement = new Vector3(3, 0, 1), PlacementTraveller = new Vector3(0, 0, 1) };
+            moved.PlacementRejections["building_overhead"] = 5; moved.PlacementWalkoutRejections["solid_overlap"] = 9; moved.PlacementWaitReasons["no_safe_ground_position"] = 2;
+            placed.Transfer(moved, true, null);
+            Check(lines.Count == 2 && lines[1].Contains("rejections=building_overhead:5") && lines[1].Contains("walkout_rejections=solid_overlap:9") &&
+                lines[1].Contains("wait_reasons=no_safe_ground_position:2") && lines[1].Contains("traveller_forward_m=0") && lines[1].Contains("traveller_side_m=3.0") &&
+                lines[1].Contains("traveller_distance_m=3.0"), "Transfer evidence mixed walk-out steps into candidate reasons or lost the traveller-relative landing: " + string.Join(" | ", lines));
+        }
+        finally { LogCapture.ResetVerbosity(); }
+        System.Console.WriteLine("PASS: placement outcomes retain rejection and timing totals after gate-budget exhaustion, placement waits keep their own allowance, walk-out steps stay separate from candidate reasons, landings report traveller-relative offsets, with independent bounded endings and debug suppression.");
     }
 
     private static void ReplicationOrdering()
     {
-        TameTravelReplication.CheckCompatibility();
+        ZdoReplication.CheckCompatibility();
         var type = typeof(ZDOMan).GetNestedType("ZDOPeer", BindingFlags.NonPublic)!;
         var native = RuntimeHelpers.GetUninitializedObject(type);
         var id = new ZDOID(51, 1); var other = new ZDOID(51, 2);
@@ -102,7 +125,7 @@ internal static class TameTravelRecoveryTests
         var packet = new ZPackage(); packet.Write("relocated snapshot");
 
         bool failed = false;
-        try { TameTravelReplication.Transmit(native, id, 20, 4, 10, packet, _ => throw new IOException("Disconnected")); }
+        try { ZdoReplication.Transmit(native, id, 20, 4, 10, packet, _ => throw new IOException("Disconnected")); }
         catch (IOException) { failed = true; }
         Check(failed && invalid.SetEquals(new[] { id, other }) && forced.SetEquals(new[] { id, other }) && known.Count == 0,
             "A failed send consumed native invalidation/force entries or acknowledged unsent data.");
@@ -111,7 +134,7 @@ internal static class TameTravelRecoveryTests
         // invalidation would de-index it, and native equal-revision rejection
         // would not put it back. Exercise production queue/acknowledgement work.
         string clientPosition = "source"; bool clientIndexed = true; uint clientRevision = 10;
-        TameTravelReplication.Transmit(native, id, 20, 4, 10, packet, _ =>
+        ZdoReplication.Transmit(native, id, 20, 4, 10, packet, _ =>
         {
             Check(invalid.Contains(id), "Bookkeeping changed before the reliable send succeeded.");
             clientPosition = "destination"; clientRevision = 20; clientIndexed = true;
@@ -127,7 +150,7 @@ internal static class TameTravelRecoveryTests
 
         // Ownership-only source drains must retain wire revision zero. Do not
         // accidentally acknowledge the server's full revision for that packet.
-        TameTravelReplication.Transmit(native, id, 0, 5, 11, packet, _ => { });
+        ZdoReplication.Transmit(native, id, 0, 5, 11, packet, _ => { });
         info = known[id]!;
         Check((uint)info.GetType().GetField("m_dataRevision")!.GetValue(info)! == 0, "Source-drain zero revision was discarded.");
         var record = (ZDO)RuntimeHelpers.GetUninitializedObject(typeof(ZDO)); record.m_uid = id; record.DataRevision = 20; record.OwnerRevision = 5;
@@ -172,12 +195,15 @@ internal static class TameTravelRecoveryTests
         Check(TameTravelPlacementSurfaces.LowSlab(new Vector3(2, .5f, 2), 1) &&
             !TameTravelPlacementSurfaces.LowSlab(new Vector3(.3f, 2, 2), 1) &&
             !TameTravelPlacementSurfaces.LowSlab(new Vector3(2, .5f, 2), 4), "Low paving geometry was confused with walls or raised construction.");
-        // A narrow landing opening between sparse old ring angles must be visited locally.
-        var local = Enumerable.Range(0, TameTravelPlacementRules.PreferredCandidates)
-            .Select(i => TameTravelPlacementRules.Candidate(i, 3, Vector3.zero, Vector3.zero, Vector3.forward, 17)).ToArray();
+        Check(TameTravelPlacementSurfaces.LowSlab(new Vector3(2, 1, 2), .7f) && TameTravelPlacementSurfaces.SlabRejection(new Vector3(2, 2, 1), .5f) == "too_thick" &&
+            TameTravelPlacementSurfaces.SlabRejection(new Vector3(2, .5f, 2), 4) == "raised_construction" && TameTravelPlacementSurfaces.SlabRejection(new Vector3(.3f, .5f, 2), 1) == "too_narrow",
+            "A one-metre stone floor was rejected as support, or a wall, raised or narrow piece lost its named reason.");
+        // A narrow landing opening between arc spots must be visited locally.
+        var local = Enumerable.Range(0, TameTravelPlacementRules.ArcCandidates(1))
+            .Select(i => TameTravelPlacementRules.Candidate(i, 1, Vector3.zero, Vector3.zero, Vector3.forward)).ToArray();
         var opening = new Vector3(2.2f, 0, 7.5f);
-        Check(local.Any(p => Vector3.Distance(p, opening) < .5f) && local.All(p => p.magnitude < 15),
-            "Dense local search missed a half-metre opening or searched far ground first.");
+        Check(local.Any(p => Vector3.Distance(p, opening) < .5f) && local.All(p => p.magnitude <= TameTravelPlacementRules.SweepLimit + .001f),
+            "Dense local search missed a half-metre opening or searched beyond the sweep limit.");
         System.Console.WriteLine("PASS: courtyard placement validates table detours and doorway routes, rejects wall crossings, distant detours and navigation snapping, and densely samples nearby paving.");
     }
     private static void PlacementRoutes()
@@ -187,16 +213,27 @@ internal static class TameTravelRecoveryTests
             var portal = new Vector3(100, 12, 200);
             var right = new Vector3(forward.z, 0, -forward.x);
             var exit = portal + forward * 3;
-            var traveller = portal - forward * 18 + right * 6;
-            int count = TameTravelPlacementRules.CandidateCount(3);
-            var candidates = Enumerable.Range(0, count).Select(i => TameTravelPlacementRules.Candidate(i, 3, exit, traveller, forward, 17)).ToArray();
-            Check(candidates.Take(TameTravelPlacementRules.PreferredCandidates).All(p => TameTravelPlacementRules.InFront(p, portal, forward, 4)),
-                "A preferred landing was behind the rotated portal or lacked body clearance.");
-            var firstPoints = Enumerable.Range(0, 8).Select(seed => TameTravelPlacementRules.Candidate(0, 3, exit, traveller, forward, seed)).ToArray();
-            Check(firstPoints.Distinct().Count() == 8 && firstPoints.Any(p => Vector3.Dot(p - exit, right) < 0) &&
-                firstPoints.Any(p => Vector3.Dot(p - exit, right) > 0), "Trip variation did not use both sides of the portal.");
-            Check(TameTravelPlacementRules.Candidate(0, 3, exit, traveller, forward, 17) == candidates[0],
-                "Candidate variation changed while retrying the same trip.");
+            var traveller = exit + forward * 2;
+            int count = TameTravelPlacementRules.CandidateCount(3), arcCount = TameTravelPlacementRules.ArcCandidates(3);
+            var candidates = Enumerable.Range(0, count).Select(i => TameTravelPlacementRules.Candidate(i, 3, exit, traveller, forward)).ToArray();
+            float first = TameTravelPlacementRules.ArcStart(3);
+            Check(Vector3.Distance(candidates[0], traveller + right * first) < .001f, "The sweep did not start on the traveller's right side.");
+            var firstArc = candidates.TakeWhile(p => Math.Abs(Vector3.Distance(p, traveller) - first) < .001f).ToArray();
+            Check(firstArc.Length > 2 && Vector3.Distance(firstArc[^1], traveller - right * first) < .001f &&
+                firstArc.All(p => Vector3.Dot(p - traveller, forward) >= -.001f) &&
+                firstArc.Zip(firstArc.Skip(1), (a, b) => Vector3.Dot(a - b, right) >= -.001f).All(x => x),
+                "The first arc did not sweep from the right side across the front to the left side.");
+            Check(firstArc.Zip(firstArc.Skip(1), Vector3.Distance).All(d => d <= TameTravelPlacementRules.ArcSpacing(3) + .001f),
+                "Spots on an arc were further apart than a quarter of the animal's width.");
+            var arcs = candidates.Take(arcCount).ToArray();
+            Check(arcs.Select(p => Math.Round((Vector3.Distance(p, traveller) - first) / TameTravelPlacementRules.ArcStep)).Distinct().Count() == TameTravelPlacementRules.Arcs(3) &&
+                arcs.Max(p => Vector3.Distance(p, traveller)) <= TameTravelPlacementRules.SweepLimit + .001f,
+                "Arcs did not step out a quarter metre at a time up to the sweep limit.");
+            var last = Enumerable.Reverse(arcs).TakeWhile(p => Math.Abs(Vector3.Distance(p, traveller) - Vector3.Distance(arcs[^1], traveller)) < .001f).ToArray();
+            Check(last.Any(p => Vector3.Dot((p - traveller).normalized, forward) < -.99f) && last.Distinct().Count() == last.Length,
+                "The last arc did not close a full circle behind the traveller without repeating a spot.");
+            Check(arcs.Any(p => Vector3.Dot(p - portal, forward) < 0), "The sweep did not reach ground behind the portal.");
+            Check(TameTravelPlacementRules.Candidate(0, 3, exit, traveller, forward) == candidates[0], "Candidate order changed while retrying the same trip.");
             foreach (var target in new[] { portal + forward * 24 + right * 24, portal + forward * 9 - right * 24, portal + forward * 18 + right * 6 })
             {
                 bool found = false; int cursor = 0, passes = 0;
@@ -204,21 +241,12 @@ internal static class TameTravelRecoveryTests
                 {
                     int budget = Math.Min(TameTravelPlacementRules.MaximumCandidatesPerPass, count - cursor);
                     for (int i = 0; i < budget; i++)
-                        if (candidates[cursor + i] == target && TameTravelPlacementRules.InFront(target, portal, forward, 4)) found = true;
+                        if (candidates[cursor + i] == target) found = true;
                     cursor += budget; passes++;
                 }
-                Check(found && passes <= 120, "Front-side building/traveller fallbacks lost coverage within the placement window.");
+                Check(found && passes <= 120, "Building/traveller fallback grids lost coverage within the placement window.");
             }
-            var rear = portal - forward * 24;
-            Check(!TameTravelPlacementRules.InFront(rear, portal, forward, 4) &&
-                !TameTravelPlacementRules.InFront(portal + forward * 3, portal, forward, 4) &&
-                TameTravelPlacementRules.InFront(portal + forward * 4, portal, forward, 4),
-                "Rear/straddling placement was accepted or exact forward clearance was rejected.");
-            Check(!candidates.Any(p => p == rear && TameTravelPlacementRules.InFront(p, portal, forward, 4)),
-                "A rear-only opening remained an eligible landing fallback.");
         }
-        Check(!TameTravelPlacementRules.InFront(new Vector3(float.NaN, 0, 0), Vector3.zero, Vector3.forward, 1) &&
-            !TameTravelPlacementRules.InFront(Vector3.forward, Vector3.zero, Vector3.zero, 1), "Unknown placement/facing passed the front gate.");
         var slope = new Vector3(-.3f, 1, 0).normalized;
         Check(TameTravelPlacementRules.SupportedFootprint(10, 10.9f, new Vector3(3, 0, 0), slope) &&
             !TameTravelPlacementRules.SupportedFootprint(10, 12, new Vector3(3, 0, 0), slope),
@@ -237,8 +265,11 @@ internal static class TameTravelRecoveryTests
         probes = TameTravelPlacementRules.MaximumEscapeProbes - 1;
         Check(!TameTravelPlacementRules.HasEscape(Vector3.zero, Vector3.forward, 5, Flat, (_, _) => true, ref probes) &&
             probes == TameTravelPlacementRules.MaximumEscapeProbes, "Escape-route work exceeded its per-search budget.");
+        Check(TameTravelPlacementRules.EscapeDeferred(10, TameTravelPlacementRules.MaximumEscapeProbes) &&
+            !TameTravelPlacementRules.EscapeDeferred(10, 40) && !TameTravelPlacementRules.EscapeDeferred(0, TameTravelPlacementRules.MaximumEscapeProbes),
+            "A walk-out check cut short by the shared budget was not retried, or one that can never finish was retried forever.");
         probes = 0;
         Check(TameTravelPlacementRules.HasEscape(Vector3.zero, Vector3.forward, 5, Flat, (_, _) => true, ref probes), "An open flat walkout was rejected.");
-        System.Console.WriteLine("PASS: portal-oriented candidates vary left/right, retain forward building/traveller fallbacks and reject rear/straddling landings across four portal rotations; footprint checks accept steady slopes and reject ledges; escape checks reject blocked routes and enforce the shared probe budget.");
+        System.Console.WriteLine("PASS: traveller-centred arcs sweep right to left in quarter-metre steps, widen to a full circle at the sweep limit, reach ground behind the portal and retain building/traveller fallbacks across four portal rotations; footprint checks accept steady slopes and reject ledges; escape checks reject blocked routes, enforce the shared probe budget and retry a candidate the budget cut short.");
     }
 }

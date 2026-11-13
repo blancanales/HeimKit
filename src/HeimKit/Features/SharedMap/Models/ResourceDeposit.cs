@@ -17,8 +17,9 @@ public sealed class ResourceDeposit
     public float Z { get; }
     public bool Depleted { get; internal set; }
     public bool SilverDiscovered { get; internal set; }
+    public int? SapPercent { get; internal set; }
     public MiningProgress? Progress { get; internal set; }
     public ResourceDeposit(int identity, ResourceKind kind, float x, float y, float z, bool depleted = false,
-        MiningProgress? progress = null, bool silverDiscovered = false)
-    { Identity = identity; Kind = kind; X = x; Y = y; Z = z; Depleted = depleted; Progress = progress; SilverDiscovered = silverDiscovered; }
+        MiningProgress? progress = null, bool silverDiscovered = false, int? sapPercent = null)
+    { Identity = identity; Kind = kind; X = x; Y = y; Z = z; Depleted = depleted; Progress = progress; SilverDiscovered = silverDiscovered; SapPercent = sapPercent; }
 }

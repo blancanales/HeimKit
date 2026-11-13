@@ -1,10 +1,16 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using HeimKit.Features.AFKRaidWatch;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Features.AFKNightWatch;
 using HeimKit.Features.InfiniteTorches;
 using HeimKit.Features.WeatherGuard;
-using HeimKit.Shared;
 
 internal static class StartupLoggingTests
 {
@@ -20,6 +26,7 @@ internal static class StartupLoggingTests
             ("ForestRenewal", "ForestRenewal", (config, log) => new HeimKit.Features.ForestRenewal.ForestRenewal(config, log, PlayerServicesTests.For(config, log))),
             ("SeaSalvage", "SeaSalvage", (config, log) => new HeimKit.Features.SeaSalvage.SeaSalvage(config, log, PlayerServicesTests.For(config, log))),
             ("TameTravel", "TameTravel", (config, log) => new HeimKit.Features.TameTravel.TameTravel(config, log, PlayerServicesTests.For(config, log))),
+            ("StationSupply", "StationSupply", (config, log) => new HeimKit.Features.StationSupply.StationSupply(config, log, PlayerServicesTests.For(config, log))),
             ("HeimMender", "HeimMender", (config, log) => new HeimKit.Features.HeimMender.HeimMender(config, log, PlayerServicesTests.For(config, log)))
         };
         foreach (var factory in factories)
@@ -34,9 +41,9 @@ internal static class StartupLoggingTests
                 var config = new ConfigFile(path, false) { SaveOnConfigSet = false };
                 using var logger = new ManualLogSource("Startup logging checks");
                 var messages = new List<(LogLevel Level, string Text)>();
-                logger.LogEvent += (_, args) => messages.Add((args.Level, args.Data.ToString()!));
+                logger.LogEvent += (_, args) => messages.Add((args.Level, LogCapture.Text(args.Data)));
                 var feature = factory.Create(config, logger);
-                feature.Initialize("1.0.20");
+                feature.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
                 if (!enabled) { feature.Tick(0); feature.Tick(60); }
                 var info = messages.Where(m => m.Level == LogLevel.Info).ToArray();
                 if (info.Length != 1 || info[0].Text != $"{factory.Name}: {(enabled ? "Enabled." : "Disabled.")}")
@@ -47,7 +54,7 @@ internal static class StartupLoggingTests
                     throw new Exception("Waiting must be gated Debug and readiness must require actual initialization: " + factory.Name);
                 feature.Shutdown();
                 messages.Clear();
-                feature.Initialize("unsupported");
+                feature.Initialize("");
                 if (feature.IsActive || messages.Count(m => m.Level == LogLevel.Warning) != (enabled ? 1 : 0) ||
                     messages.Any(m => m.Level != LogLevel.Debug && (m.Text.Contains("elapsed_s") || m.Text.Contains("Ready."))))
                     throw new Exception("Compatibility issue must be concise and visible without false readiness: " + factory.Name);

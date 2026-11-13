@@ -17,9 +17,9 @@ public static class RoutedActivityReader
         int cursor = packet.GetPos(); target = ZDOID.None; method = 0;
         try
         {
-            packet.ReadLong(); long sender = packet.ReadLong(); packet.ReadLong();
-            target = packet.ReadZDOID(); method = packet.ReadInt();
-            return sender == authenticatedPeer;
+            var header = ZdoPackets.Header(packet);
+            target = header.Target; method = header.Method;
+            return header.Sender == authenticatedPeer;
         }
         catch (Exception) { target = ZDOID.None; method = 0; return false; }
         finally { packet.SetPos(cursor); }
@@ -28,6 +28,22 @@ public static class RoutedActivityReader
         method == "SetTrigger".GetStableHashCode() || method == "RPC_Damage".GetStableHashCode() || method == "RPC_Repair".GetStableHashCode() ||
         method == "RPC_Remove".GetStableHashCode() || method == "RPC_RequestOpen".GetStableHashCode() || method == "RPC_RequestStack".GetStableHashCode() ||
         method == "RPC_RequestTakeAll".GetStableHashCode();
+    internal static bool TryReadTargeted(ZPackage packet, long peer, out ZDOID target, out bool sensed, out bool alerted)
+    {
+        sensed = alerted = false;
+        if (!TryRead(packet, peer, out target, out int method) || method != "OnTargeted".GetStableHashCode()) return false;
+        int cursor = packet.GetPos();
+        try
+        {
+            packet.SetPos(ZdoPackets.Header(packet).End);
+            if (packet.ReadInt() != 2 || packet.Size() - packet.GetPos() != 2) return false;
+            byte a = packet.ReadByte(), b = packet.ReadByte();
+            if (a > 1 || b > 1) return false;
+            sensed = a != 0; alerted = b != 0; return true;
+        }
+        catch (Exception) { return false; }
+        finally { packet.SetPos(cursor); }
+    }
     public static bool TryReadParameters(ZPackage packet, long authenticatedPeer, out ZDOID target,
         out int method, out ZPackage? parameters)
     {
@@ -36,7 +52,7 @@ public static class RoutedActivityReader
         int cursor = packet.GetPos();
         try
         {
-            packet.ReadLong(); packet.ReadLong(); packet.ReadLong(); packet.ReadZDOID(); packet.ReadInt();
+            packet.SetPos(ZdoPackets.Header(packet).End);
             int start = packet.GetPos(), length = packet.ReadInt();
             if (length < 0 || length > 8192 || packet.Size() - packet.GetPos() != length) return false;
             packet.SetPos(start); parameters = packet.ReadPackage(); return true;

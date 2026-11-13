@@ -9,6 +9,10 @@ InfiniteTorches periodically refills eligible torches, braziers, campfires, hear
 
 Supported game and loader versions are documented in [server setup](../server-setup.md#supported-environment).
 
+New refill discovery/requests use cooperative admission and pause during native raids or detected combat. Existing request confirmation/expiry continues at its usual cadence. Quiet resumption does not replay missed scans.
+
+Optional discovery is incremental through the shared WorldObjectProvider candidate service: advance at most eight complete cells and one millisecond of elapsed work per admitted slice. Native calls remain indivisible. Capture pure player scope values and native IDs; clear borrowed native references before yielding. Complete the scan before issuing refills, and re-resolve every ID against the current world, configured prefab catalog, ready owner and current near-simulation geometry. World/prefab changes, no ready owners and disposal cancel partial discovery. New scan slices obey existing combat admission; pending confirmations/expiry continue independently. Feature startup participates in shared cold-start admission while WeatherGuard activates first. Normal refill results retain their existing completed-pass grouping; optional discovery_slice timings feed the shared slow-stage report in global Verbose Debug.
+
 ## Configuration
 
 Debug settings use the [shared suppression contract](../server-setup.md#hidden-per-feature-debug-suppression).

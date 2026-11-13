@@ -47,6 +47,10 @@ internal sealed class HeimMenderRules
         health = zdo.GetFloat(ZDOVars.s_health, maximum);
         return PlayerWorldScope.Finite(maximum) && maximum > 0 && PlayerWorldScope.Finite(health) && health > 0 && PlayerWorldScope.Finite(zdo.GetPosition());
     }
+    // Eligible structure below its native maximum. Missing saved health reads as the maximum.
+    public bool Damaged(ZDO zdo) => Eligible(zdo, out float health, out float maximum) && health < maximum;
+    // The native world-level term applied to piece health by Eligible; -1 while it cannot be read.
+    public float HealthScale() => Game.m_worldLevel <= 0 ? 0 : !Game.instance ? -1 : Game.m_worldLevel * Game.instance.m_worldLevelPieceHPMultiplier;
     public static bool OwnerReady(ZDO zdo)
     {
         long owner = zdo.GetOwner();

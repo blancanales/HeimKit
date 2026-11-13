@@ -1,7 +1,13 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Logging;
-using HeimKit.Shared;
-using HeimKit.Shared.Players;
-using HeimKit.Shared.Players.Models;
+using HeimKit.Core.Players;
+using HeimKit.Core.Players.Models;
 
 internal static class PlayerActivityNoticesTests
 {
@@ -10,7 +16,7 @@ internal static class PlayerActivityNoticesTests
     {
         using var log = new ManualLogSource("AFK notice checks");
         var records = new List<(LogLevel Level, string Text)>();
-        log.LogEvent += (_, args) => records.Add((args.Level, args.Data.ToString()!));
+        log.LogEvent += (_, args) => records.Add((args.Level, LogCapture.Text(args.Data)));
         try
         {
             DiagnosticLog.ServerActivity.Reset(); DiagnosticLog.ServerActivity.Observe(300, false);

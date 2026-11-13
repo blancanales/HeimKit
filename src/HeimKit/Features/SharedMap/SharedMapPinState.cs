@@ -35,7 +35,7 @@ public sealed class SharedMapPinState
     private readonly Dictionary<string, string> _adopted = new(StringComparer.Ordinal);
     private readonly long _world;
     private readonly Action<string, MapPin, string>? _changed;
-    private bool _dirty;
+    private long _savedRevision;
     public long Revision { get; private set; }
     private readonly ScheduleToken _nextSave = new();
     public string FilePath { get; }
@@ -73,7 +73,7 @@ public sealed class SharedMapPinState
             if (_adopted.ContainsKey(fingerprint) || previousIds.Contains(fingerprint) ||
                 !adoptedCandidates.TryGetValue(Shape(pin), out var matches) || matches.Length != 1) continue;
             if (_adopted.Count >= Maximum) throw new InvalidDataException("Shared adopted-pin limit exceeded.");
-            _adopted.Add(fingerprint, matches[0]!); _dirty = true; Revision++;
+            _adopted.Add(fingerprint, matches[0]!); Revision++;
             _changed?.Invoke(matches[0]!, pin, "accepted_pin_adoption");
         }
         // Ownership adoption must still suppress duplicate managed copies when shared X marks are off.
@@ -94,7 +94,7 @@ public sealed class SharedMapPinState
                 state = new State(Copy(pin, pin.X, pin.Z, false), false); _states.Add(group.Key, state); Index(group.Key, state, true);
             }
             if (state.Target == pin.Checked) continue;
-            state.Target = pin.Checked; _dirty = true; Revision++; count++;
+            state.Target = pin.Checked; Revision++; count++;
             _changed?.Invoke(group.Key, pin, "accepted_checkmark");
         }
         return count;
@@ -108,7 +108,7 @@ public sealed class SharedMapPinState
         {
             if (markerIdentity == null && !shareChecks) return Copy(pin, pin.X, pin.Z, false);
             if (_states.Count >= Maximum) throw new InvalidDataException("Shared pin-state limit exceeded.");
-            state = new State(Copy(pin, pin.X, pin.Z, false), false); _states.Add(key, state); Index(key, state, true); _dirty = true; Revision++;
+            state = new State(Copy(pin, pin.X, pin.Z, false), false); _states.Add(key, state); Index(key, state, true); Revision++;
         }
         // Restore a player's original coordinates when their issued offset returns in an upload.
         MapPin source = markerIdentity == null ? new MapPin(pin.Owner, state.Source.Name, state.Source.X, state.Source.Y, state.Source.Z, pin.Icon, false, pin.Author) : pin;
@@ -123,7 +123,7 @@ public sealed class SharedMapPinState
                 double dx = source.X + Slots[state.Slot].X - old.X, dz = source.Z + Slots[state.Slot].Z - old.Z;
                 if (dx * dx + dz * dz > 1.21) break;
             }
-            state.Source = Copy(source, source.X, source.Z, check); Index(key, state, true); _dirty = true; Revision++;
+            state.Source = Copy(source, source.X, source.Z, check); Index(key, state, true); Revision++;
             _changed?.Invoke(key, state.Published, "pin_publication");
         }
         var published = state.Published;
@@ -168,13 +168,29 @@ public sealed class SharedMapPinState
             }
         }
         if (fields.BaseStream.Position != fields.BaseStream.Length) throw new InvalidDataException("Trailing shared pin-state bytes.");
-        _states.Clear(); _issued.Clear(); foreach (var pair in loaded) { _states.Add(pair.Key, pair.Value); Index(pair.Key, pair.Value, true); } _dirty = false;
+        _states.Clear(); _issued.Clear(); foreach (var pair in loaded) { _states.Add(pair.Key, pair.Value); Index(pair.Key, pair.Value, true); } _savedRevision = Revision;
         _adopted.Clear(); foreach (var pair in adopted) _adopted.Add(pair.Key, pair.Value);
     }
-    public bool SaveIfDue(float now, float interval) { if (!_nextSave.Ready(now)) return false; _nextSave.Postpone(now, interval); return Save(); }
+    private SnapshotFile? _snapshotFile;
+    private SnapshotFile Persistence => _snapshotFile ??= new SnapshotFile(FilePath);
+    public bool SaveIfDue(float now, float interval)
+    {
+        bool saved = Persistence.Poll();
+        if (saved) _savedRevision = Persistence.CompletedGeneration;
+        if (Persistence.Pending || !_nextSave.Ready(now)) return saved;
+        _nextSave.Postpone(now, interval);
+        if (Revision != _savedRevision) Persistence.Queue(Snapshot(), Revision);
+        return saved;
+    }
     public bool Save()
     {
-        if (!_dirty) return false;
+        bool saved = Persistence.Poll(wait: true);
+        if (saved) _savedRevision = Persistence.CompletedGeneration;
+        if (Revision == _savedRevision) return saved;
+        long generation = Revision; Persistence.Write(Snapshot()); _savedRevision = generation; return true;
+    }
+    private byte[] Snapshot()
+    {
         using var body = new MemoryStream();
         using (var writer = new BinaryWriter(body, Encoding.UTF8, true))
         {
@@ -191,14 +207,6 @@ public sealed class SharedMapPinState
                 foreach (string id in new[] { pair.Key, pair.Value })
                     for (int j = 0; j < 64; j += 2) writer.Write(byte.Parse(id.Substring(j, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture));
         }
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!); string temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            byte[] bytes = body.ToArray(); using var sha = SHA256.Create();
-            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { file.Write(bytes, 0, bytes.Length); byte[] hash = sha.ComputeHash(bytes); file.Write(hash, 0, hash.Length); file.Flush(true); }
-            if (File.Exists(FilePath)) File.Replace(temporary, FilePath, FilePath + ".bak"); else File.Move(temporary, FilePath);
-            _dirty = false; return true;
-        }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        return body.ToArray();
     }
 }

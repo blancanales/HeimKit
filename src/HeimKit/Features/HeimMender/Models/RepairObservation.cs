@@ -16,4 +16,6 @@ internal sealed class RepairObservation
     public float Maximum;
     public float Seen;
     public float Damaged;
+    // Fixed random share (0..1) of the repair spread this piece waits after its last observed damage.
+    public float Share;
 }

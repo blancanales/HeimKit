@@ -21,11 +21,14 @@ internal sealed class SharedMapDungeonPrefab
         ["Crypt2"] = "Burial Chamber", ["Crypt3"] = "Burial Chamber", ["Crypt4"] = "Burial Chamber",
         ["SunkenCrypt4"] = "Sunken Crypt", ["TrollCave02"] = "Troll Cave", ["MountainCave02"] = "Frost Cave",
         ["Mistlands_DvergrTownEntrance1"] = "Infested Mine", ["Mistlands_DvergrTownEntrance2"] = "Infested Mine",
-        ["Mistlands_DvergrBossEntrance1"] = "Infested Citadel", ["Hildir_crypt"] = "Smouldering Tomb",
+        ["Hildir_crypt"] = "Smouldering Tomb",
         ["Hildir_cave"] = "Howling Cavern", ["MorgenHole1"] = "Putrid Hole", ["MorgenHole2"] = "Putrid Hole",
         ["MorgenHole3"] = "Putrid Hole", ["PlaceofMystery3"] = "Reto's Tomb", ["BearCave"] = "Bear Cave",
         ["TheHole01"] = "Winding Tunnels", ["MorkBorg"] = "Mörkhalla"
     };
+    // Retain saved discoveries as cleanup anchors for previously published labels.
+    internal static readonly IReadOnlyCollection<string> RetiredLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Infested Citadel" };
+    internal static bool Retired(string label) => RetiredLabels.Contains(label.Trim());
     public string Name { get; }
     public string Label { get; }
     public IReadOnlyList<DungeonGateway> Gateways { get; }

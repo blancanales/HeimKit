@@ -1,8 +1,15 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using HeimKit.Features.InfiniteTorches;
 using System.Reflection;
 using BepInEx.Logging;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 internal static class PlayerPresenceEventsTests
 {
     private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
@@ -52,7 +59,7 @@ internal static class PlayerPresenceEventsTests
         using var hub = new PlayerServices(config, log);
         var torch = new InfiniteTorches(config, log, hub);
         var controller = typeof(InfiniteTorches).GetField("_controller", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        torch.Initialize("1.0.20");
+        torch.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
         Check(hub.Events.Subscribers == 1 && controller.GetValue(torch) == null, "Torch initialized player work on an unavailable server");
         hub.Events.Observe(false); hub.Events.Observe(true); var running = controller.GetValue(torch);
         Check(running != null && hub.Activity.Consumers == 0, "Torch presence failed to create a controller or acquired unnecessary AFK tracking");

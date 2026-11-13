@@ -52,8 +52,14 @@ public sealed class SharedMapExploration
     internal int Import(byte[] source, int offset)
     {
         if (offset < 0 || source.Length - offset < Pixels.Length) throw new ArgumentException("Invalid terrain array.");
+        return ImportRange(source, offset, 0, Pixels.Length);
+    }
+    internal int ImportRange(byte[] source, int offset, int start, int length)
+    {
+        if (offset < 0 || start < 0 || length < 0 || start > Pixels.Length - length || source.Length - offset < start + length)
+            throw new ArgumentException("Invalid terrain range.");
         int added = 0;
-        for (int i = 0; i < Pixels.Length; i++)
+        for (int i = start; i < start + length; i++)
             if (source[offset + i] != 0 && Pixels[i] == 0) { Pixels[i] = 1; added++; }
         ExploredPixels += added;
         return added;

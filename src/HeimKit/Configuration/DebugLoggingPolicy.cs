@@ -16,7 +16,7 @@ public sealed class DebugLoggingPolicy
     private readonly ConfigEntry<bool>? _feature;
     public bool Suppressed { get; }
     public bool ConfiguredEnabled => (_global.Value || _feature?.Value == true) && !Suppressed;
-    public bool Enabled => ConfiguredEnabled && HeimKit.Core.Diagnostics.DiagnosticLog.ServerActivity.Allowed;
+    public bool Enabled => ConfiguredEnabled && HeimKit.Core.Diagnostics.DiagnosticLog.ServerActivity.Allowed && !ModuleScheduler.Current.CombatActive;
     // One configuration declaration is deliberately visible at Debug even when suppression
     // disables this feature's recurring diagnostics. Loader severity filters still apply.
     public void ReportStartup(ManualLogSource logger, string name, bool featureEnabled)

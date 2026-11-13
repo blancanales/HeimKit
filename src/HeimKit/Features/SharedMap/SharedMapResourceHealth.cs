@@ -13,6 +13,9 @@ namespace HeimKit.Features.SharedMap;
 
 public static class SharedMapResourceHealth
 {
+    internal static bool TracksProgress(ResourceKind kind) =>
+        kind == ResourceKind.Copper || kind == ResourceKind.Silver || kind == ResourceKind.BlackMarble;
+
     // null means unobserved/unsupported, never depleted. Missing native health means untouched.
     public static bool? Sections(string encoded, int expected)
     {

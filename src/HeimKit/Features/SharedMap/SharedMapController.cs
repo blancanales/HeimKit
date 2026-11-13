@@ -36,6 +36,8 @@ internal sealed class SharedMapController : IDisposable
     private readonly SharedMapLandmarks? _landmarks;
     private readonly SharedMapPinState _pinState;
     private readonly SharedMapPinAdministration _pinAdministration;
+    private readonly CandidateSubscription _tableCandidates;
+    private readonly ProcessingTiming? _timing;
     private long _playerPixels, _tablePixels;
     private readonly List<ZDO> _sector = new(), _distant = new(), _tables = new();
     private readonly HashSet<ZDOID> _seen = new();
@@ -44,6 +46,12 @@ internal sealed class SharedMapController : IDisposable
     private int _acceptedChecks;
     private readonly Dictionary<ZDOID, (byte[]? Payload, SharedMapReconciliationState State)> _reconciled = new();
     private int _reconciledBytes;
+    private readonly Queue<ZDOID> _tableQueue = new();
+    private SharedMapTableData.Reconciliation? _tableWork;
+    private ZDOID _tableId;
+    private byte[]? _tableSource;
+    private SharedMapReconciliationState? _tableInputs;
+    private long _tablePinRevision;
     private const int ReconciliationBytes = 16 * 1024 * 1024;
     private IReadOnlyList<MapMarker>? _portalPins;
     private long _portalPinsRevision = -1;
@@ -54,14 +62,16 @@ internal sealed class SharedMapController : IDisposable
         var portals = PortalPins(); var resources = _resources?.Read() ?? Array.Empty<MapMarker>();
         var dungeons = _dungeons?.Read() ?? Array.Empty<MapMarker>();
         var runestones = _landmarks?.Runestones() ?? Array.Empty<MapMarker>(); var spawners = _landmarks?.Spawners() ?? Array.Empty<MapMarker>();
+        var structures = _landmarks?.Structures() ?? Array.Empty<MapMarker>();
         if (_inputs != null && _inputs.Pixels == _exploration.ExploredPixels && _inputs.Pins == _pinState.Revision &&
             _inputs.Removals == _pinAdministration.Removals.Revision && _inputs.PortalPublications == _portalRefresh.Revision &&
             _inputs.HideDistance == _settings.ResourceMarkerHideDistanceMeters.Value &&
             SharedMapReconciliationState.SameMarkers(_inputs.Portals, portals) && SharedMapReconciliationState.SameMarkers(_inputs.Resources, resources) &&
             SharedMapReconciliationState.SameMarkers(_inputs.Dungeons, dungeons) && SharedMapReconciliationState.SameMarkers(_inputs.Runestones, runestones) &&
-            SharedMapReconciliationState.SameMarkers(_inputs.Spawners, spawners)) return _inputs;
+            SharedMapReconciliationState.SameMarkers(_inputs.Spawners, spawners) &&
+            SharedMapReconciliationState.SameMarkers(_inputs.Structures, structures)) return _inputs;
         return _inputs = new(_exploration.ExploredPixels, _pinState.Revision, _pinAdministration.Removals.Revision,
-            _portalRefresh.Revision, _settings.ResourceMarkerHideDistanceMeters.Value, portals, resources, dungeons, runestones, spawners);
+            _portalRefresh.Revision, _settings.ResourceMarkerHideDistanceMeters.Value, portals, resources, dungeons, runestones, spawners, structures);
     }
 
     internal bool Running => ReferenceEquals(Active, this) && _module.IsActive &&
@@ -72,9 +82,9 @@ internal sealed class SharedMapController : IDisposable
         SharedMapExploration exploration, SharedMapMarkerRefresh portalRefresh, ManualLogSource logger,
         SharedMapResourceStore? resourceStore = null, SharedMapMarkerRefresh? resourceRefresh = null, PlayerRoutedMessages? routedMessages = null,
         SharedMapDungeonStore? dungeonStore = null, SharedMapPinState? pinState = null,
-        SharedMapLandmarkStore? runestones = null, SharedMapLandmarkStore? spawners = null)
+        SharedMapLandmarkStore? runestones = null, SharedMapLandmarkStore? spawners = null, SharedMapLandmarkStore? structures = null, ProcessingTiming? timing = null)
     {
-        _module = module; _settings = settings; _presence = presence; _exploration = exploration;
+        _module = module; _settings = settings; _presence = presence; _exploration = exploration; _timing = timing;
         _manager = ZDOMan.instance;
         _pinAdministration = new SharedMapPinAdministration(_manager, exploration.Size, module.StoreDirectory, ZNet.instance.GetWorldUID(),
             logger, () => settings.MaxTablesPerPass.Value, table => Reconcile(table, "selected_pin_cleanup"));
@@ -88,9 +98,11 @@ internal sealed class SharedMapController : IDisposable
                 routedMessages ?? throw new InvalidOperationException("SharedMap resource discovery requires shared player message observations."));
         if (settings.DungeonMarkerSync.Value && dungeonStore != null)
             _dungeons = new SharedMapDungeons(_manager, dungeonStore, exploration, settings, _diagnostics);
-        if (settings.RunestoneMarkerSync.Value || settings.SpawnerMarkerSync.Value)
-            _landmarks = new SharedMapLandmarks(_manager, runestones, spawners, exploration, settings, _diagnostics, Fail);
+        if (settings.RunestoneMarkerSync.Value || settings.SpawnerMarkerSync.Value || settings.StructureMarkersEnabled)
+            _landmarks = new SharedMapLandmarks(_manager, runestones, spawners, structures, exploration, settings, _diagnostics, Fail);
+        _tableCandidates = WorldObjectProvider.Current.Subscribe("SharedMap tables", IsTable, ScanKind.Nearby);
     }
+    private static bool IsTable(ZDO record) => record.GetPrefab() == TablePrefab;
 
     public void Install()
     {
@@ -106,7 +118,7 @@ internal sealed class SharedMapController : IDisposable
     internal bool ObservesResourceRecord(int prefab) => _resources?.Observes(prefab) == true;
     internal void AcceptedResourceRecord(ZDO zdo, MapReplicationSnapshot before) => _resources?.Accepted(zdo, before);
     internal void Fail(Exception error) => _module.Fail(error);
-    internal static bool Equal(byte[]? left, byte[]? right) => ReferenceEquals(left, right) || left != null && right != null && left.SequenceEqual(right);
+    internal static bool Equal(byte[]? left, byte[]? right) => ReferenceEquals(left, right) || left != null && right != null && left.AsSpan().SequenceEqual(right);
     private static bool PayloadError(Exception error) => error is IOException || error is InvalidDataException || error is DecoderFallbackException || error is ArgumentException;
 
     private static bool TryCharacter(ZNetPeer peer, out Vector3 position, bool allowInterior = false)
@@ -124,12 +136,15 @@ internal sealed class SharedMapController : IDisposable
 
     public void Tick(float now)
     {
+        if (!_settings.DebugLogging.Suppressed) PerformanceStages.ArrivalProgress("SharedMap.tables", now, _tableQueue.Count, _tableWork != null);
         if (!Running) return;
         BeginBatch();
         try { _pinAdministration.Tick(now); }
         finally { EndBatch(); }
-        if (ModuleScheduler.Current.Due(this, "sampling", now, _exploration.Interval))
+        TickTableWork(now);
+        if (ModuleScheduler.Current.Due(this, "sampling", now, _exploration.Interval, cooperative: true))
         {
+            using var sampleTiming = _timing?.MeasureStage("sampling") ?? default;
             for (int rosterIndex1 = 0; rosterIndex1 < _presence.Peers.Count && _presence.Peers[rosterIndex1] is var peer; rosterIndex1++)
                 if (TryCharacter(peer, out var position, allowInterior: true))
                 {
@@ -144,10 +159,16 @@ internal sealed class SharedMapController : IDisposable
                     _landmarks?.Sample(peer.m_uid, position);
                 }
         }
-        _resources?.Tick(now);
-        _dungeons?.Tick(now);
-        _landmarks?.Tick(now);
-        if (!ModuleScheduler.Current.Due(this, "tables", now, _settings.TableIntervalSeconds.Value)) return;
+        if (_resources != null && ModuleScheduler.Current.Due(this, "resources", now, .03f, cooperative: true))
+        { using var stage = _timing?.MeasureStage("resources") ?? default; _resources.Tick(now); }
+        if (_dungeons != null && ModuleScheduler.Current.Due(this, "dungeons", now, .03f, cooperative: true))
+        { using var stage = _timing?.MeasureStage("dungeons") ?? default; _dungeons.Tick(now); }
+        if (_dungeons != null && ModuleScheduler.Current.Due(this, "dungeon_loot", now, .03f, cooperative: true))
+        { using var stage = _timing?.MeasureStage("dungeon_loot") ?? default; _dungeons.TickLoot(now); }
+        if (_landmarks != null && ModuleScheduler.Current.Due(this, "landmarks", now, .03f, cooperative: true))
+        { using var stage = _timing?.MeasureStage("landmarks") ?? default; _landmarks.Tick(now); }
+        if (!ModuleScheduler.Current.Due(this, "tables", now, _settings.TableIntervalSeconds.Value, cooperative: true)) return;
+        using var tableTiming = _timing?.MeasureStage("tables") ?? default;
         if (_settings.PortalMarkerSync.Value) _portals.Refresh();
         CollectTables(out int usablePlayers);
         BeginBatch();
@@ -155,11 +176,12 @@ internal sealed class SharedMapController : IDisposable
         {
             if (_tables.Count > 0) _cursor %= _tables.Count;
             int prepared = 0;
-            while (prepared < _tables.Count && prepared < _settings.MaxTablesPerPass.Value)
-            {
-                var table = _tables[_cursor]; _cursor = (_cursor + 1) % _tables.Count;
-                Reconcile(table); prepared++;
-            }
+            if (_tableWork == null && _tableQueue.Count == 0)
+                while (prepared < _tables.Count && prepared < _settings.MaxTablesPerPass.Value)
+                {
+                    var table = _tables[_cursor]; _cursor = (_cursor + 1) % _tables.Count;
+                    _tableQueue.Enqueue(table.m_uid); prepared++;
+                }
             _diagnostics.Report(now, _exploration, usablePlayers, _tables.Count, prepared,
                 _settings.PortalMarkerSync.Value, PortalPins().Count, _playerPixels, _tablePixels);
             _resources?.Report(now);
@@ -167,6 +189,77 @@ internal sealed class SharedMapController : IDisposable
             _landmarks?.Report();
         }
         finally { EndBatch(); }
+    }
+
+    private void CancelTableWork()
+    {
+        var work = _tableWork; _tableWork = null;
+        _tableId = ZDOID.None; _tableSource = null; _tableInputs = null;
+        work?.Dispose();
+    }
+    private void TickTableWork(float now)
+    {
+        if (_tableWork == null && _tableQueue.Count == 0) return;
+        if (!ModuleScheduler.Current.Due(this, "table_work", now, .03f, cooperative: true)) return;
+        if (_tableWork == null)
+        {
+            var table = _manager.GetZDO(_tableQueue.Dequeue());
+            if (table == null || !table.IsValid() || table.GetPrefab() != TablePrefab) return;
+            var data = table.GetByteArray(ZDOVars.s_data);
+            var inputs = Inputs();
+            if (_reconciled.TryGetValue(table.m_uid, out var prior) && Equal(data, prior.Payload) && inputs.Same(prior.State)) return;
+            if (data != null && data.Length > SharedMapTableData.MaximumCompressedBytes)
+            { _diagnostics.InvalidTables(now, 1, false); return; }
+            _tableId = table.m_uid; _tableSource = data;
+            _tableInputs = inputs; _tablePinRevision = _pinState.Revision;
+            _tableWork = new SharedMapTableData.Reconciliation(_exploration, _tableSource, inputs, _settings.PortalMarkerSync.Value,
+                (name, type, owner, x, z, obsolete) =>
+                {
+                    if (obsolete) _portalRefresh.AvoidObsoletePin(name, x, z);
+                    _diagnostics.PortalPinConflict(name, type, owner, x, z, obsolete);
+                }, _pinAdministration.Removals.Contains, PublishPin, _diagnostics.DungeonPinCleanup);
+            _tableSource = _tableWork.Source;
+        }
+        var current = _manager.GetZDO(_tableId);
+        if (current == null || !current.IsValid() || current.GetPrefab() != TablePrefab ||
+            !_tableWork.SourceMatches(current.GetByteArray(ZDOVars.s_data)) ||
+            _pinState.Revision != _tablePinRevision || _pinAdministration.Removals.Revision != _tableInputs!.Removals ||
+            _portalRefresh.Revision != _tableInputs.PortalPublications || _settings.ResourceMarkerHideDistanceMeters.Value != _tableInputs.HideDistance)
+        { CancelTableWork(); return; }
+        int pixelsBefore = _exploration.ExploredPixels;
+        bool complete;
+        try { complete = _tableWork.Advance(); }
+        catch (Exception error) when (PayloadError(error))
+        { CancelTableWork(); _diagnostics.InvalidTables(now, 1, false); return; }
+        finally { _tablePixels += _exploration.ExploredPixels - pixelsBefore; }
+        _tablePinRevision = _pinState.Revision; // Publication may legitimately issue new pin identities.
+        if (!complete) return;
+        if (!_tableWork.CanPublish(current.GetByteArray(ZDOVars.s_data)) ||
+            _portalRefresh.Revision != _tableInputs!.PortalPublications || _pinAdministration.Removals.Revision != _tableInputs.Removals)
+        { CancelTableWork(); return; }
+        // Native uploads are still normalized synchronously. Never overwrite a newer
+        // map field or publish a partial compressed stream from the periodic pipeline.
+        var output = _tableWork.Output;
+        RememberReconciliation(_tableId, output ?? _tableSource, _tableInputs!);
+        if (output != null)
+        {
+            SharedMapPatches.Write(current, output);
+            _diagnostics.PinChanges(_exploration.Size, current.m_uid, current.DataRevision, _tableSource, current.GetByteArray(ZDOVars.s_data),
+                "nearby_reconciliation", validatedBefore: _tableWork.Decoded, validatedAfter: _tableWork.Normalized, alreadyValidated: true, defer: _module?.DeferPinDiagnostics(current.GetPosition()) ?? false);
+            RecordChange(current.m_uid, _tableWork.RemovedDeaths, "nearby_reconciliation", current.DataRevision);
+        }
+        CancelTableWork();
+    }
+    private void RememberReconciliation(ZDOID id, byte[]? payload, SharedMapReconciliationState inputs)
+    {
+        int length = payload?.Length ?? 0;
+        if (_reconciled.TryGetValue(id, out var previous))
+        { _reconciledBytes -= previous.Payload?.Length ?? 0; _reconciled.Remove(id); }
+        if (length > ReconciliationBytes) return;
+        if (_reconciled.Count >= 64 || _reconciledBytes + length > ReconciliationBytes)
+        { _reconciled.Clear(); _reconciledBytes = 0; }
+        _reconciled[id] = (payload == null ? null : (byte[])payload.Clone(), inputs);
+        _reconciledBytes += length;
     }
 
     // Input bytes have been accepted by native replication or a server-local field write.
@@ -225,6 +318,7 @@ internal sealed class SharedMapController : IDisposable
 
     internal void Incoming(ZDO table, TableMapSnapshot snapshot)
     {
+        using var timing = PerformanceStages.Measure("SharedMap", "incoming_table", bytes: table.GetByteArray(ZDOVars.s_data)?.Length ?? 0);
         if (!Running || table.GetPrefab() != TablePrefab) return;
         var received = table.GetByteArray(ZDOVars.s_data);
         byte[]? normalized;
@@ -239,9 +333,9 @@ internal sealed class SharedMapController : IDisposable
         if (!Equal(received, normalized)) SharedMapPatches.Write(table, normalized);
         var final = table.GetByteArray(ZDOVars.s_data);
         _diagnostics.PinChanges(_exploration.Size, table.m_uid, table.DataRevision, snapshot.Previous, received,
-            "received_update", snapshot.SenderPeer, snapshot.SenderName);
+            "received_update", snapshot.SenderPeer, snapshot.SenderName, defer: _module?.DeferPinDiagnostics(table.GetPosition()) ?? false);
         _diagnostics.PinChanges(_exploration.Size, table.m_uid, table.DataRevision, received, final,
-            "server_normalization", snapshot.SenderPeer, snapshot.SenderName);
+            "server_normalization", snapshot.SenderPeer, snapshot.SenderName, defer: _module?.DeferPinDiagnostics(table.GetPosition()) ?? false);
         if (!Equal(snapshot.Previous, final)) RecordChange(table.m_uid, removed, "accepted_client_update", table.DataRevision);
     }
 
@@ -249,21 +343,28 @@ internal sealed class SharedMapController : IDisposable
     {
         var final = table.GetByteArray(ZDOVars.s_data);
         _diagnostics.PinChanges(_exploration.Size, table.m_uid, table.DataRevision, snapshot.Previous, snapshot.Received,
-            "server_local_input", snapshot.SenderPeer, snapshot.SenderName);
+            "server_local_input", snapshot.SenderPeer, snapshot.SenderName, defer: _module?.DeferPinDiagnostics(table.GetPosition()) ?? false);
         _diagnostics.PinChanges(_exploration.Size, table.m_uid, table.DataRevision, snapshot.Received, final,
-            "server_normalization", snapshot.SenderPeer, snapshot.SenderName);
+            "server_normalization", snapshot.SenderPeer, snapshot.SenderName, defer: _module?.DeferPinDiagnostics(table.GetPosition()) ?? false);
         if (!Equal(snapshot.Previous, final)) RecordChange(table.m_uid, snapshot.RemovedDeaths, "server_map_field_write", table.DataRevision);
     }
 
     internal void Reconcile(ZDO table, string reason = "nearby_reconciliation")
     {
+        using var timing = PerformanceStages.Measure("SharedMap", "table_reconcile", bytes: table.GetByteArray(ZDOVars.s_data)?.Length ?? 0);
         if (!Running || !table.IsValid() || table.GetPrefab() != TablePrefab) return;
+        if (_tableWork != null && _tableId == table.m_uid) CancelTableWork();
         byte[]? merged;
         int removed;
         var data = table.GetByteArray(ZDOVars.s_data);
         var inputs = Inputs();
         if (_reconciled.TryGetValue(table.m_uid, out var cached) && Equal(data, cached.Payload) && inputs.Same(cached.State)) return;
-        try { merged = MergeTable(data, out removed); }
+        SharedMapTableData.ValidatedTable? decoded = null, normalized = null;
+        try
+        {
+            decoded = SharedMapTableData.Decode(_exploration.Size, data);
+            merged = MergeTable(data, out removed, decoded, _diagnostics.WantsPinChanges ? value => normalized = value : null);
+        }
         catch (Exception error) when (PayloadError(error))
         {
             if (_batchDepth > 0) _invalidExisting++;
@@ -272,22 +373,12 @@ internal sealed class SharedMapController : IDisposable
         }
         // Only retain successful reconciliation; incoming uploads always validate.
         // Any merge side effects must force another pass before cache reuse.
-        var finalPayload = merged ?? data;
-        int length = finalPayload?.Length ?? 0;
-        if (_reconciled.TryGetValue(table.m_uid, out var prior))
-        { _reconciledBytes -= prior.Payload?.Length ?? 0; _reconciled.Remove(table.m_uid); }
-        if (length <= ReconciliationBytes)
-        {
-            if (_reconciled.Count >= 64 || _reconciledBytes + length > ReconciliationBytes)
-            { _reconciled.Clear(); _reconciledBytes = 0; }
-            // Pre-merge inputs make side effects force a fresh pass before reuse.
-            _reconciled[table.m_uid] = (finalPayload == null ? null : (byte[])finalPayload.Clone(), inputs);
-            _reconciledBytes += length;
-        }
+        RememberReconciliation(table.m_uid, merged ?? data, inputs);
         if (merged == null) return;
         var previous = table.GetByteArray(ZDOVars.s_data);
         SharedMapPatches.Write(table, merged);
-        _diagnostics.PinChanges(_exploration.Size, table.m_uid, table.DataRevision, previous, table.GetByteArray(ZDOVars.s_data), reason);
+        if (normalized != null) _diagnostics.PinChanges(_exploration.Size, table.m_uid, table.DataRevision, previous, table.GetByteArray(ZDOVars.s_data), reason,
+            validatedBefore: decoded, validatedAfter: normalized, alreadyValidated: true, defer: _module?.DeferPinDiagnostics(table.GetPosition()) ?? false);
         RecordChange(table.m_uid, removed, reason, table.DataRevision);
     }
 
@@ -307,7 +398,7 @@ internal sealed class SharedMapController : IDisposable
         return published;
     }
 
-    private byte[]? MergeTable(byte[]? data, out int removed, SharedMapTableData.ValidatedTable? decoded = null)
+    private byte[]? MergeTable(byte[]? data, out int removed, SharedMapTableData.ValidatedTable? decoded = null, Action<SharedMapTableData.ValidatedTable>? validatedOutput = null)
     {
         decoded ??= SharedMapTableData.Decode(_exploration.Size, data);
         int before = _exploration.ExploredPixels;
@@ -319,13 +410,15 @@ internal sealed class SharedMapController : IDisposable
                 _diagnostics.PortalPinConflict(name, type, owner, x, z, obsolete);
             }, _resources?.Read() ?? Array.Empty<MapMarker>(), _pinAdministration.Removals.Contains,
             _dungeons?.Read() ?? Array.Empty<MapMarker>(), PublishPin,
-            _landmarks?.Runestones() ?? Array.Empty<MapMarker>(), _landmarks?.Spawners() ?? Array.Empty<MapMarker>(), _diagnostics.DungeonPinCleanup, _settings.ResourceMarkerHideDistanceMeters.Value);
+            _landmarks?.Runestones() ?? Array.Empty<MapMarker>(), _landmarks?.Spawners() ?? Array.Empty<MapMarker>(), _diagnostics.DungeonPinCleanup, _settings.ResourceMarkerHideDistanceMeters.Value, validatedOutput,
+            structures: _landmarks?.Structures() ?? Array.Empty<MapMarker>());
         if (repositioned)
             result = SharedMapTableData.MergeValidated(_exploration, decoded, out removed, PortalPins(), _settings.PortalMarkerSync.Value,
                 resources: _resources?.Read() ?? Array.Empty<MapMarker>(), removePin: _pinAdministration.Removals.Contains,
                 dungeons: _dungeons?.Read() ?? Array.Empty<MapMarker>(), publication: PublishPin,
                 runestones: _landmarks?.Runestones() ?? Array.Empty<MapMarker>(), spawners: _landmarks?.Spawners() ?? Array.Empty<MapMarker>(),
-                dungeonCleanup: _diagnostics.DungeonPinCleanup, resourceMarkerHideDistanceMeters: _settings.ResourceMarkerHideDistanceMeters.Value);
+                dungeonCleanup: _diagnostics.DungeonPinCleanup, resourceMarkerHideDistanceMeters: _settings.ResourceMarkerHideDistanceMeters.Value, validatedOutput: validatedOutput,
+                structures: _landmarks?.Structures() ?? Array.Empty<MapMarker>());
         _tablePixels += _exploration.ExploredPixels - before;
         return result;
     }
@@ -362,7 +455,7 @@ internal sealed class SharedMapController : IDisposable
             if (!TryCharacter(peer, out var position)) continue;
             usablePlayers++;
             _sector.Clear(); _distant.Clear();
-            WorldObjectProvider.Current.For("SharedMap").Query(ZoneSystem.GetZone(position), peer.m_simulationDistance, _sector, _distant);
+            _tableCandidates.Query(ZoneSystem.GetZone(position), peer.m_simulationDistance, _sector, _distant);
             foreach (var table in _sector)
                 if (_tables.Count < MaximumCandidates && table.IsValid() && table.GetPrefab() == TablePrefab && _seen.Add(table.m_uid))
                     _tables.Add(table);
@@ -377,6 +470,6 @@ internal sealed class SharedMapController : IDisposable
             try { try { _resources?.Dispose(); } finally { try { _dungeons?.Dispose(); } finally { _landmarks?.Dispose(); } } }
             finally { try { _pinAdministration.Dispose(); } finally { _patches.Dispose(); } }
         }
-        finally { _reconciled.Clear(); _portalPins = null; _portalInput = null; _tables.Clear(); _sector.Clear(); _distant.Clear(); _seen.Clear(); _changedTables.Clear(); _batchDepth = 0; }
+        finally { CancelTableWork(); _tableQueue.Clear(); _tableCandidates.Dispose(); _reconciled.Clear(); _portalPins = null; _portalInput = null; _tables.Clear(); _sector.Clear(); _distant.Clear(); _seen.Clear(); _changedTables.Clear(); _batchDepth = 0; }
     }
 }

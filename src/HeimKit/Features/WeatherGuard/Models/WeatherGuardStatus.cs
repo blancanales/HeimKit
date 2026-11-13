@@ -12,6 +12,15 @@ public sealed class WeatherGuardStatus
     public bool RainProtection { get; set; } = true;
     public bool UnderwaterProtection { get; set; } = true;
     public System.Collections.Generic.Dictionary<string, int> ReleaseTotals { get; set; } = new();
+    public float CycleSeconds { get; set; }
+    public int CycleSlices { get; set; }
+    public long CompletedCycles { get; set; }
+    public long ContextChecks { get; set; }
+    public long ContextReuses { get; set; }
+    public long SceneListBuilds { get; set; }
+    public long SceneListReuses { get; set; }
+    public int SceneCandidates { get; set; }
+    public bool ProbePending { get; set; }
     public int Protected { get; set; }
     public int Eligible { get; set; }
     public int Waiting { get; set; }

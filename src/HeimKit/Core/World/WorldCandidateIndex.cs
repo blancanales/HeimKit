@@ -52,6 +52,15 @@ internal sealed class WorldCandidateIndex : IDisposable
         if (_changes.Count < Capacity || _changes.Contains(id)) _changes.Add(id); else _overflow = true;
     }
     private void Destroyed(ZDO record) => Enqueue(record.m_uid);
+    internal int AreaCount => _areaOrder.Count;
+    // Releases the least-recently-read seeded area through the normal eviction callback.
+    internal bool EvictOldestArea()
+    {
+        if (_disposed || _areaOrder.Count == 0) return false;
+        var expired = _areaOrder.RemoveOldest();
+        _evictCell?.Invoke(new Vector2s(expired.X, expired.Z));
+        return true;
+    }
     internal void Invalidate() => _overflow = true;
     internal void Read(Vector3 center, int radius, List<ZDO> result, bool classic = false, bool includeDistant = true)
     {

@@ -22,10 +22,11 @@ using HeimKit.Features.ForestRenewal;
 using HeimKit.Features.SeaSalvage;
 using HeimKit.Features.TameTravel;
 using HeimKit.Features.HeimMender;
+using HeimKit.Features.StationSupply;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.2.2")]
+[BepInPlugin("heimkit", "HeimKit", "0.2.2-station-supply.32")]
 [BepInProcess("valheim_server.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -34,6 +35,7 @@ public sealed class Plugin : BaseUnityPlugin
     private WorldObjectProvider? _world;
     private UpgradeStartup? _startup;
     private ModuleFailureProtection? _failureProtection;
+    private ServerSaveRequests? _saveRequests;
     private string _gameVersion = "";
     private bool _modulesInitialized, _processingBlocked;
 
@@ -42,9 +44,9 @@ public sealed class Plugin : BaseUnityPlugin
         _host = new ModuleHost(Logger);
         DiagnosticLog.StartSession();
 #if DEBUG
-        DiagnosticLog.Write(Logger, "HeimKit", CoreLogTopics.Lifecycle, $"Starting version 0.2.2 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Debug.");
+        DiagnosticLog.Write(Logger, "HeimKit", CoreLogTopics.Lifecycle, $"Starting version 0.2.2-station-supply.32 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Debug.");
 #else
-        DiagnosticLog.Write(Logger, "HeimKit", $"Starting version 0.2.2 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Release.");
+        DiagnosticLog.Write(Logger, "HeimKit", $"Starting version 0.2.2-station-supply.32 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Release.");
 #endif
         try
         {
@@ -53,7 +55,7 @@ public sealed class Plugin : BaseUnityPlugin
             {
                 GameVersionCompatibility.Resolve(config, Logger);
                 _players = new PlayerServices(config, Logger);
-                _world = new WorldObjectProvider(_players.Presence);
+                _world = new WorldObjectProvider(_players.Presence, logger: Logger);
                 _host.Register(() => new InfiniteTorches(config, Logger, _players), "InfiniteTorches");
                 _host.Register(() => new WeatherGuard(config, Logger, _players), "WeatherGuard");
                 _host.Register(() => new AFKNightWatch(config, Logger, _players), "AFKNightWatch");
@@ -64,6 +66,7 @@ public sealed class Plugin : BaseUnityPlugin
                 _host.Register(() => new SeaSalvage(config, Logger, _players), "SeaSalvage");
                 _host.Register(() => new TameTravel(config, Logger, _players), "TameTravel");
                 _host.Register(() => new HeimMender(config, Logger, _players), "HeimMender");
+                _host.Register(() => new StationSupply(config, Logger, _players), "StationSupply");
                 return config;
             });
             _gameVersion = global::Version.CurrentVersion.ToString();
@@ -85,6 +88,11 @@ public sealed class Plugin : BaseUnityPlugin
         if (_startup?.Ready != true) return false;
         if (!_startup.PrepareFailureProtection(_failureProtection!)) return false;
         _startup.Dispose();
+        if (_gameVersion == GameVersionCompatibility.AuditedVersion)
+        {
+            try { _saveRequests = new ServerSaveRequests(Logger); }
+            catch (Exception error) { DiagnosticLog.Write(Logger, "HeimKit", "Native save-request compatibility and observation hooks are unavailable: " + error.GetType().Name + ". Native saving remains unchanged.", LogLevel.Warning); }
+        }
         _host!.Initialize(_gameVersion);
         _failureProtection!.ThrowIfFailed();
         _modulesInitialized = true;
@@ -100,14 +108,20 @@ public sealed class Plugin : BaseUnityPlugin
             if (_startup?.PrepareFailureProtection(_failureProtection!) != true)
                 throw new InvalidOperationException("The protected dedicated-server world is no longer available.");
             float now = Time.unscaledTime;
-            WorldServices.Refresh();
-            _players?.Tick(now);
+            long measuredUpdate = ServerPerformance.BeginUpdate();
+            ModuleScheduler.Current.BeginFrame(now);
+            using (PerformanceStages.Measure("HeimKit", "world_services")) WorldServices.Refresh();
+            using (PerformanceStages.Measure("HeimKit", "player_services")) _players?.Tick(now);
             _failureProtection?.ThrowIfFailed();
-            _world?.Tick(now);
+            using (PerformanceStages.Measure("HeimKit", "world_preparation")) _world?.Tick(now);
             _failureProtection?.ThrowIfFailed();
-            _host?.Tick(now);
+            using (PerformanceStages.Measure("HeimKit", "feature_dispatch")) _host?.Tick(now, _players?.Presence.HasJoinedPlayers, beginFrame: false);
             _failureProtection?.ThrowIfFailed();
-            _players?.Events.ReportProcessing();
+            using (PerformanceStages.Measure("HeimKit", "player_reporting")) _players?.Events.ReportProcessing();
+            using (PerformanceStages.Measure("HeimKit", "player_diagnostics")) _players?.Context.Tick(now);
+            using (PerformanceStages.Measure("PlayerActivity", "arrival_diagnostics")) _players?.Arrivals.EndFrame(now, measuredUpdate);
+            ServerPerformance.EndUpdate(measuredUpdate, now, Logger, _players?.Presence.JoinedCount,
+                _world?.FrameRecords ?? 0, ZNetScene.instance == null ? 0 : ZNetScene.instance.NrOfInstances(), WeatherGuardController.Active?.RegionCount ?? 0);
         }
         catch (Exception error) { StopProcessing("Modules disabled after a shared processing failure.", error); }
     }
@@ -125,6 +139,8 @@ public sealed class Plugin : BaseUnityPlugin
         var world = _world; _world = null;
         var players = _players; _players = null;
         var protection = _failureProtection; _failureProtection = null;
+        var saves = _saveRequests; _saveRequests = null;
+        ModuleCleanup.Run(Logger, "HeimKit", () => saves?.Dispose());
         ModuleCleanup.Run(Logger, "HeimKit", () => startup?.Dispose());
         ModuleCleanup.Run(Logger, "HeimKit", () => host?.Dispose());
         ModuleCleanup.Run(Logger, "HeimKit", () => world?.Dispose());

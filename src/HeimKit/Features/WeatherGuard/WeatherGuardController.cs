@@ -24,6 +24,8 @@ internal sealed class WeatherGuardController : IDisposable
     private readonly IPlayerPresence _presence;
     private readonly ManualLogSource _log;
     private readonly WeatherGuardDiagnostics _diagnostics;
+    private readonly PlayerContextDiagnostics? _context;
+    private readonly DebugLoggingPolicy _contextPolicy;
     private readonly Action<ZDOID, string?> _confirmedPiece;
     internal Action<ZDOID, string?> ConfirmedPiece => _confirmedPiece;
     private readonly bool _protectRain, _protectUnderwater;
@@ -33,17 +35,35 @@ internal sealed class WeatherGuardController : IDisposable
     private readonly AccessTools.FieldRef<WearNTear, bool> _rainWet = NativeAccess.Field<WearNTear, bool>("m_rainWet");
     private readonly ZDOMan _manager;
     private readonly WeatherGuardPatches _patches;
+    private TerrainContext? _terrain;
     private readonly List<ZDO> _near = new(), _distant = new(), _scratch = new(), _farScratch = new();
     private readonly HashSet<ZDOID> _nearIds = new(), _distantIds = new();
     private readonly HashSet<ZDOID> _instanceSeen = new();
     private readonly HashSet<Vector2s> _regions = new();
     private readonly List<Vector3> _positions = new();
     private readonly Dictionary<ZDOID, ZDO> _protected = new();
-    private readonly Dictionary<Vector2s, bool> _readyContexts = new();
+    private SectorReadiness? _readiness;
+    private SceneListPass _scenePass;
+    private CandidateSubscription? _sceneSelection;
+    private readonly List<ZDO> _sceneNear = new(), _sceneDistant = new();
+    private readonly List<ZDOID> _sceneNearIds = new(), _sceneDistantIds = new();
+    private readonly List<Vector2s> _sceneZones = new();
+    private readonly bool _reuseSceneLists;
+    private CandidateSubscription? _sceneBuiltFor;
+    private long _sceneRevision = -1, _sceneBuilds, _sceneReuses;
+    private int _sceneNearDistance, _sceneTotalDistance, _sceneFrame;
+    private const int SceneReuseFrames = 30;
+    private bool _sceneClassic, _sceneStale = true;
+    private readonly Dictionary<Vector2s, bool> _terrainChecks = new();
+    private int _terrainFrame = -1;
     private readonly PrefabCatalog<bool> _contextPrefabs = PrefabRegistry.Current.Catalog<bool>("WeatherGuardController._contextPrefabs");
     private readonly Func<int> _nativeContextMask = NativeAccess.StaticField<int>(typeof(WearNTear), "s_rayMask");
     private int _classifiedContextMask;
-    private readonly List<ZDO> _contextObjects = new();
+    private readonly List<ZDOID> _probeIds = new();
+    private IEnumerator<bool>? _probes;
+    private float _cycleStarted, _cycleSeconds;
+    private int _cycleSlices, _completedSlices, _sceneCandidates;
+    private long _completedCycles;
     private readonly List<ZDOID> _release = new();
     private readonly Dictionary<string, int> _exclusions = new();
     private readonly Dictionary<string, int> _releaseReasons = new();
@@ -82,19 +102,22 @@ internal sealed class WeatherGuardController : IDisposable
     private int _peers, _readyPeers, _characterWaits;
     internal static WeatherGuardController? Active { get; private set; }
     internal long ServerId => ZDOMan.GetSessionID();
+    internal int RegionCount => _regions.Count;
     internal bool Running => Active == this && _module.IsActive && ReferenceEquals(_manager, ZDOMan.instance) &&
         (_protectRain || _protectUnderwater) && WorldServices.Terrain;
 
-    public WeatherGuardController(WeatherGuard module, ManualLogSource log, DebugLoggingPolicy debug, DebugLogLevel level, bool logWorldCreated, bool protectRain, bool protectUnderwater, string excludedPrefabs, IPlayerPresence presence)
+    public WeatherGuardController(WeatherGuard module, ManualLogSource log, DebugLoggingPolicy debug, DebugLogLevel level, bool logWorldCreated, bool protectRain, bool protectUnderwater, string excludedPrefabs, IPlayerPresence presence, PlayerContextDiagnostics? context = null, bool reuseSceneLists = true)
     {
         _confirmedPiece = WeatherDamageSuppressed;
+        _context = context; _contextPolicy = debug;
         _presence = presence;
-        _protectRain = protectRain; _protectUnderwater = protectUnderwater;
+        _protectRain = protectRain; _protectUnderwater = protectUnderwater; _reuseSceneLists = reuseSceneLists;
         _excludedPrefabs = WeatherGuardRules.ParseExcludedPrefabs(excludedPrefabs, out int rejected);
         if (rejected > 0) DiagnosticLog.Write(log, "WeatherGuard", $"Ignored {rejected} invalid or over-limit prefab exclusions. Review WeatherGuard.ExcludedPrefabs.", level: LogLevel.Warning);
         _module = module; _log = log; _diagnostics = new WeatherGuardDiagnostics(log, debug, level, logWorldCreated); _manager = ZDOMan.instance; _patches = new WeatherGuardPatches(); }
     public void Install()
     {
+        using var timing = PerformanceStages.Measure("WeatherGuard", "hook_installation");
         WorldObjectProvider.CheckLiveInstanceCompatibility();
         if (_creator == null || _creatorIndex == null || _rainWet == null || _createZones == null || _roof == null || _shield == null || _rainTimer == null || _coverTimer == null || _creationTime == null ||
             _shouldUpdate == null || _underWater == null || _canBeRemoved == null) throw new MissingMemberException("WeatherGuard terrain/instance/wear evidence APIs unavailable.");
@@ -102,7 +125,7 @@ internal sealed class WeatherGuardController : IDisposable
         foreach (string name in _excludedPrefabs) if (PrefabRegistry.Current.Prefab(name) == null) unknown.Add(name);
         if (unknown.Count > 0) DiagnosticLog.Write(_log, "WeatherGuard", $"{unknown.Count} excluded prefab identifiers were not found. Review WeatherGuard.ExcludedPrefabs; matching remains exact.", level: LogLevel.Warning);
         Active = this;
-        try { _patches.Install(); } catch { Dispose(); throw; }
+        try { _terrain = new TerrainContext(); _patches.Install(); } catch { Dispose(); throw; }
     }
     internal bool Protects(ZDOID id) => Running && _protected.ContainsKey(id);
     internal void Fail(Exception error) => _module.Fail(error);
@@ -143,7 +166,11 @@ internal sealed class WeatherGuardController : IDisposable
     }
     internal string? PiecePrefab(ZDO zdo) => PrefabRegistry.Current.Prefab(zdo.GetPrefab())?.name;
     internal void WeatherDamageSuppressed(ZDOID id, string? prefab = null)
-    { _confirmedPreventions++; _diagnostics.WeatherDamageSuppressed(id, prefab); }
+    {
+        _confirmedPreventions++; _diagnostics.WeatherDamageSuppressed(id, prefab);
+        if (_context?.CaptureEnabled == true && !_contextPolicy.Suppressed && _protected.TryGetValue(id, out var record))
+            _context.WeatherConfirmed(Time.unscaledTime, record.GetSector());
+    }
     internal void WearConditions(WearNTear wear, float time)
     {
         if (!_diagnostics.StepsEnabled) return;
@@ -158,10 +185,12 @@ internal sealed class WeatherGuardController : IDisposable
             time - (float)_rainTimer(wear) <= 60f ? "waiting_wet_timer" : "native_conditions_met";
         _decisions.TryGetValue(stage, out long count); _decisions[stage] = count + 1;
     }
-    internal void WeatherGate(WearNTear wear, bool branchBypassed)
+    internal void WeatherGate(WearNTear wear, bool branchBypassed, ZDO? observedRecord = null)
     {
         _weatherGates++;
         if (branchBypassed) _weatherSuppressedTotal++;
+        if (observedRecord != null && _context?.CaptureEnabled == true && !_contextPolicy.Suppressed)
+            _context.WeatherGate(Time.unscaledTime, observedRecord.GetSector(), _rainWet(wear));
         if (!_diagnostics.DebugEnabled) return;
         int shield = (int)_shield(wear);
         bool wet = wear.m_noRoofWear && wear.GetHealthPercentage() > 0.5f &&
@@ -301,9 +330,9 @@ internal sealed class WeatherGuardController : IDisposable
         if (history.LastGateTime >= 0 && Time.time - history.LastGateTime > 10) { history.WetSeconds = 0; history.LastGateTime = -1; }
     }
 
-    private void RefreshRainEvidence(ZNetScene scene)
+    private IEnumerable<bool> RefreshRainEvidence(ZNetScene scene)
     {
-        if (!_diagnostics.DebugEnabled) return;
+        if (!_diagnostics.DebugEnabled) yield break;
         var removed = _staleDebug; removed.Clear();
         foreach (var pair in _rainEvidence)
         {
@@ -334,9 +363,12 @@ internal sealed class WeatherGuardController : IDisposable
         foreach (var id in removed) _rainEvidence.Remove(id);
         // Probe at most twelve structural candidates per scan. Fresh geometry detects
         // exposed pieces even while the vanilla cover cache still says roofed.
+        if (!_diagnostics.LogWorldCreatedItems) yield break;
         int probes = 0;
         for (int visited = 0; visited < _near.Count && probes < 12; visited++)
         {
+            if ((visited & 31) == 0) yield return true;
+            if (_near.Count == 0) yield break;
             _rainProbeCursor %= _near.Count;
             var zdo = _near[_rainProbeCursor++];
             string reason = Eligibility(zdo, scene);
@@ -352,21 +384,29 @@ internal sealed class WeatherGuardController : IDisposable
 
     private static string Biome(Vector3 position)
         => WorldGenerator.instance == null ? "unknown" : WorldGenerator.instance.GetBiome(position).ToString();
-    private void RefreshExposure(ZNetScene scene, float now)
+    private IEnumerable<bool> RefreshExposure(ZNetScene scene, float now)
     {
         var managed = _managedExposure; managed.Clear(); _eligibleExposure.Clear();
-        foreach (var zdo in _eligiblePieces)
+        int visitedEligible = 0;
+        foreach (var id in _probeIds)
         {
+            if ((visitedEligible++ & 31) == 0) yield return true;
+            var zdo = _manager.GetZDO(id);
+            if (zdo == null || !zdo.IsValid() || !_nearIds.Contains(id)) continue;
+            _eligibleExposure.Add(id);
             var view = scene.FindInstance(zdo);
             if (Protects(zdo.m_uid) && view != null && view.IsValid() && view.IsOwner()) managed.Add(zdo.m_uid);
         }
-        foreach (var zdo in _eligiblePieces) _eligibleExposure.Add(zdo.m_uid);
         _exposure.Retain(_eligibleExposure, managed);
         int probes = 0;
-        for (int visited = 0; visited < _eligiblePieces.Count && probes < WeatherGuardExposureTracking.ProbeLimitPerScan; visited++)
+        for (int visited = 0; visited < _probeIds.Count && probes < WeatherGuardExposureTracking.ProbeLimitPerScan; visited++)
         {
-            _exposureProbeCursor %= _eligiblePieces.Count;
-            var zdo = _eligiblePieces[_exposureProbeCursor++];
+            // Resolve Unity instances only after resuming; none survive a yield.
+            yield return true;
+            _exposureProbeCursor %= _probeIds.Count;
+            var id = _probeIds[_exposureProbeCursor++];
+            var zdo = _manager.GetZDO(id);
+            if (zdo == null || !zdo.IsValid() || !_nearIds.Contains(id)) continue;
             var view = scene.FindInstance(zdo);
             if (view == null || !view.IsValid() || !ContextReady(zdo, scene, ZoneSystem.instance) ||
                 !view.TryGetComponent<WearNTear>(out var wear)) continue;
@@ -374,50 +414,112 @@ internal sealed class WeatherGuardController : IDisposable
             bool roof = WearNTear.RoofCheck(wear.transform, wear.transform.position, out _, wear.m_roofCheckOffset);
             bool water = _underWater(wear);
             _exposure.Observe(zdo.m_uid, roof, water, managed.Contains(zdo.m_uid),
-                (bool)_roof(wear), Biome(zdo.GetPosition()), now);
+                (bool)_roof(wear), Biome(zdo.GetPosition()), Time.unscaledTime);
             if (!roof && _diagnostics.DebugEnabled) TrackRain(zdo, wear, "eligible");
-            if (_rainEvidence.TryGetValue(zdo.m_uid, out var evidence)) { evidence.FreshRoof = roof; evidence.FreshRoofAt = now; }
+            if (_rainEvidence.TryGetValue(zdo.m_uid, out var evidence)) { evidence.FreshRoof = roof; evidence.FreshRoofAt = Time.unscaledTime; }
         }
     }
 
+    private IEnumerator<bool>? _processing;
     public void Tick(float now)
     {
+        TerrainContext.ThrowIfFailed();
         _diagnostics.PollPreventionRollup();
-        if (!ModuleScheduler.Current.Due(this, "processing", now, 1f)) return;
+        using (PerformanceStages.Measure("WeatherGuard", "selection_setup")) { RefreshContextMask(); EnsureSelections(); }
+        if (_processing == null && ModuleScheduler.Current.Due(this, "processing", now, 1f))
+        { _cycleStarted = now; _cycleSlices = 0; _processing = Process(now).GetEnumerator(); }
+        if (_processing != null)
+        {
+            using var timing = PerformanceStages.Measure("WeatherGuard", "protection_slice");
+            try
+            {
+                _cycleSlices++;
+                if (WorkSlice.Advance(_processing)) { _processing.Dispose(); _processing = null; }
+            }
+            catch { _processing?.Dispose(); _processing = null; throw; }
+        }
+        // Optional geometry/history must never delay a completed protection cycle.
+        if (_probes != null && ModuleScheduler.Current.Due(this, "observations", now, .03f, cooperative: true))
+        {
+            using var timing = PerformanceStages.Measure("WeatherGuard", "observation_slice");
+            try { if (WorkSlice.Advance(_probes, .5, 32)) { _probes.Dispose(); _probes = null; } }
+            catch { _probes?.Dispose(); _probes = null; throw; }
+        }
+        if (!_contextPolicy.Suppressed) PerformanceStages.ArrivalProgress("WeatherGuard.protection", now, _processing == null ? 0 : 1, _processing != null);
+    }
+    private void EnsureSelections()
+    {
+        _sceneSelection ??= WorldObjectProvider.Current.Subscribe("WeatherGuard", SceneRequired);
+        _readiness ??= new SectorReadiness(WorldObjectProvider.Current, "WeatherGuard", ContextDependency,
+            record => SceneInstances.BindingValid(record, ZNetScene.instance.FindInstance(record)));
+    }
+    private bool ContextDependency(ZDO record) => record.IsValid() && RequiresContext(record, ZNetScene.instance);
+    private void QueueObservations(float now)
+    {
+        // Preserve a running independent sample instead of cancelling it each cycle.
+        if (_probes != null || !_diagnostics.DebugEnabled || ModuleScheduler.Current.Combat.Active(now)) return;
+        _probeIds.Clear();
+        foreach (var record in _eligiblePieces)
+            if (record.IsValid() && _nearIds.Contains(record.m_uid)) _probeIds.Add(record.m_uid);
+        _probes = Observe().GetEnumerator();
+        IEnumerable<bool> Observe()
+        {
+            if (_diagnostics.StepsEnabled) foreach (bool unit in RefreshExposure(ZNetScene.instance, now)) yield return unit;
+            foreach (bool unit in RefreshRainEvidence(ZNetScene.instance)) yield return unit;
+        }
+    }
+    private IEnumerable<bool> Process(float now)
+    {
+        TerrainContext.ThrowIfFailed();
+        _diagnostics.PollPreventionRollup();
         _eligiblePieces.Clear(); _playerBiomes.Clear();
         var manager = ZDOMan.instance; var scene = ZNetScene.instance; var zones = ZoneSystem.instance;
-        if (!WorldServices.Terrain) return;
-        _near.Clear(); _distant.Clear(); _nearIds.Clear(); _distantIds.Clear(); _regions.Clear(); _positions.Clear(); _readyContexts.Clear();
+        if (!WorldServices.Terrain) yield break;
+        _context?.BeginWeather(!_contextPolicy.Suppressed && _context.CaptureEnabled, _protectRain, _protectUnderwater);
+        _near.Clear(); _distant.Clear(); _nearIds.Clear(); _distantIds.Clear(); _regions.Clear(); _positions.Clear(); _readiness?.Reset(); _terrainChecks.Clear(); _sceneStale = true;
         bool limited = false;
         _peers = _readyPeers = _characterWaits = 0; _exclusions.Clear(); _releaseReasons.Clear();
-        for (int rosterIndex1 = 0; rosterIndex1 < _presence.Peers.Count && _presence.Peers[rosterIndex1] is var peer; rosterIndex1++)
+        using (PerformanceStages.Measure("WeatherGuard", "region_scope"))
         {
-            _peers++;
-            if (!peer.IsReady()) continue;
-            _readyPeers++;
-            if (peer.m_characterID.IsNone()) { _characterWaits++; continue; }
-            var character = manager.GetZDO(peer.m_characterID);
-            if (character == null || !character.IsValid() || character.GetOwner() != peer.m_uid) { _characterWaits++; continue; }
-            var position = character.GetPosition();
-            if (_diagnostics.StepsEnabled) Count(_playerBiomes, Biome(position));
-            var sector = ZoneSystem.GetZone(position);
-            if (_regions.Contains(sector)) continue;
-            if (_regions.Count >= WeatherGuardRules.MaximumRegions) { limited = true; continue; }
-            _scratch.Clear(); _farScratch.Clear();
-            // Use the server's distance, matching terrain/instance readiness checks.
-            WorldObjectProvider.Current.For("WeatherGuard").Query(sector, ZNet.instance.GetSyncedSimulationDistance(), _scratch, _farScratch);
-            if (_near.Count + _distant.Count + _scratch.Count + _farScratch.Count > WeatherGuardRules.MaximumObjects)
-            { limited = true; continue; }
-            _regions.Add(sector); _positions.Add(position);
-            foreach (var zdo in _scratch) if (_nearIds.Add(zdo.m_uid)) _near.Add(zdo);
-            foreach (var zdo in _farScratch) if (_distantIds.Add(zdo.m_uid)) _distant.Add(zdo);
+            for (int rosterIndex1 = 0; rosterIndex1 < _presence.Peers.Count && _presence.Peers[rosterIndex1] is var peer; rosterIndex1++)
+            {
+                _peers++;
+                if (!peer.IsReady()) continue;
+                _readyPeers++;
+                if (peer.m_characterID.IsNone()) { _characterWaits++; continue; }
+                var character = manager.GetZDO(peer.m_characterID);
+                if (character == null || !character.IsValid() || character.GetOwner() != peer.m_uid) { _characterWaits++; continue; }
+                var position = character.GetPosition();
+                if (!PlayerWorldScope.Finite(position) || Character.InInterior(position)) continue;
+                if (_diagnostics.StepsEnabled) Count(_playerBiomes, Biome(position));
+                var sector = ZoneSystem.GetZone(position);
+                if (_regions.Contains(sector)) continue;
+                if (_regions.Count >= WeatherGuardRules.MaximumRegions) { limited = true; continue; }
+                _scratch.Clear(); _farScratch.Clear();
+                // Use the server's distance, matching terrain/instance readiness checks.
+                WorldObjectProvider.Current.For("WeatherGuard").Query(sector, ZNet.instance.GetSyncedSimulationDistance(), _scratch, _farScratch);
+                if (_near.Count + _distant.Count + _scratch.Count + _farScratch.Count > WeatherGuardRules.MaximumObjects)
+                { limited = true; continue; }
+                _regions.Add(sector); _positions.Add(position);
+                foreach (var zdo in _scratch) if (_nearIds.Add(zdo.m_uid)) _near.Add(zdo);
+                foreach (var zdo in _farScratch) if (_distantIds.Add(zdo.m_uid)) _distant.Add(zdo);
+            }
         }
         // A later region may need a full instance of an earlier region's distant object.
         for (int index = _distant.Count - 1; index >= 0; index--) if (_nearIds.Contains(_distant[index].m_uid)) _distant.RemoveAt(index);
         // Release authority before vanilla removes instances outside retained regions.
         _release.Clear();
         foreach (var pair in _protected)
+            if (!pair.Value.IsValid() || pair.Value.m_uid != pair.Key || !_nearIds.Contains(pair.Key))
+            { _release.Add(pair.Key); Count(_releaseReasons, "outside retained region"); Count(_releaseTotals, "outside retained region"); }
+        foreach (var id in _release) Release(id);
+        _release.Clear();
+        // Out-of-scope authority is released before yielding/native scene removal.
+        // Existing in-scope pieces keep their hooks and ownership between slices.
+        int checkedProtected = 0;
+        foreach (var pair in _protected)
         {
+            if ((checkedProtected++ & 7) == 0) yield return true;
             var zdo = manager.GetZDO(pair.Key);
             string reason = zdo == null || !zdo.IsValid() ? "destroyed/invalid" : !_nearIds.Contains(pair.Key) ? "outside retained region" :
                 Eligibility(zdo, scene) != "eligible" ? Eligibility(zdo, scene) : !Ready(zdo, scene, zones) ? "context lost" : "";
@@ -439,9 +541,13 @@ internal sealed class WeatherGuardController : IDisposable
             foreach (var id in _candidateReasons.Keys) if (!_nearIds.Contains(id)) staleReasons.Add(id);
             foreach (var id in staleReasons) _candidateReasons.Remove(id);
         }
+        int checkedCandidates = 0;
         foreach (var zdo in _near)
         {
+            if ((checkedCandidates++ & 31) == 0) yield return true;
+            if (!_nearIds.Contains(zdo.m_uid)) continue; // A pooled record may have been reused while suspended.
             string exclusion = Eligibility(zdo, scene);
+            if (exclusion == "eligible") _context?.WeatherCandidate(zdo.GetSector(), _protected.ContainsKey(zdo.m_uid));
             string? priorReason = null;
             bool reasonChanged = _diagnostics.DebugEnabled && (!_candidateReasons.TryGetValue(zdo.m_uid, out priorReason) || priorReason != exclusion);
             if (reasonChanged && priorReason != null)
@@ -486,6 +592,7 @@ internal sealed class WeatherGuardController : IDisposable
             ObjectAuthority.Assign(zdo, ServerId);
             manager.ForceSendZDO(zdo.m_uid);
             _acquired++;
+            _context?.WeatherAcquired(zdo.GetSector());
 
             // Successful acquisition/release counts are grouped by diagnostics interval.
         }
@@ -496,9 +603,11 @@ internal sealed class WeatherGuardController : IDisposable
         }
         _diagnostics.CapacityState(limited);
         _candidateScanStarted |= _near.Count > 0;
+        now = Time.unscaledTime;
         _lastScopeScan = now; _scopeLimited = limited;
-        if (_diagnostics.StepsEnabled) RefreshExposure(scene, now);
-        RefreshRainEvidence(scene);
+        _context?.EndWeather(now, _regions, limited);
+        _cycleSeconds = Math.Max(0, now - _cycleStarted); _completedSlices = _cycleSlices; _completedCycles++;
+        QueueObservations(now);
         if (_diagnostics.SummaryReady(now)) ReportStatus(now, limited);
     }
     private void RecordOwner(float now, ZDO zdo) => _diagnostics.Record(now, "ownership", () =>
@@ -532,7 +641,11 @@ internal sealed class WeatherGuardController : IDisposable
             Exclusions = new Dictionary<string, int>(_exclusions), ReleaseReasons = new Dictionary<string, int>(_releaseReasons), ReleaseTotals = new Dictionary<string, int>(_releaseTotals),
             OwnerLosses = _ownerLosses, WeatherGates = _weatherGates, WetOpportunities = _wetOpportunities,
             Decisions = new Dictionary<string, long>(_decisions), WeatherSuppressed = _weatherSuppressedTotal, ConfirmedPreventions = _confirmedPreventions,
-            NativeCommands = _nativeCommands, SupportPasses = _supportPasses
+            NativeCommands = _nativeCommands, SupportPasses = _supportPasses,
+            CycleSeconds = _cycleSeconds, CycleSlices = _completedSlices, CompletedCycles = _completedCycles,
+            ContextChecks = _readiness?.Checks ?? 0, ContextReuses = _readiness?.Reuses ?? 0,
+            SceneListBuilds = _sceneBuilds, SceneListReuses = _sceneReuses,
+            SceneCandidates = _sceneCandidates, ProbePending = _probes != null
         }, () => _rainEvidence.Values, ProtectionStatus, () =>
         {
             var counts = _exposure.Counts(_eligible, now);
@@ -624,34 +737,25 @@ internal sealed class WeatherGuardController : IDisposable
         return new() { ["missing_dependency"] = "not_found_in_sample" };
     }
 
-    private static bool TerrainReady(ZDO zdo, ZoneSystem zones)
+    private bool TerrainReady(ZDO zdo, ZoneSystem zones)
     {
+        if (_terrainFrame != Time.frameCount) { _terrainChecks.Clear(); _terrainFrame = Time.frameCount; }
         var sector = zdo.GetSector();
+        if (_terrainChecks.TryGetValue(sector, out bool cached)) return cached;
         // Support can cross sector edges: do not take ownership with only the central terrain loaded.
         for (int x = sector.x - 1; x <= sector.x + 1; x++)
         for (int y = sector.y - 1; y <= sector.y + 1; y++)
-            if (!zones.IsZoneLoaded(new Vector2s(x, y))) return false;
-        return true;
+            if (!zones.IsZoneLoaded(new Vector2s(x, y))) { _terrainChecks[sector] = false; return false; }
+        _terrainChecks[sector] = true; return true;
     }
     private bool ContextReady(ZDO zdo, ZNetScene scene, ZoneSystem zones)
     {
-        RefreshContextMask();
-        var sector = zdo.GetSector();
-        if (_readyContexts.TryGetValue(sector, out bool ready)) return ready;
-        ready = TerrainReady(zdo, zones);
-        if (ready)
-        {
-            _contextObjects.Clear();
-            WorldObjectProvider.Current.For("WeatherGuard").Query(sector, new SimulationDistance(1, 0), _contextObjects);
-            foreach (var candidate in _contextObjects)
-                if (RequiresContext(candidate, scene) && scene.FindInstance(candidate) == null) { ready = false; break; }
-        }
-        _readyContexts.Add(sector, ready);
-        return ready;
+        RefreshContextMask(); EnsureSelections();
+        return TerrainReady(zdo, zones) && _readiness!.Ready(zdo.GetSector());
     }
     private bool RequiresContext(ZDO zdo, ZNetScene scene)
     {
-        int mask = RefreshContextMask();
+        int mask = _classifiedContextMask;
         int id = zdo.GetPrefab();
         if (_contextPrefabs.TryGetValue(id, out bool required)) return required;
         var prefab = PrefabRegistry.Current.Prefab(id);
@@ -674,7 +778,9 @@ internal sealed class WeatherGuardController : IDisposable
         if (mask != _classifiedContextMask)
         {
             _contextPrefabs.Clear();
-            _readyContexts.Clear();
+            _readiness?.Dispose(); _readiness = null;
+            _sceneSelection?.Dispose(); _sceneSelection = null; _sceneStale = true;
+            _terrainChecks.Clear();
             _classifiedContextMask = mask;
         }
         return mask;
@@ -684,38 +790,98 @@ internal sealed class WeatherGuardController : IDisposable
     internal void LoadTerrain()
     {
         if (!Running || ZoneSystem.instance == null || !ZoneSystem.instance.LocationsGenerated) return;
+        TerrainContext.ThrowIfFailed();
         float now = Time.unscaledTime;
         if (!ModuleScheduler.Current.Due(this, "terrain", now, .1f)) return;
-        foreach (var position in _positions) _createZones(ZoneSystem.instance, position);
+        foreach (var position in _positions)
+        {
+            using var measured = ServerPerformance.MeasureNativeContext();
+            using var timing = PerformanceStages.Measure("WeatherGuard", "terrain_refresh", 1);
+            _createZones(ZoneSystem.instance, position);
+        }
     }
     internal void AddInstances(List<ZDO> near, List<ZDO> distant)
     {
-        if (!Running) return;
+        if (!Running || _positions.Count == 0 || !_scenePass.Enter(Time.frameCount, near, ZDOMan.instance)) return;
+        using var timing = PerformanceStages.Measure("WeatherGuard", "scene_extension", _near.Count + _distant.Count);
+        RefreshContextMask(); EnsureSelections();
         var seen = _instanceSeen; seen.Clear();
         foreach (var zdo in near) seen.Add(zdo.m_uid);
         foreach (var zdo in distant) seen.Add(zdo.m_uid);
-        foreach (var zdo in _near) if (zdo.IsValid() && seen.Add(zdo.m_uid)) near.Add(zdo);
-        foreach (var zdo in _distant) if (zdo.IsValid() && seen.Add(zdo.m_uid)) distant.Add(zdo);
+        var distance = ZNet.instance.GetSyncedSimulationDistance();
+        var selection = _sceneSelection!;
+        // Drain pending record changes first so Revision reflects current membership.
+        selection.Refresh();
+        int frame = Time.frameCount;
+        bool reuse = WeatherGuardRules.CanReuseSceneList(_reuseSceneLists, _sceneStale, frame - _sceneFrame, SceneReuseFrames,
+            WorldObjectProvider.Current.Ready && _presence.HasJoinedPlayers == true, selection.Indexed, ReferenceEquals(_sceneBuiltFor, selection),
+            _sceneRevision, selection.Revision, (_sceneNearDistance, _sceneTotalDistance, _sceneClassic),
+            (distance.NearSimulationDistance, distance.TotalSimulationDistance, distance.IsClassic), _sceneZones.Count, _positions.Count);
+        for (int i = 0; reuse && i < _positions.Count; i++) if (!WeatherGuardRules.SameSceneZone(ZoneSystem.GetZone(_positions[i]), _sceneZones[i])) reuse = false;
+        // A pooled record can be reused for another object. Check its original identity before use.
+        for (int i = 0; reuse && i < _sceneNear.Count; i++)
+            reuse = WeatherGuardRules.CanReuseSceneRecord(_sceneNear[i].IsValid(), _sceneNear[i].m_uid, _sceneNearIds[i], true);
+        for (int i = 0; reuse && i < _sceneDistant.Count; i++)
+            reuse = WeatherGuardRules.CanReuseSceneRecord(_sceneDistant[i].IsValid(), _sceneDistant[i].m_uid, _sceneDistantIds[i], _sceneDistant[i].Distant);
+        if (reuse) _sceneReuses++;
+        else
+        {
+            _sceneNear.Clear(); _sceneDistant.Clear(); _sceneNearIds.Clear(); _sceneDistantIds.Clear(); _sceneZones.Clear();
+            foreach (var position in _positions)
+            {
+                var zone = ZoneSystem.GetZone(position);
+                _sceneZones.Add(zone);
+                selection.Query(zone, distance, _sceneNear, _sceneDistant);
+            }
+            foreach (var zdo in _sceneNear) _sceneNearIds.Add(zdo.m_uid);
+            foreach (var zdo in _sceneDistant) _sceneDistantIds.Add(zdo.m_uid);
+            // Seeding and expiry can advance Revision during the queries.
+            _sceneBuiltFor = selection; _sceneRevision = selection.Revision;
+            _sceneNearDistance = distance.NearSimulationDistance; _sceneTotalDistance = distance.TotalSimulationDistance; _sceneClassic = distance.IsClassic;
+            _sceneStale = false; _sceneFrame = frame; _sceneBuilds++;
+        }
+        _sceneCandidates = _sceneNear.Count + _sceneDistant.Count;
+        foreach (var zdo in _sceneNear) if (zdo.IsValid() && seen.Add(zdo.m_uid)) near.Add(zdo);
+        foreach (var zdo in _sceneDistant) if (zdo.IsValid() && seen.Add(zdo.m_uid)) distant.Add(zdo);
         // Vanilla may create drops/fragments/new objects between our one-second scans.
         // Keep those live instances until the next scan; otherwise RemoveObjects could
         // delete server-owned nonpersistent drops outside the server reference area.
-        WorldObjectProvider.Current.IncludeLiveInstances(near, distant, _positions);
+        WorldObjectProvider.Current.IncludeLiveInstances(near, distant, _positions, seen);
+    }
+    private bool SceneRequired(ZDO record)
+    {
+        // Extend native coverage for protection dependencies and server simulation,
+        // rather than instantiating every remote client-owned creature/effect.
+        if (record.GetOwner() == ServerId || RequiresContext(record, ZNetScene.instance) || Eligibility(record, ZNetScene.instance) == "eligible") return true;
+        var prefab = PrefabRegistry.Current.Prefab(record.GetPrefab());
+        return PrefabRegistry.Component<TerrainComp>(prefab) != null || PrefabRegistry.Component<TerrainModifier>(prefab) != null;
     }
 
     private void Release(ZDOID id)
     {
         if (!_protected.TryGetValue(id, out var zdo)) return;
         _protected.Remove(id);
-        if (zdo.IsValid() && zdo.GetOwner() == ServerId) ObjectAuthority.Assign(zdo, 0L);
-        if (zdo.IsValid()) _manager.ForceSendZDO(id);
+        if (zdo.IsValid() && zdo.m_uid == id && ReferenceEquals(_manager.GetZDO(id), zdo))
+        {
+            if (zdo.GetOwner() == ServerId) ObjectAuthority.Assign(zdo, 0L);
+            _manager.ForceSendZDO(id);
+        }
         _released++;
     }
     public void Dispose()
     {
+        _scenePass.Clear();
+        _sceneNear.Clear(); _sceneDistant.Clear(); _sceneNearIds.Clear(); _sceneDistantIds.Clear(); _sceneZones.Clear();
+        _sceneBuiltFor = null; _sceneStale = true;
+        _processing?.Dispose(); _processing = null;
+        _probes?.Dispose(); _probes = null; _probeIds.Clear();
+        _readiness?.Dispose(); _readiness = null;
+        _sceneSelection?.Dispose(); _sceneSelection = null;
+        _context?.Weather.Clear();
         _diagnostics.Dispose();
         if (Active == this) Active = null;
         bool succeeded = true;
-        try { succeeded = ModuleCleanup.Run(_log, _module.Name, _patches.Dispose); }
+        try { succeeded = ModuleCleanup.Run(_log, _module.Name, _patches.Dispose, () => _terrain?.Dispose()); }
         finally
         {
             // With guards inactive, let vanilla choose a new owner even if unpatching failed.
@@ -724,11 +890,13 @@ internal sealed class WeatherGuardController : IDisposable
                 Exception? firstError = null;
                 int failures = 0;
                 // Release through the captured world, never a replacement world's manager.
-                foreach (var zdo in _protected.Values)
+                foreach (var pair in _protected)
                 {
+                    var zdo = pair.Value;
                     try
                     {
-                        if (!zdo.IsValid() || !ReferenceEquals(_manager, ZDOMan.instance) || zdo.GetOwner() != ServerId) continue;
+                        if (!zdo.IsValid() || zdo.m_uid != pair.Key || !ReferenceEquals(_manager, ZDOMan.instance) ||
+                            !ReferenceEquals(_manager.GetZDO(pair.Key), zdo) || zdo.GetOwner() != ServerId) continue;
                         ObjectAuthority.Assign(zdo, 0L);
                         _manager.ForceSendZDO(zdo.m_uid);
                     }

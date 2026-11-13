@@ -1,5 +1,7 @@
 # ForestRenewal
 
+New background renewal work pauses during native raids and observed combat. Save acknowledgements and already-staged placement completion keep their existing safety path. See [performance observations](../server-setup.md#performance-observations).
+
 Renews supported trees from either a stump left behind or its confirmed-cleared location. It finds existing/new stumps, waits, and has a configurable chance to replace the stump with the corresponding vanilla sapling. Removing a tracked stump keeps the same renewal timer and chance decision. Native biome, sunlight, spacing and growth rules remain.
 
 ![ForestRenewal: observe eligible stumps, apply delay and clearance checks, then place a supported sapling](../images/forest-renewal-workflow.jpg)

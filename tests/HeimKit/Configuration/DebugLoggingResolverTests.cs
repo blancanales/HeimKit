@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using HeimKit.Features.AFKRaidWatch;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -17,11 +24,11 @@ internal static class DebugLoggingResolverTests
         var path = Path.Combine(root, "heimkit.cfg");
         using var logger = new ManualLogSource("Debug suppression checks");
         var messages = new List<(string Text, LogLevel Level)>();
-        logger.LogEvent += (_, args) => messages.Add((args.Data.ToString()!, args.Level));
+        logger.LogEvent += (_, args) => messages.Add((LogCapture.Text(args.Data), args.Level));
         try
         {
             // Production constructors bind all settings before startup, including disabled modules.
-            void BindModules() => ConfigurationLoader.Load(root, logger, config => new HeimKit.Shared.IServerModule[] {
+            void BindModules() => ConfigurationLoader.Load(root, logger, config => new HeimKit.Core.Scheduling.IServerModule[] {
                 new InfiniteTorches(config, logger, PlayerServicesTests.For(config, logger)), new WeatherGuard(config, logger, PlayerServicesTests.For(config, logger)), new AFKNightWatch(config, logger, PlayerServicesTests.For(config, logger)), new AFKRaidWatch(config, logger, PlayerServicesTests.For(config, logger)) });
             string SavedValue(string section, string key)
             {
@@ -133,11 +140,11 @@ internal static class DebugLoggingResolverTests
                 }
             }
             // Suppression leaves ordinary lifecycle and version warnings visible.
-            File.WriteAllText(path, "[Diagnostics]\nDebugMode = true\n[Torches]\nEnabled = true\nDisableDebugLogging = true\n[WeatherGuard]\nEnabled = true\nDisableDebugLogging = true\n");
+            File.WriteAllText(path, "[Compatibility]\nAllowUnverifiedVersions = false\n[Diagnostics]\nDebugMode = true\n[Torches]\nEnabled = true\nDisableDebugLogging = true\n[WeatherGuard]\nEnabled = true\nDisableDebugLogging = true\n");
             var config = new ConfigFile(path, false) { SaveOnConfigSet = false };
             var torches = new InfiniteTorches(config, logger, PlayerServicesTests.For(config, logger));
             var weather = new WeatherGuard(config, logger, PlayerServicesTests.For(config, logger));
-            messages.Clear(); torches.Initialize("1.0.20"); weather.Initialize("1.0.20");
+            messages.Clear(); torches.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); weather.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
             Check(torches.IsActive && weather.IsActive && messages.Count(m => m.Text.EndsWith(": Enabled.")) == 2 &&
                 messages.Where(m => m.Level == LogLevel.Debug).Count() == 2 && messages.Where(m => m.Level == LogLevel.Debug).All(m => m.Text.Contains("Debug logging suppressed by DisableDebugLogging")), "Suppression changed gameplay enablement or leaked recurring diagnostics.");
             torches.Initialize("unsupported"); weather.Initialize("unsupported");

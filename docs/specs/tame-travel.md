@@ -136,6 +136,8 @@ Reservation-end diagnostics capture a controller-owned snapshot before cleanup, 
 
 ## HeimKit Core integration
 
+Core IncomingPackets supplies the shared incoming ZDO/routed hook dispatch, current ready-peer provenance, routed-header cache and retained-ID inspection. This module registers and releases only its own handlers; its existing filtering, application callbacks, failure path and nested state follow the [packet dispatch contract](../architecture.md#core-layer-and-anti-duplication).
+
 The performance rebuild in `src/HeimKit/Features/` consumes CandidateSubscription for portals, animals and placement context, PrefabRegistry native animal/portal geometry, NativeAccess FieldRefs/delegates, ObjectAuthority/ZdoPackets/ZdoReplication, PlayerServices routed/position observations and ModuleScheduler. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
 
 Native field access is supplied by Core NativeAccess through runtime-compatible cached ref-getters; feature controllers retain the existing field types and gameplay operations.

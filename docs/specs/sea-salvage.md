@@ -22,6 +22,8 @@ Shared terrain preparation caches terrain-related prefab classification and reus
 
 Loose-drop discovery uses the shared spatial candidate index, seeded on activation and entry into another player sector. Successful replicated/local changes update it, including ownership release and movement of shallow drops. Client-owned and shallow drops remain indexed. Once seeded, an unchanged area without candidates performs no repeated broad discovery or terrain query. Settling, depth, native item validation and transfer fencing retain their existing cadence. Full terrain context is queried only for a candidate reaching the terrain stage.
 
+New scans and recovery transfers use cooperative admission and pause during native raids or detected combat. Cleanup of consumed sources continues; committed cargo and native world state are preserved. Quiet resumption follows the ordinary bounded scan interval.
+
 ## Player-service integration
 
 Follow the [required feature hookup](../architecture.md#required-feature-hookup). Plugin injects its existing PlayerServices. The module owns one presence subscription and at most one controller per world. Enablement, exact game compatibility, dedicated-server world readiness and joined-world presence gate gameplay independently. False or unknown presence disposes the controller before acknowledging pause; reconnect creates a fresh controller. World replacement disposes old resources. No activity lease or AFK inference is needed. Ready is reported once independently of presence. There is no independent empty-server gameplay responsibility.

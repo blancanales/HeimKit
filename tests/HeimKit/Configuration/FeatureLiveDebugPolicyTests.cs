@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
@@ -6,7 +13,6 @@ using HeimKit.Features.AFKNightWatch;
 using HeimKit.Features.AFKNightWatch.Models;
 using HeimKit.Features.AFKRaidWatch;
 using HeimKit.Features.AFKRaidWatch.Models;
-using HeimKit.Shared;
 
 internal static class FeatureLiveDebugPolicyTests
 {
@@ -15,7 +21,7 @@ internal static class FeatureLiveDebugPolicyTests
     {
         using var log = new ManualLogSource("Other feature live policy checks");
         var records = new List<(LogLevel Level, string Text)>();
-        log.LogEvent += (_, e) => records.Add((e.Level, e.Data.ToString()!));
+        log.LogEvent += (_, e) => records.Add((e.Level, LogCapture.Text(e.Data)));
         string[] names = { "InfiniteTorches", "AFKNightWatch", "AFKRaidWatch" };
         foreach (int selected in Enumerable.Range(0, 3))
         {
@@ -32,7 +38,7 @@ internal static class FeatureLiveDebugPolicyTests
             var sd = new AFKNightWatchDiagnostics(log, sleep.DebugLogging);
             var rd = new AFKRaidWatchDiagnostics(log, raid.DebugLogging);
             Action<float>[] emit = {
-                now => td.Report(now, () => "Pending refill evidence; examined_pass=1"),
+                now => td.Report(now, () => "Pending refill evidence; examined=1"),
                 now => sd.Report(now, () => new NightWatchStatus { Players = 3, Votes = 1,
                     Vote = new SleepDecision { Participants = 3, Sleepers = 2, Required = 2, Met = true } }),
                 now => rd.Report(now, () => new RaidWatchStatus { Connected = 3, Candidates = 1, Suppressed = 1 })
@@ -41,7 +47,7 @@ internal static class FeatureLiveDebugPolicyTests
             Check(records.Count == 0, "All-off policies emitted Debug");
             switches[selected].Value = true;
             foreach (var write in emit) write(1);
-            Check(records.Count > 0 && records.All(r => r.Level == LogLevel.Debug && r.Text.StartsWith(names[selected] + ":")),
+            Check(records.Count > 0 && records.All(r => r.Level == LogLevel.Debug && r.Text.StartsWith(names[selected] + ".")),
                 "Feature-only enablement failed or enabled another feature: " + names[selected]);
             switches[selected].Value = false; records.Clear(); emit[selected](62);
             Check(!policies[selected].Enabled && records.Count == 0, "Feature retained enabled snapshot: " + names[selected]);

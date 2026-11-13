@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Features.InfiniteTorches;
@@ -10,8 +17,8 @@ internal static class InfiniteTorchesTests
         // Exercise actual feature configuration and startup logs without a running Unity world.
         var cases = new[]
         {
-            (Enabled: true, Version: "1.0.20", Active: true, Message: "InfiniteTorches: Enabled."),
-            (Enabled: false, Version: "1.0.20", Active: false, Message: "InfiniteTorches: Disabled."),
+            (Enabled: true, Version: HeimKit.Configuration.GameVersionCompatibility.AuditedVersion, Active: true, Message: "InfiniteTorches: Enabled."),
+            (Enabled: false, Version: HeimKit.Configuration.GameVersionCompatibility.AuditedVersion, Active: false, Message: "InfiniteTorches: Disabled."),
             (Enabled: true, Version: "1.0.18", Active: false, Message: "DISABLED (unsupported Valheim version 1.0.18"),
             (Enabled: false, Version: "1.0.18", Active: false, Message: "InfiniteTorches: Disabled.")
         };
@@ -21,10 +28,11 @@ internal static class InfiniteTorchesTests
             {
                 SaveOnConfigSet = false
             };
+            config.Bind("Compatibility", "AllowUnverifiedVersions", false);
             config.Bind("Torches", "Enabled", test.Enabled);
             using var logger = new ManualLogSource("HeimKit checks");
             var messages = new List<string>();
-            logger.LogEvent += (_, args) => messages.Add(args.Data.ToString()!);
+            logger.LogEvent += (_, args) => messages.Add(LogCapture.Text(args.Data));
             var feature = new InfiniteTorches(config, logger, PlayerServicesTests.For(config, logger));
             feature.Initialize(test.Version);
             if (feature.IsActive != test.Active || messages.Count != (test.Enabled && !test.Active ? 2 : 1) || !messages.Any(m => m.Contains(test.Message)))
@@ -47,7 +55,7 @@ internal static class InfiniteTorchesTests
         if (!suppliedConfig.TryGetEntry<bool>("Diagnostics", "DebugMode", out var diagnostics) || diagnostics.Value)
             throw new Exception("Supplied configuration must default DebugMode off.");
         suppliedConfig.Bind("Torches", "Enabled", true).Value = false;
-        suppliedFeature.Initialize("1.0.20");
+        suppliedFeature.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
         if (suppliedFeature.IsActive) throw new Exception("Existing disabled setting was overridden.");
         System.Console.WriteLine("PASS: supplied heimkit.cfg defaults debug mode off and respects an existing disabled setting.");
 

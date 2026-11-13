@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System.Reflection;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -8,7 +15,6 @@ using HeimKit.Features.SeaSalvage;
 using HeimKit.Features.SeaSalvage.Models;
 using HeimKit.Features.TameTravel;
 using HeimKit.Features.TameTravel.Models;
-using HeimKit.Shared;
 using UnityEngine;
 
 internal static class WorldAdditionsTests
@@ -65,26 +71,38 @@ internal static class WorldAdditionsTests
     {
         DiagnosticLog.StartSession();
         using var log = new ManualLogSource("Traversal evidence checks");
-        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(args.Data.ToString()!);
+        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(LogCapture.Text(args.Data));
         var config = new ConfigFile(Path.Combine(Path.GetTempPath(), "heimkit-traversal-" + Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         var debug = config.Bind("Diagnostics", "DebugMode", true); float now = 1;
         var diagnostics = new TameTravelDiagnostics(log, new HeimKit.Configuration.DebugLoggingPolicy(debug, false), () => now);
         var peer = (ZNetPeer)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(ZNetPeer)); peer.m_uid = 123; peer.m_playerName = "Trevor";
         for (int i = 0; i < 30; i++) diagnostics.Traversal(peer, "source_entry", "outside_trigger", new ZDOID(456, 1));
-        Check(lines.Count == 1 && lines[0].Contains("player=Trevor") && lines[0].Contains("source=456:1"), "Repeated source misses flooded or lost actor/source identity.");
+        Check(lines.Count == 1 && lines[0].Contains("Portal travel for Trevor: outside trigger.") && lines[0].Contains("source=456:1"), "Repeated source misses flooded or lost actor/source identity.");
         diagnostics.Traversal(peer, "source_entry", "portal_pair_unavailable", new ZDOID(456, 1));
         diagnostics.Traversal(peer, "source_entry", "outside_trigger", new ZDOID(456, 1));
         Check(lines.Count == 2, "A pair failure was hidden or routine source polling bypassed its separate interval.");
         diagnostics.Traversal(peer, "consent_ended", "animal_left_wait_area", animal: new ZDOID(456, 2), transition: true);
         var journey = new PortalJourney { Peer = peer, Name = "Trevor", Entered = 0, Arrived = 3, Exit = Vector3.zero };
         diagnostics.Cancel(journey, "destination_distance_exceeded", new Vector3(9, 0, 0), 11);
-        Check(lines.Count == 4 && lines[^1].Contains("destination_distance_m=9") && lines[^1].Contains("entry_age_s=11"), "Cancellation distance/timing or consent-loss evidence was lost.");
+        Check(lines.Count == 4 && lines[^1].Contains("distance_m=9.0") && lines[^1].Contains("entry_age_s=11"), "Cancellation distance/timing or consent-loss evidence was lost.");
         for (int i = 0; i < 30; i++) diagnostics.Traversal(peer, "arrival", "linked_exit_observed", transition: true);
         Check(lines.Count == 7, "Critical traversal evidence exceeded six records or routine source polling consumed its allowance.");
         diagnostics.Command(peer, "request_received", "Wait"); Check(lines.Count == 8, "Traversal events consumed the command budget.");
         now = 301; diagnostics.Traversal(peer, "source_entry", "outside_trigger", new ZDOID(456, 1));
         Check(lines.Count == 9, "Unchanged source-gate heartbeat was lost.");
         debug.Value = false; diagnostics.Traversal(peer, "source_entry", "no_portal_nearby"); Check(lines.Count == 9, "Suppressed traversal evidence emitted output.");
+        debug.Value = true; HeimKit.Configuration.DiagnosticsSettings.Bind(config);
+        config.Bind("Diagnostics", "DebugVerbosity", HeimKit.Configuration.DebugVerbosity.Normal).Value = HeimKit.Configuration.DebugVerbosity.Verbose;
+        try
+        {
+            lines.Clear();
+            new TameTravelDiagnostics(log, new HeimKit.Configuration.DebugLoggingPolicy(debug, false), () => now)
+                .Traversal(peer, "source_entry", "no_portal_nearby", fields: new (string, object?)[] { ("pos", new Vector3(1, 2, 3)), ("followers", 1) });
+            Check(lines.Count == 2 && lines[0].Contains("No portal near Trevor; travel not started.") &&
+                lines.All(line => !line.Contains("_now=")) && lines[1].Contains("pos=1.0,2.0,3.0 followers=1"),
+                "Traversal supporting evidence retained retired field suffixes or lost typed positions.");
+        }
+        finally { config.Bind("Diagnostics", "DebugVerbosity", HeimKit.Configuration.DebugVerbosity.Normal).Value = HeimKit.Configuration.DebugVerbosity.Normal; }
         System.Console.WriteLine("PASS: traversal evidence preserves actor/object identity, distance and time, combines repeated misses, retains consent transitions and has an independent bounded stream with suppression.");
     }
     private static void NativeHealth()
@@ -111,18 +129,18 @@ internal static class WorldAdditionsTests
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         var compiler = (TerrainComp)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(TerrainComp));
-        Check(!WorldTerrainContext.CompilerInitialized(compiler), "An early-return terrain compiler was considered initialized.");
+        Check(!TerrainContext.CompilerInitialized(compiler), "An early-return terrain compiler was considered initialized.");
         typeof(TerrainComp).GetField("m_initialized", flags)!.SetValue(compiler, true);
-        Check(!WorldTerrainContext.CompilerInitialized(compiler), "A compiler without its map and arrays was considered initialized.");
+        Check(!TerrainContext.CompilerInitialized(compiler), "A compiler without its map and arrays was considered initialized.");
         typeof(TerrainComp).GetField("m_hmap", flags)!.SetValue(compiler, System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(Heightmap)));
         foreach (string field in new[] { "m_modifiedHeight", "m_levelDelta", "m_smoothDelta", "m_modifiedPaint", "m_paintMask" })
         {
             var info = typeof(TerrainComp).GetField(field, flags)!;
             info.SetValue(compiler, Array.CreateInstance(info.FieldType.GetElementType()!, 1));
         }
-        Check(WorldTerrainContext.CompilerInitialized(compiler), "Initialized native compiler state was rejected.");
+        Check(TerrainContext.CompilerInitialized(compiler), "Initialized native compiler state was rejected.");
         typeof(TerrainComp).GetField("m_modifiedHeight", flags)!.SetValue(compiler, Array.Empty<bool>());
-        Check(!WorldTerrainContext.CompilerInitialized(compiler), "Empty terrain arrays passed readiness.");
+        Check(!TerrainContext.CompilerInitialized(compiler), "Empty terrain arrays passed readiness.");
         Check(typeof(TerrainComp).GetMethod("Awake", flags) != null, "Native terrain initialization entry point is unavailable.");
         System.Console.WriteLine("PASS: terrain readiness rejects missing/empty compiler state before load and resolves the native initialization path; Unity initialization itself is not executed.");
     }
@@ -149,7 +167,7 @@ internal static class WorldAdditionsTests
     private static void RenewalEvidence()
     {
         using var log = new ManualLogSource("Renewal evidence checks");
-        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(args.Data.ToString()!);
+        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(LogCapture.Text(args.Data));
         var config = new ConfigFile(Path.Combine(Path.GetTempPath(), "heimkit-renewal-evidence-" + Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         var debug = config.Bind("Diagnostics", "DebugMode", true);
         var diagnostics = new ForestRenewalDiagnostics(log, new HeimKit.Configuration.DebugLoggingPolicy(debug, false));
@@ -171,13 +189,13 @@ internal static class WorldAdditionsTests
         { packet.Write(id); packet.Write((ushort)7); packet.Write(9U); packet.Write(3L); packet.Write(new Vector3(1, 2, 3)); var payload = new ZPackage(); payload.Write("opaque metadata"); packet.Write(payload); }
         packet.Write(ZDOID.None); packet.SetPos(0); var original = packet.GetArray();
         int callbacks = 0;
-        var filtered = NativeZdoPackets.FilterData(packet, id => id == guarded, out int blocked, (_, _, _) => callbacks++);
+        var filtered = ZdoPackets.FilterData(packet, id => id == guarded, out int blocked, (_, _, _) => callbacks++);
         Check(blocked == 2 && callbacks == 1 && packet.GetPos() == 0 && packet.GetArray().SequenceEqual(original), "Authority filtering changed original data or callback counts.");
         Check(filtered.ReadInt() == 0 && filtered.ReadZDOID() == ordinary && filtered.ReadUShort() == 7 && filtered.ReadUInt() == 9 && filtered.ReadLong() == 3, "Unrelated native header was changed.");
         filtered.ReadVector3(); Check(filtered.ReadPackage().ReadString() == "opaque metadata" && filtered.ReadZDOID().IsNone() && filtered.GetPos() == filtered.Size(), "Opaque record or terminator lost.");
         var malformed = new ZPackage(original.Take(original.Length - 1).ToArray());
         callbacks = 0; bool rejected = false;
-        try { NativeZdoPackets.FilterData(malformed, _ => true, out _, (_, _, _) => callbacks++); }
+        try { ZdoPackets.FilterData(malformed, _ => true, out _, (_, _, _) => callbacks++); }
         catch (IOException) { rejected = true; }
         Check(rejected && callbacks == 0 && malformed.GetPos() == 0, "Malformed packet partially changed authority metadata.");
         System.Console.WriteLine("PASS: new shared authority filtering preserves unrelated payloads and rejects incomplete packets without metadata mutation.");
@@ -263,7 +281,7 @@ internal static class WorldAdditionsTests
         {
             string path = Path.Combine(directory, "heimkit.cfg");
             using var log = new ManualLogSource("HeimMender config checks");
-            var messages = new List<string>(); log.LogEvent += (_, args) => messages.Add(args.Data.ToString()!);
+            var messages = new List<string>(); log.LogEvent += (_, args) => messages.Add(LogCapture.Text(args.Data));
             var config = new ConfigFile(path, false) { SaveOnConfigSet = false }; var settings = new HeimMenderSettings(config, log); config.Save(); config.SaveOnConfigSet = true;
             using var observer = new HeimMenderConfiguration(config, settings, log);
             void Read(string text, float now)
@@ -297,15 +315,15 @@ internal static class WorldAdditionsTests
     {
         DiagnosticLog.StartSession();
         using var log = new ManualLogSource("Timing checks");
-        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(args.Data.ToString()!);
+        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(LogCapture.Text(args.Data));
         var config = new ConfigFile(Path.Combine(Path.GetTempPath(), "heimkit-timing-" + Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         var debug = config.Bind("Diagnostics", "DebugMode", true);
         var timing = new ProcessingTiming(log, "HeimMender", new HeimKit.Configuration.DebugLoggingPolicy(debug, false));
         var scope = timing.Measure(0, () => 5); scope.Dispose(); scope.Dispose();
         using (timing.Measure(1, () => 5)) { }
-        Check(lines.Count == 1 && lines[0].Contains("duration_max_ms="), "Timing duplicated a disposed scope or exceeded its reporting interval.");
+        Check(lines.Count == 1 && lines[0].Contains(" ms."), "Timing duplicated a disposed scope or exceeded its reporting interval.");
         using (timing.Measure(60, () => 5)) { }
-        Check(lines.Count == 2 && lines[1].Contains("passes_interval=2") && lines[1].Contains("duration_avg_ms="), "Timing interval omitted measurements.");
+        Check(lines.Count == 2 && lines[1].Contains("2 passes in the last minute, avg"), "Timing interval omitted measurements.");
         debug.Value = false;
         using (timing.Measure(120, () => 5)) { }
         Check(lines.Count == 2, "Disabled diagnostic policy emitted timing data.");
@@ -314,8 +332,8 @@ internal static class WorldAdditionsTests
     private static void AuthorityTargets()
     {
         // Resolve the actual constructor's patch set, rather than checking names exist.
-        var targets = ServerObjectAuthority.NativePatches();
-        Check(targets.Length == 6 && targets.Select(t => t.Target).Distinct().Count() == 6, "Shared authority patch set is incomplete or duplicates a method.");
+        var targets = ObjectAuthority.NativePatches();
+        Check(targets.Length == 4 && targets.Select(t => t.Target).Distinct().Count() == 4, "Shared authority patch set is incomplete or duplicates a method.");
         var outside = targets.Single(t => t.Target.Name == "OutsideActiveArea").Target;
         Check(!outside.IsStatic && outside.ReturnType == typeof(bool) && outside.GetParameters().Select(p => p.ParameterType).SequenceEqual(new[] { typeof(Vector3) }),
             "Authority selected the static two-argument active-area overload.");
@@ -358,16 +376,16 @@ internal static class WorldAdditionsTests
         Check(follow.ReturnType == typeof(void) && move.ReturnType == typeof(bool), "Follow movement native signatures changed.");
         _ = move.CreateDelegate(typeof(Func<BaseAI, float, Vector3, float, bool, bool>));
         using var log = new ManualLogSource("Follow spacing checks");
-        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(args.Data.ToString()!);
+        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(LogCapture.Text(args.Data));
         var config = new ConfigFile(Path.Combine(Path.GetTempPath(), "heimkit-follow-" + Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         var debug = config.Bind("Diagnostics", "DebugMode", true);
         float now = 1;
         var diagnostics = new TameTravelDiagnostics(log, new HeimKit.Configuration.DebugLoggingPolicy(debug, false), () => now);
         diagnostics.EndFollowing(diagnostics.BeginFollowing(), 2);
         diagnostics.EndFollowing(diagnostics.BeginFollowing(), 2);
-        Check(lines.Count == 1 && lines[0].Contains("Follow movement timing") && lines[0].Contains("followers_now=2"), "Follow timing exceeded its interval or omitted scope.");
+        Check(lines.Count == 1 && lines[0].Contains("1 follow updates in the last minute") && lines[0].Contains("scope=2"), "Follow timing exceeded its interval or omitted scope.");
         now = 61; diagnostics.EndFollowing(diagnostics.BeginFollowing(), 2);
-        Check(lines.Count == 2 && lines[1].Contains("calls_interval=2"), "Follow timing lost its aggregated interval.");
+        Check(lines.Count == 2 && lines[1].Contains("2 follow updates in the last minute"), "Follow timing lost its aggregated interval.");
         debug.Value = false; now = 121;
         Check(diagnostics.BeginFollowing() == 0, "Suppressed follow timing still collected measurements.");
         diagnostics.EndFollowing(1, 2); Check(lines.Count == 2, "Suppressed follow timing emitted output.");
@@ -376,7 +394,7 @@ internal static class WorldAdditionsTests
     private static void CommandEvidence()
     {
         using var log = new ManualLogSource("Animal command evidence checks");
-        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(args.Data.ToString()!);
+        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(LogCapture.Text(args.Data));
         var config = new ConfigFile(Path.Combine(Path.GetTempPath(), "heimkit-command-" + Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         var debug = config.Bind("Diagnostics", "DebugMode", true);
         float now = 1;
@@ -400,7 +418,7 @@ internal static class WorldAdditionsTests
         var animal = (ZDO)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(ZDO)); animal.m_uid = new ZDOID(123, 22);
         diagnostics.Selection(peer, TameOrder.Follow, 100, 2, 1);
         diagnostics.Candidate(peer, TameOrder.Follow, animal, 3, 8, "eligible");
-        Check(lines.Count == 2 && lines[1].Contains("health_saved=false") && lines[1].Contains("animal=123:22") && lines[1].Contains("distance_m=3"), "Candidate identity, distance or native omitted-health evidence was lost.");
+        Check(lines.Count == 2 && !lines[1].Contains("health_saved=") && lines[1].Contains("animal=123:22") && lines[1].Contains("distance_m=3"), "Candidate identity, distance or native omitted-health evidence was lost.");
         for (int i = 0; i < 20; i++) diagnostics.Candidate(peer, TameOrder.Follow, animal, 3, 8, "eligible");
         Check(lines.Count == 8, "Selection evidence exceeded its shared eight-record budget.");
         diagnostics.Command(peer, "request_received", "Stay");
@@ -448,7 +466,7 @@ internal static class WorldAdditionsTests
     {
         DiagnosticLog.StartSession();
         using var log = new ManualLogSource("Transfer diagnosis checks");
-        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(args.Data.ToString()!);
+        var lines = new List<string>(); log.LogEvent += (_, args) => lines.Add(LogCapture.Text(args.Data));
         var config = new ConfigFile(Path.Combine(Path.GetTempPath(), "heimkit-transfer-diagnostics-" + Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         var policy = new HeimKit.Configuration.DebugLoggingPolicy(config.Bind("Diagnostics", "DebugMode", true), false);
         var diagnostics = new TameTravelDiagnostics(log, policy, () => 1);
@@ -457,10 +475,21 @@ internal static class WorldAdditionsTests
         var snapshot = new TransferSnapshot { Reason = "follow_changed", SameRecord = true, Owner = 1234, DataRevision = 99, OwnerRevision = 5,
             Position = new Vector3(1, 2, 3), Follow = "", Health = 200, Tamed = true, Rider = 0, PhaseAge = .5f, BarrierEchoed = true };
         diagnostics.Transfer(transfer, false, snapshot);
-        Check(lines.Count == 1 && lines[0].Contains("reason=follow_changed") && lines[0].Contains("owner_before_release=1234") &&
-            lines[0].Contains("source_state_observed=true") && lines[0].Contains("barrier_echoed=true") && !lines[0].Contains("owner_now="), "Transfer diagnostics lost the cause or confused pre-release state with cleanup results.");
+        Check(lines.Count == 1 && lines[0].Contains("for Trevor ended — follow changed") && !lines[0].Contains("owner="),
+            "Normal transfer outcome lost its cause or read the released record.");
         for (int i = 0; i < 32; i++) diagnostics.Transfer(transfer, false, snapshot);
         Check(lines.Count == 8, "Detailed transfer diagnostics exceeded the independent ending allowance.");
+        HeimKit.Configuration.DiagnosticsSettings.Bind(config);
+        config.Bind("Diagnostics", "DebugVerbosity", HeimKit.Configuration.DebugVerbosity.Normal).Value = HeimKit.Configuration.DebugVerbosity.Verbose;
+        try
+        {
+            lines.Clear();
+            new TameTravelDiagnostics(log, policy, () => 1).Transfer(transfer, false, snapshot);
+            Check(lines.Count == 2 && lines[1].Contains("reason=follow_changed") && lines[1].Contains("owner=1234") &&
+                lines[1].Contains("position_before_release=1.0,2.0,3.0") && lines[1].Contains("source_state_observed=true") &&
+                lines[1].Contains("barrier_echoed=true"), "Verbose transfer evidence lost its immutable pre-release snapshot.");
+        }
+        finally { config.Bind("Diagnostics", "DebugVerbosity", HeimKit.Configuration.DebugVerbosity.Normal).Value = HeimKit.Configuration.DebugVerbosity.Normal; }
         System.Console.WriteLine("PASS: transfer stop reasons and pre-release evidence survive record cleanup without reading the live record, and remain capped at eight endings per minute.");
     }
 }

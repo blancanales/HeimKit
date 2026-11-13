@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Logging;
 using HeimKit.Features.AFKRaidWatch;
 internal static class SelectionNoticesTests
@@ -6,7 +13,7 @@ internal static class SelectionNoticesTests
     {
         using var log = new ManualLogSource("Raid batch notice checks");
         var messages = new List<(LogLevel Level, string Text)>();
-        log.LogEvent += (_, args) => messages.Add((args.Level, args.Data.ToString()!));
+        log.LogEvent += (_, args) => messages.Add((args.Level, LogCapture.Text(args.Data)));
         var notices = new AFKRaidWatchSelectionNotices(log);
         notices.Excluded(); notices.End(false); notices.Begin(); notices.End(false);
         if (messages.Count != 0) throw new Exception("Outside or empty selections emitted Info.");

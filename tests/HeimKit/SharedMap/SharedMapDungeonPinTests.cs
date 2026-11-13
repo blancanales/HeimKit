@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System.IO.Compression;
 using System.Text;
 using HeimKit.Features.SharedMap;
@@ -37,6 +44,19 @@ internal static class SharedMapDungeonPinTests
             SharedMapDungeonPins.Family("troll Cave") == "Troll Cave" && SharedMapDungeonPins.Family("Burial Chamber 101%") == null &&
             SharedMapDungeonPins.Family("Burial Chamber supplies") == null && SharedMapDungeonPins.Family("Home") == null,
             "Dungeon label recognition accepted arbitrary notes or missed an older percentage label.");
+        Check(SharedMapDungeonPins.Family("Infested Citadel") == "Infested Citadel" &&
+            !SharedMapDungeonPrefab.Labels.ContainsKey("Mistlands_DvergrBossEntrance1"), "Citadel label cleanup or catalog exclusion is missing.");
+        foreach (string label in new[] { "Infested Citadel", "Infested Citadel 50%" })
+        {
+            var retired = new SharedMapDungeonPins(new[] { Marker("a", 0, 0, label), Marker("b", 0, 10, "Infested Mine") });
+            Check(retired.Markers.Single().Name == "Infested Mine" && retired.Suppressed == 0,
+                "A retired Citadel was published or suppressed another entrance.");
+            Check(retired.Obsolete(new MapPin(42, "infested citadel", 10, 100, 0, 2)) &&
+                !retired.Obsolete(new MapPin(42, "infested citadel", 11, 0, 0, 2)) &&
+                !retired.Obsolete(new MapPin(42, "infested citadel", 0, 0, 0, 3)) &&
+                !retired.Obsolete(new MapPin(42, "Troll Cave", 10, 0, 0, 2)),
+                "Retired-label cleanup ignored the distance, label or icon boundary.");
+        }
         // Log-derived old and new publication points for the same dungeon, plus an unrelated local note.
         var markers = new[] { Marker("stable-source", 520.591858f, 441.392029f, "Burial Chamber 0%") };
         var old = new MapPin(2473943127, "Burial Chamber 100%", 522.591858f, 56.3352432f, 441.392029f, 2, true, "Steam_test");
@@ -45,6 +65,12 @@ internal static class SharedMapDungeonPinTests
         var dot = new MapPin(78, "Burial Chamber", old.X, 0, old.Z, 3);
         var distant = new MapPin(79, "Burial Chamber 100%", 600, 0, old.Z, 2);
         var map = new SharedMapExploration(64, 12, 50, .25f);
+        var citadel = Table(new MapPin(SharedMapTableData.DungeonOwner, "Infested Citadel", 0, 0, 0, 2),
+            new MapPin(42, "Infested Citadel 50%", 10, 0, 0, 2),
+            new MapPin(42, "The Queen", 0, 0, 0, (int)Minimap.PinType.Boss));
+        var cleanedCitadel = SharedMapTableData.Merge(map, citadel, out _, dungeons: new[] { Marker("retired", 0, 0, "Infested Citadel") })!;
+        Check(SharedMapTableData.ReadPins(64, cleanedCitadel).Single().Name == "The Queen",
+            "Citadel table cleanup preserved a stale copy or removed the native boss marker.");
         var upload = Table(old, adopted, note, dot, distant);
         int obsolete = 0;
         var merged = SharedMapTableData.Merge(map, upload, out _, dungeons: markers, dungeonCleanup: (_, pins) => obsolete = pins)!;

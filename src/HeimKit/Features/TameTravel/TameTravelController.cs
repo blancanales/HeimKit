@@ -24,6 +24,7 @@ internal sealed class TameTravelController : IDisposable
         TeleportPlayerMethod = "RPC_TeleportPlayer".GetStableHashCode(), CommandMethod = "Command".GetStableHashCode(),
         SayMethod = "Say".GetStableHashCode(), ChatMethod = "ChatMessage".GetStableHashCode();
     private readonly Harmony _hooks = new("heimkit.tametravel.traversal");
+    private IDisposable? _packets;
     private readonly TameTravelSettings _settings;
     private readonly ManualLogSource _log;
     private readonly PlayerServices _players;
@@ -68,13 +69,13 @@ internal sealed class TameTravelController : IDisposable
             _current = this;
             _hooks.Patch(AccessTools.Method(typeof(Player), "TeleportTo"), prefix: new HarmonyMethod(typeof(TameTravelController), nameof(CompetingTeleport)));
             _hooks.Patch(AccessTools.Method(typeof(Chat), "TeleportPlayer"), prefix: new HarmonyMethod(typeof(TameTravelController), nameof(AdministrativeTeleport)));
-            _hooks.Patch(AccessTools.Method(typeof(ZDOMan), "RPC_ZDOData"), prefix: new HarmonyMethod(typeof(TameTravelController), nameof(BeforePlayerData)), postfix: new HarmonyMethod(typeof(TameTravelController), nameof(AfterPlayerData)));
+            _packets = IncomingPackets.RegisterData<(ZNetPeer? Peer, ZDO? Actor, uint Revision, int Emote)>(BeginData, AfterPlayerData, failed: _fail);
             _messages = players.RoutedMessages.Subscribe(Observe, module.Fail);
         }
         catch
         {
             if (ReferenceEquals(_current, this)) _current = null;
-            ModuleCleanup.Run(log, "TameTravel", () => _hooks.UnpatchSelf(), () => _following.Dispose(), () => _placement.Dispose(), () => _authority.Dispose());
+            ModuleCleanup.Run(log, "TameTravel", () => _packets?.Dispose(), () => _hooks.UnpatchSelf(), () => _following.Dispose(), () => _placement.Dispose(), () => _authority.Dispose());
             throw;
         }
     }
@@ -536,6 +537,8 @@ internal sealed class TameTravelController : IDisposable
         if (targetPeerID == 0) { c.ClearJourneys(); return; }
         if (c._samples.TryGetValue(targetPeerID, out var s)) c.Cancel(s, Time.unscaledTime);
     }
+    private static bool BeginData(IncomingPackets.Context context, ref ZPackage packet, out (ZNetPeer? Peer, ZDO? Actor, uint Revision, int Emote) state)
+    { BeforePlayerData(context.Rpc, out state); return true; }
     private static void BeforePlayerData(ZRpc rpc, out (ZNetPeer? Peer, ZDO? Actor, uint Revision, int Emote) __state)
     {
         __state = default;
@@ -595,7 +598,7 @@ internal sealed class TameTravelController : IDisposable
     {
         if (_disposed) return; _disposed = true;
         var errors = new List<Exception>();
-        foreach (Action step in new Action[] { () => _messages.Dispose(), () => _hooks.UnpatchSelf(), ClearJourneys, () => _commands.ClearForShutdown(), () => _stops.ClearPendingForShutdown(), () => _following.Dispose(), () => _authority.Dispose(), () => _placement.Dispose() })
+        foreach (Action step in new Action[] { () => _messages.Dispose(), () => _packets?.Dispose(), () => _hooks.UnpatchSelf(), ClearJourneys, () => _commands.ClearForShutdown(), () => _stops.ClearPendingForShutdown(), () => _following.Dispose(), () => _authority.Dispose(), () => _placement.Dispose() })
             try { step(); } catch (Exception error) { errors.Add(error); }
         if (ReferenceEquals(_current, this)) _current = null;
         _samples.Clear(); _commands.Bindings.Clear(); _reserved.Clear(); _messagesSeen.Clear(); _transfers.Clear();

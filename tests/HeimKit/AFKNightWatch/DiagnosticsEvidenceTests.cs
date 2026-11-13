@@ -1,14 +1,20 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using HeimKit.Features.AFKRaidWatch;
 using HeimKit.Features.AFKRaidWatch.Models;
-using HeimKit.Shared.Players;
-using HeimKit.Shared.Players.Models;
+using HeimKit.Core.Players;
+using HeimKit.Core.Players.Models;
 using HeimKit.Features.AFKNightWatch;
 using HeimKit.Features.AFKNightWatch.Models;
 using System.Reflection;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
-using HeimKit.Shared;
 internal static class DiagnosticsEvidenceTests
 {
     private static void Check(bool okay, string reason) { if (!okay) throw new Exception(reason); }
@@ -63,7 +69,7 @@ internal static class DiagnosticsEvidenceTests
         Check(counts.Get("get_valid_event_points_invocations") == 1 && counts.Get("empty_native_candidate_results") == 1 && counts.Get("native_records_rejected_before_afk") == 4 && counts.Get("unknown") == 0, "Named hook/empty/rejection counts distinct");
 
         using var logger = new ManualLogSource("Diagnostic evidence checks"); var messages = new List<string>();
-        var levels = new List<LogLevel>(); logger.LogEvent += (_, e) => { messages.Add(e.Data.ToString()!); levels.Add(e.Level); };
+        var levels = new List<LogLevel>(); logger.LogEvent += (_, e) => { messages.Add(LogCapture.Text(e.Data)); levels.Add(e.Level); };
         var config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, "evidence-" + Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         var debug = DiagnosticsSettings.Bind(config); var policy = new DebugLoggingPolicy(debug, false);
         var raid = new AFKRaidWatchDiagnostics(logger, policy); var majority = new AFKNightWatchDiagnostics(logger, policy);
@@ -74,12 +80,14 @@ internal static class DiagnosticsEvidenceTests
         Check(messages.Count == 6, "Local candidate stream capped at six");
         raid.Sample(1, "raid", default, false, "nearby_active_player", () => throw new Exception("Unchanged probe rerun"));
         raid.Report(1, () => new RaidWatchStatus { Connected = 6, Candidates = 50, Hooks = counts });
-        Check(messages.Any(m => m.Contains("omitted_messages_interval=RAID_CANDIDATE:44") && m.Contains("unchanged_candidate_samples_interval=1")), "Omitted and unchanged attempts retained");
+        Check(messages.Any(m => m.Contains("omitted_messages=raid_candidates:44") && m.Contains("unchanged_candidate_samples=1")), "Omitted and unchanged attempts retained");
         messages.Clear();
         var probe = new NativeSleepObservation { ObservedAt = 0, Server = true, Sleeping = false, Night = true, Afternoon = false, SkippingBefore = false, SkippingAfter = false, CooldownRemaining = 0 };
         majority.Native(probe); majority.Native(probe); Check(messages.Count == 1, "Unchanged native evidence suppressed");
+        config.Bind("Diagnostics", "DebugVerbosity", DebugVerbosity.Normal).Value = DebugVerbosity.Verbose;
         majority.Report(30, () => new NightWatchStatus { Players = 1, Vote = new SleepDecision { Participants = 1 }, Sleep = probe });
-        Check(messages.Any(m => m.Contains("native_probe_age_s=30") && m.Contains("unchanged_native_samples_interval=1")), "Age retained without claiming a current outcome");
+        Check(messages.Any(m => m.Contains("native_probe_age_s=30") && m.Contains("unchanged_native_samples=1")), "Age retained without claiming a current outcome");
+        LogCapture.ResetVerbosity();
         Check(levels.All(level => level == LogLevel.Debug), "Optional evidence retains Debug severity");
         raid.Warning(0, new Exception("Observation unavailable")); Check(levels[^1] == LogLevel.Warning, "Warning severity preserved");
         const BindingFlags methods = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;

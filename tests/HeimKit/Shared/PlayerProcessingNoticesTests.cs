@@ -1,5 +1,12 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Logging;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 using HeimKit.Features.InfiniteTorches;
 using BepInEx.Configuration;
 using System.Reflection;
@@ -8,7 +15,7 @@ internal static class PlayerProcessingNoticesTests
 {
     private const string EmptyNotice = "PlayerPresence: No players have joined the world; all features are inactive until a player joins.";
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
-    private static void MarkServerReady(HeimKit.Shared.IServerModule module)
+    private static void MarkServerReady(HeimKit.Core.Scheduling.IServerModule module)
     {
         var state = (PlayerProcessingNotices)module.GetType().GetField("_processing", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(module)!;
         state.ServerReady();
@@ -17,7 +24,7 @@ internal static class PlayerProcessingNoticesTests
     {
         using var logger = new ManualLogSource("Processing state checks");
         var messages = new List<(LogLevel Level, string Text)>();
-        logger.LogEvent += (_, args) => messages.Add((args.Level, args.Data.ToString()!));
+        logger.LogEvent += (_, args) => messages.Add((args.Level, LogCapture.Text(args.Data)));
         var status = new PlayerProcessingNotices(logger, "WeatherGuard");
         status.Unavailable("player presence unavailable"); status.EmptyPaused();
         Check(messages.Count == 0 && status.IsEmptyPaused, "Processing leaked individual normal status");
@@ -35,13 +42,13 @@ internal static class PlayerProcessingNoticesTests
         new HeimKit.Features.WeatherGuard.WeatherGuardDiagnostics(logger, false).InitialAcquisition(61);
         Check(messages.Count == 0, "WeatherGuard acquisition leaked into normal logging");
         new HeimKit.Features.WeatherGuard.WeatherGuardDiagnostics(logger, true, HeimKit.Features.WeatherGuard.Models.DebugLogLevel.Medium).InitialAcquisition(61);
-        Check(messages.Count == 1 && messages[^1].Level == LogLevel.Debug && messages[^1].Text.Contains("Initial protection acquisition") && messages[^1].Text.Contains("protected_now=61"), "WeatherGuard acquisition evidence is missing or has wrong severity");
+        Check(messages.Count == 1 && messages[^1].Level == LogLevel.Debug && messages[^1].Text.Contains("Acquired initial protection") && messages[^1].Text.Contains("protected=61"), "WeatherGuard acquisition evidence is missing or has wrong severity");
         // Real module ordering: log pause only after its controller/pending-work references are cleared.
         var config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         using var hub = new PlayerServices(config, logger);
         var torch = new InfiniteTorches(config, logger, hub);
         var controller = typeof(InfiniteTorches).GetField("_controller", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        torch.Initialize("1.0.20"); MarkServerReady(torch); messages.Clear();
+        torch.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); MarkServerReady(torch); messages.Clear();
         hub.Events.Observe(false);
         Check(messages.Count == 1 && messages[^1].Text == EmptyNotice && controller.GetValue(torch) == null, "Feature did not confirm actual paused state");
         hub.Events.Observe(false); Check(messages.Count == 1, "Unchanged empty polls repeated module notice");
@@ -56,15 +63,15 @@ internal static class PlayerProcessingNoticesTests
         // All enabled consumers independently acknowledge cleanup before the shared notice.
         config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         using var allPlayers = new PlayerServices(config, logger);
-        HeimKit.Shared.IServerModule[] modules = {
+        HeimKit.Core.Scheduling.IServerModule[] modules = {
             new InfiniteTorches(config, logger, allPlayers),
             new HeimKit.Features.WeatherGuard.WeatherGuard(config, logger, allPlayers),
             new HeimKit.Features.AFKNightWatch.AFKNightWatch(config, logger, allPlayers),
             new HeimKit.Features.AFKRaidWatch.AFKRaidWatch(config, logger, allPlayers)
         };
-        foreach (var module in modules) { module.Initialize("1.0.20"); if (module.IsActive) MarkServerReady(module); }
+        foreach (var module in modules) { module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); if (module.IsActive) MarkServerReady(module); }
         // Replay startup without marking any module ready: occupancy alone must stay quiet.
-        foreach (var module in modules) module.Initialize("1.0.20");
+        foreach (var module in modules) module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
         messages.Clear(); allPlayers.Events.Observe(false);
         Check(messages.Count == 0, "Empty presence preceded feature server readiness");
         foreach (var module in modules.Take(3)) MarkServerReady(module);
@@ -111,7 +118,7 @@ internal static class PlayerProcessingNoticesTests
             bool stopped = false; int failures = 0;
             using var broken = events.Subscribe(state => {
                 if (state == false) throw new InvalidOperationException("cleanup failure");
-            }, error => { failures++; HeimKit.Shared.DiagnosticLog.Write(logger, "Broken", HeimKit.Shared.DiagnosticEvent.Lifecycle, error.Message, level: LogLevel.Error); }, () => false);
+            }, error => { failures++; HeimKit.Core.Diagnostics.DiagnosticLog.Write(logger, "Broken", HeimKit.Core.Diagnostics.CoreLogTopics.Lifecycle, error.Message, level: LogLevel.Error); }, () => false);
             using var healthy = events.Subscribe(state => stopped = state == false, error => throw error, () => stopped);
             events.Observe(false); events.Observe(false); events.Observe(null); events.Observe(false);
             Check(stopped && failures == 1 && messages.Count == 1 && messages[0].Level == LogLevel.Error, "Failure blocked healthy cleanup, disappeared, or claimed aggregate success");
@@ -126,10 +133,10 @@ internal static class PlayerProcessingNoticesTests
         {
             config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
             using var players = new PlayerServices(config, logger);
-            HeimKit.Shared.IServerModule module = raid
+            HeimKit.Core.Scheduling.IServerModule module = raid
                 ? new HeimKit.Features.AFKRaidWatch.AFKRaidWatch(config, logger, players)
                 : new HeimKit.Features.AFKNightWatch.AFKNightWatch(config, logger, players);
-            module.Initialize("1.0.20"); players.Events.Observe(true);
+            module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); players.Events.Observe(true);
             using var activity = new PlayerActivityService(new(5, 2, .5f, 10, 1), logger, players.Presence,
                 observer: install => { if (!install) throw new InvalidOperationException("observer removal failed"); });
             var type = raid ? typeof(HeimKit.Features.AFKRaidWatch.AFKRaidWatchController) : typeof(HeimKit.Features.AFKNightWatch.AFKNightWatchController);
@@ -151,7 +158,7 @@ internal static class PlayerProcessingNoticesTests
         {
             config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
             using var players = new PlayerServices(config, logger);
-            modules = new HeimKit.Shared.IServerModule[] {
+            modules = new HeimKit.Core.Scheduling.IServerModule[] {
                 new InfiniteTorches(config, logger, players),
                 new HeimKit.Features.WeatherGuard.WeatherGuard(config, logger, players),
                 new HeimKit.Features.AFKNightWatch.AFKNightWatch(config, logger, players),
@@ -159,7 +166,7 @@ internal static class PlayerProcessingNoticesTests
             };
             string[] sections = { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" };
             for (int i = 0; i < modules.Length; i++) config.Bind(sections[i], "Enabled", true).Value = (mask & (1 << i)) != 0;
-            foreach (var module in modules) { module.Initialize("1.0.20"); if (module.IsActive) MarkServerReady(module); }
+            foreach (var module in modules) { module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); if (module.IsActive) MarkServerReady(module); }
             messages.Clear(); players.Events.Observe(false); players.Events.Observe(false);
             Check(messages.Count == 1 && messages[0].Text == EmptyNotice, "Enabled subset did not combine empty notice: " + mask);
             foreach (var module in modules) module.Shutdown();

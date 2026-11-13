@@ -53,16 +53,24 @@ internal static class ZdoPackets
         // Native ReadPackage trusts the declared length before allocating its byte buffer.
         return new ZPackage(packet.ReadByteArray(length));
     }
+    internal static RoutedPacketHeader Header(ZPackage packet)
+    {
+        if (IncomingPackets.TryHeader(packet, out var header, out var error))
+        { if (error != null) throw error; return header; }
+        int cursor = packet.GetPos();
+        try { return new RoutedPacketHeader(packet); } finally { packet.SetPos(cursor); }
+    }
     public static ZRoutedRpc.RoutedRPCData ReadRouted(ZPackage packet)
     {
         int cursor = packet.GetPos();
         try
         {
             if (packet.Size() > MaximumPacketBytes) throw new InvalidDataException("Oversized routed packet.");
+            var header = Header(packet); packet.SetPos(header.End);
             var data = new ZRoutedRpc.RoutedRPCData
             {
-                m_msgID = packet.ReadLong(), m_senderPeerID = packet.ReadLong(), m_targetPeerID = packet.ReadLong(),
-                m_targetZDO = packet.ReadZDOID(), m_methodHash = packet.ReadInt(), m_parameters = ReadPackage(packet)
+                m_msgID = header.Message, m_senderPeerID = header.Sender, m_targetPeerID = header.TargetPeer,
+                m_targetZDO = header.Target, m_methodHash = header.Method, m_parameters = ReadPackage(packet)
             };
             if (packet.GetPos() != packet.Size()) throw new InvalidDataException("Trailing routed data.");
             return data;
@@ -74,9 +82,8 @@ internal static class ZdoPackets
         int cursor = packet.GetPos();
         try
         {
-            packet.ReadLong(); packet.ReadLong(); packet.ReadLong();
-            var id = packet.ReadZDOID(); int method = packet.ReadInt();
-            return protectedId(id) || id.IsNone() && method == DestroyMethod;
+            var header = Header(packet);
+            return protectedId(header.Target) || header.Target.IsNone() && header.Method == DestroyMethod;
         }
         finally { packet.SetPos(cursor); }
     }

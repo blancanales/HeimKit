@@ -14,12 +14,14 @@ public enum DebugVerbosity { Normal, Verbose }
 public static class DiagnosticsSettings
 {
     private static ConfigEntry<DebugVerbosity>? _verbosity;
+    private static ConfigEntry<bool>? _debugMode;
+    internal static bool VerboseEnabled => _debugMode?.Value == true && Verbosity == DebugVerbosity.Verbose;
     public static DebugVerbosity Verbosity => _verbosity?.Value ?? DebugVerbosity.Normal;
     public static ConfigEntry<bool> Bind(ConfigFile config)
     {
         _verbosity = config.Bind("Diagnostics", "DebugVerbosity", DebugVerbosity.Normal,
             "Normal shows concise diagnostics; Verbose adds detailed evidence when effective feature debugging is enabled. Restart after edits.");
-        var debugMode = config.Bind("Diagnostics", "DebugMode", false,
+        _debugMode = config.Bind("Diagnostics", "DebugMode", false,
             "Enable diagnostics for all features unless their hidden feature override suppresses them. When false, feature DebugMode settings can enable individual diagnostics. Restart after edits.");
         // Consume and remove retired settings so existing files also keep the current global debug switch.
         foreach (string key in new[] { "LogStatus", "StatusIntervalSeconds", "LogRefillDetails", "LogRefillRequests" })
@@ -27,6 +29,6 @@ public static class DiagnosticsSettings
             config.Bind("Diagnostics", key, "");
             config.Remove(new ConfigDefinition("Diagnostics", key));
         }
-        return debugMode;
+        return _debugMode;
     }
 }

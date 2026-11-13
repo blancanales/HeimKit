@@ -1,94 +1,60 @@
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
-using HeimKit.Features.AFKNightWatch;
-using HeimKit.Features.AFKRaidWatch;
-using HeimKit.Features.InfiniteTorches;
-using HeimKit.Features.WeatherGuard;
-using HeimKit.Shared;
 
 internal static class GameVersionCompatibilityTests
 {
     private static void Check(bool valid, string message) { if (!valid) throw new Exception(message); }
-
     public static void Run()
     {
-        var folder = Path.Combine(AppContext.BaseDirectory, "version-policy-" + Guid.NewGuid());
+        string folder = Path.Combine(Path.GetTempPath(), "heimkit-version-" + Guid.NewGuid());
         Directory.CreateDirectory(folder);
         string path = Path.Combine(folder, "heimkit.cfg");
-        using var logger = new ManualLogSource("Manual game version tests");
+        using var logger = new ManualLogSource("Version policy checks");
         var warnings = new List<string>();
-        logger.LogEvent += (_, args) => { if (args.Level == LogLevel.Warning) warnings.Add(args.Data.ToString()!); };
+        logger.LogEvent += (_, args) => { if (args.Level == LogLevel.Warning) warnings.Add(LogCapture.Text(args.Data)); };
         try
         {
-            foreach (string? value in new string?[] { null, "1.0.20", "1.0.21", " 1.0.21 ", "0.0.0", "2.10.300", "", "*", "1.0.*", "1.0", "1.0.21.0", "01.0.21", "1.0.021", "+1.0.21", "1.0.-1", "1.0.21-beta", "1.0.20,1.0.21", "2147483648.0.0" })
+            foreach (string? value in new string?[] { null, "true", "false", "TRUE", "garbage", "" })
             {
                 warnings.Clear();
-                File.WriteAllText(path, "[Torches]\nEnabled = true\n" + (value == null ? "" : "[Compatibility]\nSupportedValheimVersion = " + value + "\n"));
-                var loaded = ConfigurationLoader.Load(folder, logger, config =>
+                File.WriteAllText(path, "[Compatibility]\nSupportedValheimVersion = 9.9.9\n" +
+                    (value == null ? "" : "AllowUnverifiedVersions = " + value + "\n") + "[Torches]\nEnabled = false\n");
+                var config = ConfigurationLoader.Load(folder, logger, cfg =>
+                    (Config: cfg, Policy: GameVersionCompatibility.Resolve(cfg, logger)));
+                bool allow = value == null || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+                Check(config.Policy.AllowUnverifiedVersions == allow, "Boolean version policy default/preservation/validation failed.");
+                Check(config.Policy.Supports(GameVersionCompatibility.AuditedVersion), "Audited version was rejected.");
+                Check(!config.Policy.NeedsStartupBackup(GameVersionCompatibility.AuditedVersion), "Audited startup requested an upgrade backup.");
+                foreach (string version in new[] { "0.0.0", "1.0.20", "1.0.22", "2.10.300", "9.9.9", "1.0.22-public-test", "1.0.22.1", "future-release" })
                 {
-                    var players = PlayerServicesTests.For(config, logger);
-                    IServerModule[] modules = { new InfiniteTorches(config, logger, players), new WeatherGuard(config, logger, players),
-                        new AFKNightWatch(config, logger, players), new AFKRaidWatch(config, logger, players) };
-                    return (Config: config, Modules: modules, Policy: GameVersionCompatibility.Resolve(config, logger));
-                });
-                string expected = value?.Trim() switch { "1.0.21" => "1.0.21", "0.0.0" => "0.0.0", "2.10.300" => "2.10.300", _ => "1.0.20" };
-                bool invalid = value != null && value.Trim() != expected;
-                Check(loaded.Policy.RequiredVersion == expected, "Version override validation/fallback: " + value);
-                Check(warnings.Count == (value == null || value.Trim() == GameVersionCompatibility.AuditedVersion ? 0 : 1), "Shared policy must warn only once across all modules.");
-                if (invalid) Check(warnings.Single().Contains("Invalid"), "Malformed version must report fallback.");
-                else if (expected != GameVersionCompatibility.AuditedVersion)
-                    Check(warnings.Single().Contains("does not validate gameplay compatibility"), "Manual requirement must not claim an audit.");
-                try
-                {
-                    foreach (var module in loaded.Modules)
-                    {
-                        module.Initialize(expected);
-                        Check(module.IsActive, module.Name + " did not accept the effective exact requirement.");
-                        module.Initialize("9.9.9");
-                        Check(!module.IsActive, module.Name + " treated override as a blanket bypass.");
-                        module.Initialize("1.0.20");
-                        Check(module.IsActive == (expected == "1.0.20"), module.Name + " treated override as an additional allowed version.");
-                    }
+                    Check(config.Policy.Supports(version) == allow, "Unverified version policy failed: " + version);
+                    Check(config.Policy.NeedsStartupBackup(version) == (allow && (GameVersionCompatibility.CompareToAudited(version) ?? 1) > 0), "Upgrade backup requirement failed: " + version);
                 }
-                finally { foreach (var module in loaded.Modules) module.Shutdown(); }
-                loaded.Config.Save();
+                foreach (string version in new[] { "", " ", " 1.0.21 ", "1.0.21\nextra", new string('x', 129) })
+                    Check(!config.Policy.Supports(version) && !config.Policy.NeedsStartupBackup(version), "Malformed observed version was accepted.");
+                Check(warnings.Count == 1 || value == "false" && warnings.Count == 0,
+                    "Policy must emit one shared unverified/invalid warning, independently of the number of modules.");
                 string saved = File.ReadAllText(path);
-                Check(saved.Contains("SupportedValheimVersion") == (value != null), "Hidden key generated or lost.");
-                Check(!loaded.Config.ContainsKey(new ConfigDefinition("Compatibility", "SupportedValheimVersion")), "Manual entry should remain unbound.");
-                if (value != null)
-                {
-                    Check(saved.IndexOf("[Compatibility]", StringComparison.Ordinal) < saved.IndexOf("[Torches]", StringComparison.Ordinal), "Manual shared section must precede features.");
-                    var reloaded = new ConfigFile(path, false) { SaveOnConfigSet = false };
-                    Check(reloaded.Bind("Compatibility", "SupportedValheimVersion", "sentinel").Value == value.Trim(), "Manual value rewritten during save.");
-                    Check(GameVersionCompatibility.Resolve(new ConfigFile(path, false), logger).RequiredVersion == expected, "Saved override did not survive reload.");
-                }
+                Check(saved.Contains("AllowUnverifiedVersions") && !saved.Contains("SupportedValheimVersion"), "Retired exact-version key survived migration or new switch was omitted.");
+                Check(saved.Contains("Enabled = false"), "Migration changed unrelated feature settings.");
+                Check(saved.IndexOf("[Compatibility]", StringComparison.Ordinal) < saved.IndexOf("[Torches]", StringComparison.Ordinal), "Generated compatibility section must precede features.");
             }
-
-            File.WriteAllText(path, "[Compatibility]\nSupportedValheimVersion = 1.0.22\nSupportedValheimVersion = 1.0.21\n");
+            File.WriteAllText(path, "[Compatibility]\nAllowUnverifiedVersions = true\n");
             var original = new ConfigFile(path, false) { SaveOnConfigSet = false };
             var policy = GameVersionCompatibility.Resolve(original, logger);
-            Check(policy.RequiredVersion == "1.0.21", "Duplicate entries must match loader last-value-wins behavior.");
-            File.WriteAllText(path, "[Compatibility]\nSupportedValheimVersion = 1.0.22\n");
+            File.WriteAllText(path, "[Compatibility]\nAllowUnverifiedVersions = false\n");
             original.Reload();
-            Check(ReferenceEquals(policy, GameVersionCompatibility.Resolve(original, logger)) && policy.RequiredVersion == "1.0.21", "Policy must remain fixed until a new configuration session.");
-            Check(GameVersionCompatibility.Resolve(new ConfigFile(path, false), logger).RequiredVersion == "1.0.22", "New configuration must observe updated requirement.");
-
+            Check(ReferenceEquals(policy, GameVersionCompatibility.Resolve(original, logger)) && policy.AllowUnverifiedVersions,
+                "Version policy changed without a new startup configuration session.");
+            Check(!GameVersionCompatibility.Resolve(new ConfigFile(path, false), logger).AllowUnverifiedVersions, "Restart did not apply strict mode.");
             warnings.Clear();
-            var unreadable = new ConfigFile(path, false) { SaveOnConfigSet = false };
-            using (var locked = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-                Check(GameVersionCompatibility.Resolve(unreadable, logger).RequiredVersion == GameVersionCompatibility.AuditedVersion, "Unreadable override must fall back.");
-            Check(warnings.Count == 1 && warnings[0].Contains("Could not read"), "Unreadable override must warn once.");
-
-            File.WriteAllText(path, "[Compatibility]\nSupportedValheimVersion = 1.0.21\n[Torches]\nEnabled = false\n[WeatherGuard]\nEnabled = false\n[AFKNightWatch]\nEnabled = false\n[AFKRaidWatch]\nEnabled = false\n");
-            var disabled = new ConfigFile(path, false) { SaveOnConfigSet = false };
-            var disabledPlayers = PlayerServicesTests.For(disabled, logger);
-            IServerModule[] disabledModules = { new InfiniteTorches(disabled, logger, disabledPlayers), new WeatherGuard(disabled, logger, disabledPlayers),
-                new AFKNightWatch(disabled, logger, disabledPlayers), new AFKRaidWatch(disabled, logger, disabledPlayers) };
-            try { foreach (var module in disabledModules) { module.Initialize("1.0.21"); Check(!module.IsActive, "Override must not enable a disabled module."); } }
-            finally { foreach (var module in disabledModules) module.Shutdown(); }
+            var locked = new ConfigFile(path, false) { SaveOnConfigSet = false };
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                Check(!GameVersionCompatibility.Resolve(locked, logger).AllowUnverifiedVersions, "Unreadable policy did not use strict mode.");
+            Check(warnings.Count == 1, "Unreadable policy must warn once.");
         }
         finally { Directory.Delete(folder, true); }
-        System.Console.WriteLine("PASS: hidden exact-version override across all modules, strict validation/fallback, one shared warning, default omission, manual save/layout preservation, disabled modules, mismatch rejection and restart semantics.");
+        System.Console.WriteLine("PASS: default-on unverified versions, strict mode, generated configuration, retired-key migration, one shared warning, invalid-version rejection and restart semantics.");
     }
 }

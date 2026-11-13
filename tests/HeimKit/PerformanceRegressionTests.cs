@@ -1,8 +1,14 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using HeimKit.Features.SharedMap;
 using HeimKit.Features.SharedMap.Models;
-using HeimKit.Shared;
 using UnityEngine;
 
 internal static class PerformanceRegressionTests
@@ -121,13 +127,13 @@ internal static class PerformanceRegressionTests
         MapMarker[] Marker(string label = "A", float x = 1, string id = "source") => new[] { new MapMarker(label, x, 2, 3, id) };
         SharedMapReconciliationState State(int pixels = 1, long pins = 1, long removed = 1, long publications = 1, float hide = 10,
             IReadOnlyList<MapMarker>? portals = null, IReadOnlyList<MapMarker>? resources = null, IReadOnlyList<MapMarker>? dungeons = null,
-            IReadOnlyList<MapMarker>? runes = null, IReadOnlyList<MapMarker>? spawners = null) =>
-            new(pixels, pins, removed, publications, hide, portals ?? empty, resources ?? empty, dungeons ?? empty, runes ?? empty, spawners ?? empty);
+            IReadOnlyList<MapMarker>? runes = null, IReadOnlyList<MapMarker>? spawners = null, IReadOnlyList<MapMarker>? structures = null) =>
+            new(pixels, pins, removed, publications, hide, portals ?? empty, resources ?? empty, dungeons ?? empty, runes ?? empty, spawners ?? empty, structures ?? empty);
         var original = State(); Check(original.Same(State()), "Identical community inputs missed reuse.");
         Check(!original.Same(State(pixels: 2)) && !original.Same(State(pins: 2)) && !original.Same(State(removed: 2)) &&
             !original.Same(State(publications: 2)) && !original.Same(State(hide: 11)), "Exploration/pin/admin/publication inputs failed to invalidate.");
         Check(!original.Same(State(portals: Marker())) && !original.Same(State(resources: Marker())) && !original.Same(State(dungeons: Marker())) &&
-            !original.Same(State(runes: Marker())) && !original.Same(State(spawners: Marker())), "A marker family failed to invalidate.");
+            !original.Same(State(runes: Marker())) && !original.Same(State(spawners: Marker())) && !original.Same(State(structures: Marker())), "A marker family failed to invalidate.");
         var portalState = State(portals: Marker());
         Check(portalState.Same(State(portals: Marker())) && !portalState.Same(State(portals: Marker("renamed"))) &&
             !portalState.Same(State(portals: Marker(x: 5))) && !portalState.Same(State(portals: Marker(id: "other"))), "Marker rename/offset/identity failed to invalidate.");

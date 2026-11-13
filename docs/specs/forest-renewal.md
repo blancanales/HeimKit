@@ -2,6 +2,8 @@
 
 ## Behavior and mappings
 
+New discovery/renewal work participates in Core cooperative admission and pauses entirely during native raids or detected combat. Acknowledgement polling remains available while discovery is deferred, and an already-staged placement keeps its existing completion/cancellation path outside the new-work gate. Existing durable-generation, player-clearance and world-mutation fences remain mandatory.
+
 Observe existing/new eligible stumps and accepted native stump destruction. Both routes share one persisted chance decision and timer per original stump ID. When eligible, replace the standing stump or renew its confirmed-cleared position with one vanilla sapling. Removing a previously observed stump preserves its pending decision rather than cancelling or rerolling it. Missing/unloaded records alone never count as destruction. Runtime mapping checks join Plant.m_grownPrefabs to TreeBase.m_stubPrefab in installed prefabs, with exactly one matching requested sapling per stump.
 
 | Stump | Sapling | Native grown tree |

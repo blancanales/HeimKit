@@ -27,7 +27,7 @@ Read, in order, before writing any code:
 **Behavioral rule:** The rebuilt HeimKit must be functionally identical to the legacy implementation from a player/operator
 point of view. Same features, same settings keys, same config file name (`heimkit.cfg`), same
 gameplay effects. Approved logging exceptions are timestamped topic-based output, rewritten Debug/Error records, the shared DebugVerbosity setting (Normal by default), and WeatherGuard ten-minute prevention roll-ups; other Info/Warning wording remains unchanged. Performance and internal structure change; observable
-behavior does not. Where current behavior is subtle (ZDO ownership transfer, Harmony IL
+behavior does not. The shared Verbose Debug performance window, elapsed optional-output admission and StationSupply minute-grouped transfer results follow their current owning architecture/specification contracts. Where current behavior is subtle (ZDO ownership transfer, Harmony IL
 transpilers, replication fences), preserve it exactly — port, do not reinvent the logic.
 
 ## 1. Ground rules (non-negotiable)
@@ -153,9 +153,11 @@ Every one of these is a hard acceptance criterion. See §10.
 6. **Staggered ticks.** `ModuleScheduler` assigns each module a small fixed startup phase offset so
    modules sharing an interval do not land their heavy passes on the same frame. Interval values
    themselves stay as configured.
-7. **Diagnostics never cost when off.** Status snapshot objects and their dictionary copies are
+7. **Optional diagnostics never cost when off.** Status snapshot objects and their dictionary copies are
    built only when a summary will actually emit (debug enabled and cadence due), never
-   unconditionally per tick.
+   unconditionally per tick. Core's ServerPerformance window is separate from feature diagnostics: fixed counters
+   observe update intervals, plugin/native/log elapsed work and bounded operation counts without
+   Debug. Global Verbose Debug enables process sampling and admits output at most once per minute, subject to shared Debug admission. It performs no discovery.
 
 These requirements are architectural, not optional micro-optimizations. A feature port that
 re-introduces an independent scan, an independent prefab cache, or hot-path reflection is incorrect
@@ -331,6 +333,10 @@ TameTravel carry parallel ownership/packet logic. In HeimKit:
   Core packet/ownership primitives, not a reimplementation of packet parsing.
 - The per-operation incident reporting and bounded shared Error handling stay in Core.
 
+Core IncomingPackets owns one prefix, postfix and finalizer per native incoming entry point while handlers exist. It resolves physical ready-peer provenance once per call, preserves each cached presence roster's membership decision (constant-time native-index comparison, with one cached roster validation on a membership mismatch), caches the routed header with its cursor restored, and walks ZDO IDs once to select retained-ID filters. Each original filter still validates and decides its own mutations/rejections and owns its failure path. A malformed inspection is passed to those original filters in order; it is never silently admitted or used to disable unrelated modules. Packet replacement invalidates the header cache so later handlers see the replacement's current recipients/parameters. Typed pooled invocation state handles nesting without boxing per-call value states. Registration/unregistration follows the original controller/consumer lifetimes; the final handler removes that native hook set. Features must not patch either incoming entry point themselves.
+
+All audited packet prefixes, postfixes and finalizers have default Harmony Normal priority (400), with no before/after constraints; ties follow installation order. IncomingPackets preserves that order dynamically by registering handlers at the same lifecycle points. In Plugin's ordinary module order, data handlers are WeatherGuard, SharedMap, ObjectAuthority (first DoorKeeper/SeaSalvage consumer), ObjectTransferAuthority (first TameTravel/StationSupply consumer), then TameTravel's player-data observer. Readiness delays, disabled modules, pauses and recreation may change that installation order, which remains authoritative. Routed handlers follow their actual registration order among PlayerRoutedMessages (first shared combat/context/activity subscriber), WeatherGuard, ObjectAuthority and ObjectTransferAuthority; the standalone PlayerActivityService fallback occupies its original registration point only when no routed hub is supplied. Postfixes retain registration order (ObjectTransferAuthority DataApplied and TameTravel AfterPlayerData), and SharedMap's finalizer restores the previous nested batch context while preserving the native exception. The loader-provided HarmonyX runs every prefix in order even after a false result, ANDs boolean results to decide native execution, then runs postfixes in order. IncomingPackets retains that behavior, including later observers seeing any earlier packet replacement. Removed handlers receive default per-call state rather than sharing another handler's state.
+
 ### 4.6 Players — `Core/Players/`
 
 Port the entire `Shared/Players/` subtree with file names preserved. This subsystem
@@ -368,6 +374,7 @@ named here. It must not implement its own.
 | Know player positions / proximity / movement | `WorldObjectProvider.Scope` (`PlayerWorldScope`) | re-sample peers or re-derive movement segments |
 | Classify a prefab (components, category, health, colliders) | `Core/Prefabs/PrefabRegistry` | call `GetComponent`/`GetComponentsInChildren` on a prefab, or keep a prefab→metadata dictionary |
 | Read/write a native private field or call a native private method | `Core/Native/NativeAccess` (FieldRef/delegate) | declare `FieldInfo`/`MethodInfo` fields or call `GetValue`/`Invoke` in hot paths |
+| Observe or filter incoming ZDO data or routed RPCs | `Core/Ownership/IncomingPackets` | patch `RPC_ZDOData` or `RPC_RoutedRPC` in a feature or install a second packet inspector |
 | Retain/release ZDO ownership, parse/fence packets | `Core/Ownership/ObjectAuthority` + `ZdoPackets` | re-implement packet parsing, ownership transfer, or destruction fencing |
 | Prepare terrain / create persistent world objects | `Core/World/TerrainContext` + `NativeWorldObject` | re-resolve terrain compiler reflection or re-implement zone creation |
 | Check living/dead/finite actor health | `Core/Native/NativeCharacterHealth` | read health fields directly for eligibility |
@@ -504,7 +511,7 @@ the code and by in-chat testing with Trevor (no test artifacts committed).
 5. **No `ZDOID.ToString()` keys** in per-tick maps/sets.
 6. **No per-tick allocation / no LINQ** in per-tick or per-frame paths; buffers are reused fields.
 7. **Staggered, scheduler-driven ticks.** No feature stores its own `_next` throttle float.
-8. **Diagnostics cost nothing when off.** Status objects/dictionary copies built only when emitting.
+8. **Optional diagnostics cost nothing when off.** Status objects/dictionary copies built only when emitting; normal Core performance counters retain their fixed, bounded observation contract.
 9. **Isolation preserved.** Each module enables/disables independently; one module's failure disables
    only itself; cleanup is complete and reported (per current architecture).
 10. **Docs updated** per §9, including the anti-duplication rule and decision table.
@@ -514,7 +521,7 @@ the code and by in-chat testing with Trevor (no test artifacts committed).
 
 - No new features or gameplay changes. The approved shared DebugVerbosity setting is the only settings exception.
 - No change to the audited game version or server-only compatibility posture.
-- Approved logging exceptions permit timestamped topics, rewritten Debug/Error records, the shared DebugVerbosity setting and WeatherGuard ten-minute prevention roll-ups; other Info/Warning wording, severities and existing gates remain unchanged. Player-activity contracts retain their behavior when moved to `Core/`.
+- Approved logging exceptions permit timestamped topics, rewritten Debug/Error records, the shared DebugVerbosity setting, WeatherGuard ten-minute prevention roll-ups, StationSupply minute-grouped transfer results and Core Verbose Debug performance windows with elapsed optional-output admission; other Info/Warning wording and severities remain unchanged. Player-activity contracts retain their behavior when moved to `Core/`.
 - No additional source or test directory moves as an incidental part of feature work.
 - No deployment, server install, or world changes.
 
