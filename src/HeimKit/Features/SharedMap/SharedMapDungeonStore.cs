@@ -160,41 +160,39 @@ public sealed class SharedMapDungeonStore
         _revision = _savedRevision = 0; _markers = null; return true;
     }
 
+    private SnapshotFile? _snapshotFile;
+    private SnapshotFile Persistence => _snapshotFile ??= new SnapshotFile(FilePath);
     public bool SaveIfDue(float now, float interval)
     {
-        if (!_nextSave.Ready(now)) return false;
-        _nextSave.Postpone(now, interval); return Save();
+        bool saved = Persistence.Poll();
+        if (saved) _savedRevision = Persistence.CompletedGeneration;
+        if (Persistence.Pending || !_nextSave.Ready(now)) return saved;
+        _nextSave.Postpone(now, interval);
+        if (_revision != _savedRevision) Persistence.Queue(Snapshot(), _revision);
+        return saved;
     }
-
     public bool Save()
     {
-        if (_revision == _savedRevision) return false;
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        string temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
+        bool saved = Persistence.Poll(wait: true);
+        if (saved) _savedRevision = Persistence.CompletedGeneration;
+        if (_revision == _savedRevision) return saved;
+        long generation = _revision; Persistence.Write(Snapshot()); _savedRevision = generation; return true;
+    }
+    private byte[] Snapshot()
+    {
+        using var body = new MemoryStream();
+        using (var writer = new BinaryWriter(body, Encoding.UTF8, true))
         {
-            using var body = new MemoryStream();
-            using (var writer = new BinaryWriter(body, Encoding.UTF8, true))
+            writer.Write(Magic); writer.Write(3); writer.Write(_world); writer.Write(Count);
+            foreach (var marker in _discoveries.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Value))
             {
-                writer.Write(Magic); writer.Write(3); writer.Write(_world); writer.Write(Count);
-                foreach (var marker in _discoveries.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Value))
-                {
-                    for (int i = 0; i < 64; i += 2) writer.Write(byte.Parse(marker.Identity.Substring(i, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture));
-                    byte[] name = Encoding.UTF8.GetBytes(marker.Name);
-                    writer.Write((ushort)name.Length); writer.Write(name); writer.Write(marker.X); writer.Write(marker.Y); writer.Write(marker.Z);
-                    var progress = ProgressState(marker.Identity); writer.Write(progress.Total); writer.Write(progress.Picked);
-                    writer.Write((byte)(Visited(marker.Identity) ? 1 : 0));
-                }
+                for (int i = 0; i < 64; i += 2) writer.Write(byte.Parse(marker.Identity.Substring(i, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture));
+                byte[] name = Encoding.UTF8.GetBytes(marker.Name);
+                writer.Write((ushort)name.Length); writer.Write(name); writer.Write(marker.X); writer.Write(marker.Y); writer.Write(marker.Z);
+                var progress = ProgressState(marker.Identity); writer.Write(progress.Total); writer.Write(progress.Picked);
+                writer.Write((byte)(Visited(marker.Identity) ? 1 : 0));
             }
-            byte[] bytes = body.ToArray(); using var sha = SHA256.Create();
-            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                output.Write(bytes, 0, bytes.Length); byte[] checksum = sha.ComputeHash(bytes);
-                output.Write(checksum, 0, checksum.Length); output.Flush(true);
-            }
-            if (File.Exists(FilePath)) File.Replace(temporary, FilePath, FilePath + ".bak"); else File.Move(temporary, FilePath);
-            _savedRevision = _revision; return true;
         }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        return body.ToArray();
     }
 }

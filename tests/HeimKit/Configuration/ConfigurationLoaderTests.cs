@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using HeimKit.Features.AFKRaidWatch;
 using HeimKit.Features.SharedMap;
 using BepInEx.Configuration;
@@ -13,7 +20,7 @@ internal static class ConfigurationLoaderTests
     {
         int diagnostics = contents.IndexOf("[Diagnostics]", StringComparison.Ordinal);
         int activity = contents.IndexOf("[PlayerActivity]", StringComparison.Ordinal);
-        foreach (string feature in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch", "SharedMap", "DoorKeeper", "ForestRenewal", "SeaSalvage", "TameTravel", "HeimMender" })
+        foreach (string feature in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch", "SharedMap", "DoorKeeper", "ForestRenewal", "SeaSalvage", "TameTravel", "HeimMender", "StationSupply" })
         {
             int at = contents.IndexOf("[" + feature + "]", StringComparison.Ordinal);
             if (diagnostics < 0 || activity < 0 || at < 0 || diagnostics > at || activity > at)
@@ -28,13 +35,13 @@ internal static class ConfigurationLoaderTests
         var path = Path.Combine(directory, "heimkit.cfg");
         var setupMessages = new List<string>();
         using var setupLogger = new ManualLogSource("First-use config checks");
-        setupLogger.LogEvent += (_, args) => setupMessages.Add(args.Data.ToString()!);
+        setupLogger.LogEvent += (_, args) => setupMessages.Add(LogCapture.Text(args.Data));
         try
         {
             ConfigurationLoader.Load(directory, setupLogger, config => new InfiniteTorches(config, setupLogger, PlayerServicesTests.For(config, setupLogger)));
             if (!File.Exists(path)) throw new Exception("First-use config was not created in the correct folder.");
             var text = File.ReadAllText(path);
-            foreach (string setting in new[] { "[Torches]", "Enabled = true", "IntervalSeconds = 5", "MaxMessagesPerPass = 32", "Prefabs = piece_groundtorch_wood", "[Diagnostics]", "DebugMode = false" })
+            foreach (string setting in new[] { "[Torches]", "Enabled = true", "IntervalSeconds = 5", "MaxMessagesPerPass = 32", "Prefabs = piece_groundtorch_wood", "[Diagnostics]", "DebugMode = false", "DebugVerbosity = Normal" })
                 if (!text.Contains(setting)) throw new Exception("Missing default setting: " + setting);
             if (!setupMessages.Any(m => m.Contains("Created default configuration:")))
                 throw new Exception("Creation was not logged.");
@@ -62,6 +69,7 @@ internal static class ConfigurationLoaderTests
                 _ = new HeimKit.Features.SeaSalvage.SeaSalvage(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new HeimKit.Features.TameTravel.TameTravel(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new HeimKit.Features.HeimMender.HeimMender(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.StationSupply.StationSupply(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 return config;
             });
             if (complete.Count != reference.Count || complete.Any(entry =>
@@ -87,6 +95,7 @@ internal static class ConfigurationLoaderTests
                 _ = new HeimKit.Features.SeaSalvage.SeaSalvage(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new HeimKit.Features.TameTravel.TameTravel(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new HeimKit.Features.HeimMender.HeimMender(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.StationSupply.StationSupply(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 return config;
             });
             var reordered = File.ReadAllText(complete.ConfigFilePath);
@@ -104,7 +113,7 @@ internal static class ConfigurationLoaderTests
             File.WriteAllText(path, "[Torches]\nEnabled = false\nIntervalSeconds = 12\n\n[Diagnostics]\nDebugMode = true\nLogStatus = false\nLogRefillRequests = false\nLogRefillDetails = false\nStatusIntervalSeconds = 120\n");
             setupMessages.Clear();
             var reloaded = ConfigurationLoader.Load(directory, setupLogger, config => new InfiniteTorches(config, setupLogger, PlayerServicesTests.For(config, setupLogger)));
-            reloaded.Initialize("1.0.20");
+            reloaded.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
             text = File.ReadAllText(path);
             foreach (string retired in new[] { "LogStatus", "LogRefillRequests", "LogRefillDetails", "StatusIntervalSeconds" })
                 if (text.Contains(retired)) throw new Exception("Retired diagnostic setting remains: " + retired);

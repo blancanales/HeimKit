@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
@@ -12,18 +19,19 @@ internal static class WeatherGuardTests
     {
         foreach (bool torchesOn in new[] { false, true })
         foreach (bool weatherOn in new[] { false, true })
-        foreach (string version in new[] { "1.0.20", "1.0.18" })
+        foreach (string version in new[] { HeimKit.Configuration.GameVersionCompatibility.AuditedVersion, "1.0.18" })
         {
             var config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
+            config.Bind("Compatibility", "AllowUnverifiedVersions", false);
             config.Bind("Torches", "Enabled", torchesOn);
             config.Bind("WeatherGuard", "Enabled", weatherOn);
             using var log = new ManualLogSource("WeatherGuard lifecycle checks");
-            var messages = new List<string>(); log.LogEvent += (_, args) => messages.Add(args.Data.ToString()!);
+            var messages = new List<string>(); log.LogEvent += (_, args) => messages.Add(LogCapture.Text(args.Data));
             var torches = new InfiniteTorches(config, log, PlayerServicesTests.For(config, log));
             var weather = new WeatherGuard(config, log, PlayerServicesTests.For(config, log));
             torches.Initialize(version); weather.Initialize(version);
-            Check(torches.IsActive == (torchesOn && version == "1.0.20"), "torch isolation");
-            Check(weather.IsActive == (weatherOn && version == "1.0.20"), "weather isolation/version guard");
+            Check(torches.IsActive == (torchesOn && version == HeimKit.Configuration.GameVersionCompatibility.AuditedVersion), "torch isolation");
+            Check(weather.IsActive == (weatherOn && version == HeimKit.Configuration.GameVersionCompatibility.AuditedVersion), "weather isolation/version guard");
             Check(weather.Name == "WeatherGuard" && messages.Any(m => m == (weatherOn ? "WeatherGuard: Enabled." : "WeatherGuard: Disabled.")), "exact feature name and configuration status");
             Check(messages.All(m => !m.Contains("elapsed_s") && !m.Contains("player-built") && !m.Contains("waiting")), "debug-off startup must be concise");
             weather.Shutdown(); weather.Shutdown(); torches.Shutdown();

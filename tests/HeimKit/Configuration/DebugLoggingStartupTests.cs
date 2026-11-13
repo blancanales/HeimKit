@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
@@ -6,8 +13,7 @@ using HeimKit.Features.WeatherGuard;
 using HeimKit.Features.WeatherGuard.Models;
 using HeimKit.Features.AFKNightWatch;
 using HeimKit.Features.AFKRaidWatch;
-using HeimKit.Shared;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 
@@ -19,7 +25,7 @@ internal static class DebugLoggingStartupTests
         DiagnosticLog.StartSession();
         using var logger = new ManualLogSource("Debug startup checks");
         var records = new List<(LogLevel Level, string Text)>();
-        logger.LogEvent += (_, args) => records.Add((args.Level, args.Data.ToString()!));
+        logger.LogEvent += (_, args) => records.Add((args.Level, LogCapture.Text(args.Data)));
         string path = Path.Combine(AppContext.BaseDirectory, Guid.NewGuid() + ".cfg");
         string[] names = { "InfiniteTorches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" };
         string[] sections = { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch" };
@@ -37,16 +43,16 @@ internal static class DebugLoggingStartupTests
                     new InfiniteTorches(config, logger, players), new WeatherGuard(config, logger, players),
                     new AFKNightWatch(config, logger, players), new AFKRaidWatch(config, logger, players)
                 };
-                records.Clear();
-                foreach (var module in modules) module.Initialize("1.0.20");
+                DiagnosticLog.StartSession(); records.Clear();
+                foreach (var module in modules) module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
                 var declarations = records.Where(r => r.Text.Contains("Debug logging ")).ToArray();
                 int expected = global ? 4 : local || suppressed ? 1 : 0;
                 Check(declarations.Length == expected && declarations.All(r => r.Level == LogLevel.Debug), "Per-feature startup policy count/severity incorrect");
                 if (global || local || suppressed)
                 {
-                    var line = declarations.Single(r => r.Text.StartsWith(names[selected] + ":")).Text;
+                    var line = declarations.Single(r => r.Text.StartsWith(names[selected] + ".")).Text;
                     string source = suppressed ? "hidden_override" : global && local ? "global_and_feature" : local ? "feature" : "global";
-                    Check(line.Contains("source=" + source) && line.Contains("configured_debug_enabled=" + ((global || local) && !suppressed).ToString().ToLowerInvariant()),
+                    Check(line.Contains("log_schema=2") && line.Contains("source=" + source) && line.Contains("configured_debug_enabled=" + ((global || local) && !suppressed).ToString().ToLowerInvariant()),
                         "Startup policy did not explain source and effective suppression");
                 }
                 foreach (var module in modules) module.Shutdown();
@@ -56,10 +62,10 @@ internal static class DebugLoggingStartupTests
             var weatherConfig = new ConfigFile(path, false) { SaveOnConfigSet = false };
             var weather = new WeatherGuardSettings(weatherConfig, logger);
             Check(weather.DebugLogLevel.Value == DebugLogLevel.Detailed && weather.DebugLogging.ConfiguredEnabled, "Feature-only default Detailed diagnostics not enabled");
-            records.Clear();
+            DiagnosticLog.StartSession(); records.Clear();
             var diagnostics = new WeatherGuardDiagnostics(logger, weather.DebugLogging, weather.DebugLogLevel.Value, false);
             diagnostics.Report(0, () => new WeatherGuardStatus());
-            Check(records.Any(r => r.Level == LogLevel.Debug && r.Text.Contains("SUMMARY")) && records.Any(r => r.Text.Contains("Processing and network counters")),
+            Check(records.Any(r => r.Level == LogLevel.Debug && r.Text.Contains(".scope:")) && records.Any(r => r.Text.Contains("protection and network activity")),
                 "Detailed feature-only diagnostics did not emit without global debug");
             // Invoke the actual loader listener against a memory writer: prove filtering independently
             // of native Unity/gameplay and without editing a server's loader configuration.
@@ -101,17 +107,17 @@ internal static class DebugLoggingStartupTests
                             };
                             return settings;
                         });
-                        foreach (var module in modules) module.Initialize("1.0.20");
+                        foreach (var module in modules) module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
                         new WeatherGuardDiagnostics(logger, selected.DebugLogging, selected.DebugLogLevel.Value, false)
                             .Report(0, () => new WeatherGuardStatus());
                         Check(!selected.GlobalDebugMode.Value && selected.DebugMode.Value && selected.DebugLogging.ConfiguredEnabled,
                             "Production loader/save changed feature-only debug selection");
                         Check(records.Any(r => r.Level == LogLevel.Debug && r.Text.Contains("Waiting for joined players and dedicated-server world")) &&
-                            records.Any(r => r.Level == LogLevel.Debug && r.Text.StartsWith("WeatherGuard: SUMMARY")),
+                            records.Any(r => r.Level == LogLevel.Debug && r.Text.StartsWith("WeatherGuard.scope:")),
                             "Feature-only startup/summary emission failed after production loading");
-                        Check(!records.Any(r => r.Level == LogLevel.Debug && names.Where(n => n != "WeatherGuard").Any(n => r.Text.StartsWith(n + ":"))),
+                        Check(!records.Any(r => r.Level == LogLevel.Debug && names.Where(n => n != "WeatherGuard").Any(n => r.Text.StartsWith(n + "."))),
                             "Feature-only setting enabled another module's Debug");
-                        Check(writer.ToString().Contains("WeatherGuard: SUMMARY") == diskDebug,
+                        Check(writer.ToString().Contains("WeatherGuard.scope:") == diskDebug,
                             "Production feature-only records did not follow the loader's Debug filter");
                     }
                     finally

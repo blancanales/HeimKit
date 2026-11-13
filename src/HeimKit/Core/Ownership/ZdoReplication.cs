@@ -46,6 +46,17 @@ internal static class ZdoReplication
         sendSnapshot();
     }
 
+    internal static void ResetClientPair(ZDOID station, ZDOID chest, bool preserveStation, Action<ZPackage> removeRemoteCache,
+        Action stationSnapshot, Action chestSnapshot)
+    {
+        if (station.IsNone() || chest.IsNone() || station == chest) throw new ArgumentException("Cache refresh requires distinct original records.");
+        var packet = new ZPackage(); packet.Write(preserveStation ? 1 : 2);
+        if (!preserveStation) packet.Write(station);
+        packet.Write(chest);
+        removeRemoteCache(packet);
+        stationSnapshot(); chestSnapshot();
+    }
+
     internal static void Send(ZNetPeer peer, ZDO record, uint? wireRevision = null)
     {
         var native = Accessors.GetPeer(ZDOMan.instance, peer.m_uid);

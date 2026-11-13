@@ -24,33 +24,8 @@ public static class WeatherGuardNetworkFilter
         // Native ReadPackage trusts the declared length before allocating its byte buffer.
         return new ZPackage(packet.ReadByteArray(length));
     }
-    public static ZRoutedRpc.RoutedRPCData ReadRouted(ZPackage packet)
-    {
-        int cursor = packet.GetPos();
-        try
-        {
-            if (packet.Size() > MaximumPacketBytes) throw new InvalidDataException("Oversized routed packet.");
-            var data = new ZRoutedRpc.RoutedRPCData
-            {
-                m_msgID = packet.ReadLong(), m_senderPeerID = packet.ReadLong(), m_targetPeerID = packet.ReadLong(),
-                m_targetZDO = packet.ReadZDOID(), m_methodHash = packet.ReadInt(), m_parameters = ReadPackage(packet)
-            };
-            if (packet.GetPos() != packet.Size()) throw new InvalidDataException("Trailing routed data.");
-            return data;
-        }
-        finally { packet.SetPos(cursor); }
-    }
-    public static bool RelevantRouted(ZPackage packet, Func<ZDOID, bool> protectedId)
-    {
-        int cursor = packet.GetPos();
-        try
-        {
-            packet.ReadLong(); packet.ReadLong(); packet.ReadLong();
-            var id = packet.ReadZDOID(); int method = packet.ReadInt();
-            return protectedId(id) || id.IsNone() && method == "DestroyZDO".GetStableHashCode();
-        }
-        finally { packet.SetPos(cursor); }
-    }
+    public static ZRoutedRpc.RoutedRPCData ReadRouted(ZPackage packet) => ZdoPackets.ReadRouted(packet);
+    public static bool RelevantRouted(ZPackage packet, Func<ZDOID, bool> protectedId) => ZdoPackets.RelevantRouted(packet, protectedId);
     public static ZPackage FilterData(ZPackage original, Func<ZDOID, bool> protectedId, out int blocked,
         Action<ZDOID, uint, ushort>? rejected = null)
     {

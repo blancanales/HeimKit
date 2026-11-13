@@ -25,7 +25,7 @@ public static class DiagnosticLog
     public static LogField FieldAlways(string key, object? value) => new(key, value, true);
     // For dictionary and tuple sources: a value whose zero, false or empty form is the answer.
     public static object Kept(object? value) => new LogField("", value, true);
-    public static void StartSession() { Clock.Restart(); ServerActivity.Reset(); _budgets = new(); }
+    public static void StartSession() { Clock.Restart(); ServerActivity.Reset(); _budgets = new(); ServerPerformance.Reset(); }
     public static void ObservePlayers(bool? hasConnectedPlayers) => ServerActivity.Observe(Clock.Elapsed.TotalSeconds, hasConnectedPlayers);
     private static DiagnosticBudget Budget(ManualLogSource logger, string feature)
     {
@@ -34,7 +34,7 @@ public static class DiagnosticLog
         return budget;
     }
     public static bool DebugAvailable(ManualLogSource logger, string feature, bool verbose = false, int requiredSlots = 1) =>
-        ServerActivity.Allowed && (!verbose || VerboseConfigured) && Budget(logger, feature).Available((float)Clock.Elapsed.TotalSeconds, "optional", 61 - Math.Max(1, requiredSlots));
+        ServerActivity.Allowed && !HeimKit.Core.Scheduling.ModuleScheduler.Current.CombatActive && ServerPerformance.OptionalOutputAvailable && (!verbose || VerboseConfigured) && Budget(logger, feature).Available((float)Clock.Elapsed.TotalSeconds, "optional", 61 - Math.Max(1, requiredSlots));
     public static void Write(ManualLogSource logger, string feature, string message, LogLevel level = LogLevel.Info)
         => Write(logger, feature, CoreLogTopics.Lifecycle, message, level: level);
     public static void Write(ManualLogSource logger, string feature, LogTopic topic, string message,
@@ -42,7 +42,48 @@ public static class DiagnosticLog
     {
         if (level == LogLevel.Debug && (!DebugAvailable(logger, feature, verbose) ||
             !Budget(logger, feature).Reserve((float)Clock.Elapsed.TotalSeconds, "optional", 60, false))) return;
-        logger.Log(level, Format(feature, topic, message, fields, level, verbose, error));
+        Deliver(logger, feature, topic, message, fields, level, verbose, error);
+    }
+    // Small diagnostic lane for the evidence needed to evaluate battle pauses.
+    // It bypasses only the combat mute, retaining configuration, time and volume gates.
+    internal static bool ContextAvailable(ManualLogSource logger, DebugLoggingPolicy policy) =>
+        policy.ConfiguredEnabled && ServerActivity.Allowed && ServerPerformance.OptionalOutputAvailable &&
+        Budget(logger, "PlayerActivity").Available((float)Clock.Elapsed.TotalSeconds, "optional", 60) &&
+        Budget(logger, "PlayerActivity").Available((float)Clock.Elapsed.TotalSeconds, "player_context", 24);
+    internal static bool WriteContext(ManualLogSource logger, DebugLoggingPolicy policy, LogFields fields)
+    {
+        if (!ContextAvailable(logger, policy)) return false;
+        var budget = Budget(logger, "PlayerActivity"); float now = (float)Clock.Elapsed.TotalSeconds;
+        if (!budget.Reserve(now, "optional", 60, false) || !budget.Reserve(now, "player_context", 24, false)) return false;
+        Deliver(logger, "PlayerActivity", new LogTopic("player_context"), "Observed player performance context", fields, LogLevel.Debug, false, null);
+        return true;
+    }
+    internal static bool ArrivalAvailable(ManualLogSource logger, DebugLoggingPolicy policy) =>
+        policy.ConfiguredEnabled && ServerActivity.Allowed && ServerPerformance.OptionalOutputAvailable &&
+        Budget(logger, "PlayerActivity").Available((float)Clock.Elapsed.TotalSeconds, "optional", 60) &&
+        Budget(logger, "PlayerActivity").Available((float)Clock.Elapsed.TotalSeconds, "arrival", 12);
+    internal static bool WriteArrival(ManualLogSource logger, DebugLoggingPolicy policy, string player, LogFields fields)
+    {
+        if (!ArrivalAvailable(logger, policy)) return false;
+        var budget = Budget(logger, "PlayerActivity"); float now = (float)Clock.Elapsed.TotalSeconds;
+        if (!budget.Reserve(now, "optional", 60, false) || !budget.Reserve(now, "arrival", 12, false)) return false;
+        Deliver(logger, "PlayerActivity", new LogTopic("arrival"), "Observed arrival work for " + player, fields, LogLevel.Debug, false, null);
+        return true;
+    }
+    private static void Deliver(ManualLogSource logger, string feature, LogTopic topic, string message, LogFields fields, LogLevel level, bool verbose, Exception? error)
+    {
+        long started = Stopwatch.GetTimestamp();
+        string record = Format(feature, topic, message, fields, level, verbose, error);
+        long formatted = Stopwatch.GetTimestamp() - started;
+        ServerPerformance.LogFormat.Add(formatted);
+        started = Stopwatch.GetTimestamp();
+        try { logger.Log(level, record); }
+        finally
+        {
+            long delivered = Stopwatch.GetTimestamp() - started;
+            if (ServerPerformance.LogListeners.Add(delivered)) ServerPerformance.SlowestListener(feature, topic.Name ?? "lifecycle");
+            if (level == LogLevel.Debug) ServerPerformance.OptionalOutput(formatted + delivered);
+        }
     }
     public static string Format(string feature, LogTopic topic, string message, LogFields fields = default,
         LogLevel level = LogLevel.Debug, bool verbose = false, Exception? error = null)

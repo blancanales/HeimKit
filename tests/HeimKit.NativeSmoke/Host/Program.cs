@@ -19,6 +19,10 @@ internal static class Program
     {
         if (args.Length != 5) throw new ArgumentException("Supply Mono runtime DLL, game managed directory, probe assembly, BepInEx core directory and plugin output directory.");
         var library = NativeLibrary.Load(args[0]);
+        // The game normally adds its runtime directory to native resolution.
+        // The isolated host must load the matching compression helper explicitly.
+        var compressionHelper = Path.Combine(Path.GetDirectoryName(args[0])!, "MonoPosixHelper.dll");
+        if (File.Exists(compressionHelper)) NativeLibrary.Load(compressionHelper);
         NativeLibrary.SetDllImportResolver(typeof(Program).Assembly, (name, asm, path) => name == Mono ? library : IntPtr.Zero);
         var runtime = Path.GetDirectoryName(Path.GetDirectoryName(args[0]))!;
         mono_set_dirs(args[1], Path.Combine(runtime, "etc"));

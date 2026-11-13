@@ -20,4 +20,6 @@ internal abstract class OwnershipLease
     public float NextDestinationSend;
     public int DestinationRetries;
     public bool FollowControl;
+    public bool StaticControl;
+    public bool ManualContainerAccess, ManualInteractionRequested;
 }

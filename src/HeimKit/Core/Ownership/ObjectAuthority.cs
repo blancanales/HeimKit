@@ -22,7 +22,9 @@ internal sealed class ObjectAuthority : IDisposable
 {
     private static readonly List<ObjectAuthority> Consumers = new();
     private static readonly Harmony Hooks = new("heimkit.server_object_authority");
+    private static IDisposable? _data, _routed;
     private static readonly HashSet<ZDOID> InstanceIds = new();
+    private static SceneListPass _scenePass;
     private static bool HasRecords
     {
         get
@@ -52,10 +54,12 @@ internal sealed class ObjectAuthority : IDisposable
         {
             try
             {
+                _data = IncomingPackets.RegisterData<byte>(DataPacket, retained: Protected, failed: DataFailed, filtering: HasDataRecords);
+                _routed = IncomingPackets.RegisterRouted<byte>(RoutedPacket, failed: RoutedFailed);
                 foreach (var patch in NativePatches())
                     Hooks.Patch(patch.Target, prefix: new HarmonyMethod(typeof(ObjectAuthority), patch.Prefix));
             }
-            catch { Hooks.UnpatchSelf(); throw; }
+            catch { try { _data?.Dispose(); } finally { _data = null; _routed?.Dispose(); _routed = null; Hooks.UnpatchSelf(); } throw; }
         }
         Consumers.Add(this);
     }
@@ -68,8 +72,6 @@ internal sealed class ObjectAuthority : IDisposable
         return new[]
         {
             (Target(typeof(ZDO), "SetOwner", typeof(long)), nameof(Owner)),
-            (Target(typeof(ZDOMan), "RPC_ZDOData", typeof(ZRpc), typeof(ZPackage)), nameof(Data)),
-            (Target(typeof(ZRoutedRpc), "RPC_RoutedRPC", typeof(ZRpc), typeof(ZPackage)), nameof(Routed)),
             (Target(typeof(ZNetScene), "CreateObjects", typeof(List<ZDO>), typeof(List<ZDO>)), nameof(Instances)),
             (Target(typeof(ZNetScene), "RemoveObjects", typeof(List<ZDO>), typeof(List<ZDO>)), nameof(Instances)),
             (Target(typeof(ZNetScene), "OutsideActiveArea", typeof(Vector3)), nameof(ActiveArea))
@@ -124,9 +126,16 @@ internal sealed class ObjectAuthority : IDisposable
         zdo.OwnerRevision = (ushort)(Math.Max((int)zdo.OwnerRevision, owner) + 1);
         guard!._world.ForceSendZDO(id);
     }
+    private static bool HasDataRecords() => HasRecords;
+    private static void DataFailed(Exception error) => RejectPacket("zdo_data", error);
+    private static void RoutedFailed(Exception error) => RejectPacket("routed", error);
+    private static bool DataPacket(IncomingPackets.Context context, ref ZPackage packet, out byte state)
+    { state = 0; return Data(context.Rpc, ref packet); }
+    private static bool RoutedPacket(IncomingPackets.Context context, ref ZPackage packet, out byte state)
+    { state = 0; return Routed(context.Rpc, ref packet); }
     private static bool Data(ZRpc rpc, ref ZPackage pkg)
     {
-        if (!HasRecords || !Connected(rpc)) return true;
+        if (!HasRecords || !Connected(rpc) || !IncomingPackets.NeedsDataFilter) return true;
         try { pkg = ZdoPackets.FilterData(pkg, Protected, out _, Reassert); return true; }
         catch (Exception error) { RejectPacket("zdo_data", error); return false; }
     }
@@ -190,6 +199,7 @@ internal sealed class ObjectAuthority : IDisposable
     private static void Instances(List<ZDO> currentNearObjects, List<ZDO> currentDistantObjects)
     {
         if (!HasRecords) return;
+        if (!_scenePass.Enter(Time.frameCount, currentNearObjects, ZDOMan.instance)) return;
         var seen = InstanceIds;
         seen.Clear();
         foreach (var record in currentNearObjects) seen.Add(record.m_uid);
@@ -206,17 +216,23 @@ internal sealed class ObjectAuthority : IDisposable
         float now = Time.unscaledTime;
         PacketIncidents.TryGetValue(operation, out var incident);
         if (now < incident.Next) { PacketIncidents[operation] = (incident.Next, incident.Repeats + 1); return; }
-        var logger = Consumers.FirstOrDefault()?._log;
+        var logger = (Consumers.Count == 0 ? null : Consumers[0]._log);
         if (logger != null) DiagnosticLog.Write(logger, "HeimKit", CoreLogTopics.Lifecycle, "Rejected protected-object network data; other packets remain active.", new (string, object?)[] { ("operation", operation), ("error_type", error.GetType().FullName), ("repeats_suppressed", incident.Repeats) }, LogLevel.Error, error: incident.Next == 0 ? error : null);
         PacketIncidents[operation] = (now + 60, 0);
     }
     public void Dispose()
     {
-        if (_disposed) return; _disposed = true;
+        if (_disposed) return; _disposed = true; _scenePass.Clear();
         var errors = new List<Exception>();
         foreach (var id in _records.Keys.ToArray()) { try { Release(id); } catch (Exception error) { errors.Add(error); } }
         Consumers.Remove(this);
-        if (Consumers.Count == 0) { PacketIncidents.Clear(); try { Hooks.UnpatchSelf(); } catch (Exception error) { errors.Add(error); } }
+        if (Consumers.Count == 0)
+        {
+            PacketIncidents.Clear();
+            try { _data?.Dispose(); } catch (Exception error) { errors.Add(error); } finally { _data = null; }
+            try { _routed?.Dispose(); } catch (Exception error) { errors.Add(error); } finally { _routed = null; }
+            try { Hooks.UnpatchSelf(); } catch (Exception error) { errors.Add(error); }
+        }
         if (errors.Count > 0) throw new AggregateException("Authority cleanup failed.", errors);
     }
 }

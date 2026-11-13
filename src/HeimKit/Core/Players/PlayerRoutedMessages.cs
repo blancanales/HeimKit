@@ -25,7 +25,7 @@ public sealed class PlayerRoutedMessages : IDisposable
         public void Dispose() => _owner.Remove(this);
     }
     private static PlayerRoutedMessages? _current;
-    private readonly Harmony _harmony = new("heimkit.player_routed_messages");
+    private IDisposable? _packets;
     private readonly List<Subscription> _subscriptions = new();
     private Subscription[] _snapshot = Array.Empty<Subscription>();
     public IDisposable Subscribe(Action<ZRpc, ZPackage> observed, Action<Exception> failed)
@@ -36,14 +36,15 @@ public sealed class PlayerRoutedMessages : IDisposable
             try
             {
                 _current = this;
-                _harmony.Patch(AccessTools.Method(typeof(ZRoutedRpc), "RPC_RoutedRPC"),
-                    prefix: new HarmonyMethod(typeof(PlayerRoutedMessages), nameof(Observe)));
+                _packets = IncomingPackets.RegisterRouted<byte>(Packet, affectsOriginal: false);
             }
-            catch { _harmony.UnpatchSelf(); _current = null; throw; }
+            catch { _packets?.Dispose(); _packets = null; _current = null; throw; }
         }
         var subscription = new Subscription(this, observed, failed);
         _subscriptions.Add(subscription); _snapshot = _subscriptions.ToArray(); return subscription;
     }
+    private static bool Packet(IncomingPackets.Context context, ref ZPackage packet, out byte state)
+    { state = 0; Observe(context.Rpc, packet); return true; }
     private static void Observe(ZRpc rpc, ZPackage pkg)
     {
         var current = _current;
@@ -66,14 +67,14 @@ public sealed class PlayerRoutedMessages : IDisposable
         if (!_subscriptions.Remove(subscription)) return;
         _snapshot = _subscriptions.ToArray();
         if (_subscriptions.Count != 0) return;
-        try { _harmony.UnpatchSelf(); }
+        try { _packets?.Dispose(); _packets = null; }
         finally { if (ReferenceEquals(_current, this)) _current = null; }
     }
     public void Dispose()
     {
         _subscriptions.Clear();
         _snapshot = Array.Empty<Subscription>();
-        try { _harmony.UnpatchSelf(); }
+        try { _packets?.Dispose(); _packets = null; }
         finally { if (ReferenceEquals(_current, this)) _current = null; }
     }
 }

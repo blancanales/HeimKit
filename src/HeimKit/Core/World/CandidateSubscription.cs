@@ -23,6 +23,16 @@ internal sealed class CandidateSubscription : IDisposable
     internal string Owner { get; }
     internal ScanKind Kind { get; }
     internal bool Broad { get; }
+    internal long Revision { get; private set; }
+    internal int Count => _locations.Count;
+    internal bool Fallback => _fallback;
+    internal bool Indexed => !_fallback && !_disposed;
+    internal void Refresh()
+    {
+        if (_disposed) throw new ObjectDisposedException(Owner);
+        _provider.RefreshCandidates();
+        if (_failure != null) throw new InvalidOperationException(Owner + " candidate classification failed.", _failure);
+    }
     internal IReadOnlyList<ZDO> Records => _records;
     internal CandidateSubscription(WorldObjectProvider provider, string owner, Func<ZDO, bool> accept, ScanKind kind, bool broad = false)
     { _provider = provider; Owner = owner; _accept = accept; Kind = kind; Broad = broad; _nearbyView = new CandidateView(_nearby); }
@@ -36,23 +46,25 @@ internal sealed class CandidateSubscription : IDisposable
         Remove(record.m_uid);
         // A very large selection uses shared broad views instead of repeatedly
         // invalidating discovery for every other module.
-        if (_locations.Count >= WorldCandidateIndex.Capacity) { Clear(); _fallback = true; return; }
+        if (_locations.Count >= WorldCandidateIndex.Capacity) { Clear(); _fallback = true; _provider.SelectionFellBack(this); return; }
         if (!_cells.TryGetValue(cell, out var ids)) _cells.Add(cell, ids = new());
-        ids.Add(record.m_uid); _locations.Add(record.m_uid, cell);
+        ids.Add(record.m_uid); _locations.Add(record.m_uid, cell); Revision++;
     }
     internal void Remove(ZDOID id)
     {
         if (!_locations.TryGetValue(id, out var cell)) return;
         _locations.Remove(id);
+        Revision++;
         if (_cells.TryGetValue(cell, out var ids)) { ids.Remove(id); if (ids.Count == 0) _cells.Remove(cell); }
     }
     internal void ForgetCell(Vector2s cell)
     {
+        Revision++; // An empty seeded cell can also lose its coverage guarantee.
         if (!_cells.TryGetValue(cell, out var ids)) return;
         foreach (var id in ids) _locations.Remove(id);
         _cells.Remove(cell);
     }
-    internal void Clear() { _cells.Clear(); _locations.Clear(); _fallback = false; }
+    internal void Clear() { _cells.Clear(); _locations.Clear(); _fallback = false; Revision++; }
     internal void AppendCell(Vector2s cell, bool near, List<ZDO> result)
     {
         if (_fallback) { _provider.FilterCell(cell, _accept, near, result); return; }

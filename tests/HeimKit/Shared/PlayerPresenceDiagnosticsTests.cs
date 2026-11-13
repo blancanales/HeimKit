@@ -1,13 +1,19 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Logging;
-using HeimKit.Shared;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 internal static class PlayerPresenceDiagnosticsTests
 {
     public static void Run()
     {
         using var log = new ManualLogSource("Presence notice checks");
         var records = new List<(LogLevel Level, string Text)>();
-        log.LogEvent += (_, e) => records.Add((e.Level, e.Data.ToString()!));
+        log.LogEvent += (_, e) => records.Add((e.Level, LogCapture.Text(e.Data)));
         var notices = new PlayerPresenceDiagnostics(log);
         try
         {

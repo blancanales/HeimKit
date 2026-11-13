@@ -15,7 +15,7 @@ using HeimKit.Core.Players;
 
 namespace HeimKit.Features.WeatherGuard;
 
-public sealed class WeatherGuard : IServerModule
+public sealed class WeatherGuard : IServerModule, IImmediateActivation
 {
     private readonly WeatherGuardSettings _settings;
     private readonly ManualLogSource _logger;
@@ -65,14 +65,15 @@ public sealed class WeatherGuard : IServerModule
         if (IsActive)
         {
             if (ServerReady) _processing.ServerReady();
-            if (_occupied != true) StopController();
+            if (_occupied != true)
+                using (PerformanceStages.Measure("WeatherGuard", "idle_release")) StopController();
             else
             {
-                StartController();
+                using (PerformanceStages.Measure("WeatherGuard", "controller_start")) StartController();
                 _controller?.Tick(now);
             }
         }
-        PollCoverage(now);
+        using (PerformanceStages.Measure("WeatherGuard", "coverage_poll")) PollCoverage(now);
     }
     private static bool ServerReady => WorldServices.Terrain;
     private void PresenceChanged(bool? occupied)
@@ -93,8 +94,9 @@ public sealed class WeatherGuard : IServerModule
         if (!WorldServices.Terrain) { StopController(); _processing.Paused("world services unavailable"); return; }
         if (!ReferenceEquals(_world, world) && _controller != null) { StopController(); _processing.Paused("world changed"); }
         if (_controller != null) return;
+        using var timing = PerformanceStages.Measure("WeatherGuard", "activation");
         _world = world;
-        _controller = new WeatherGuardController(this, _logger, _settings.DebugLogging, _settings.DebugLogLevel.Value, _settings.LogWorldCreatedItems.Value, _settings.ProtectRain.Value, _settings.ProtectUnderwater.Value, _settings.ExcludedPrefabs.Value, _players.Presence);
+        _controller = new WeatherGuardController(this, _logger, _settings.DebugLogging, _settings.DebugLogLevel.Value, _settings.LogWorldCreatedItems.Value, _settings.ProtectRain.Value, _settings.ProtectUnderwater.Value, _settings.ExcludedPrefabs.Value, _players.Presence, _players.Context, reuseSceneLists: _settings.ReuseSceneLists.Value);
         _controller.Install();
         _processing.Ready();
     }

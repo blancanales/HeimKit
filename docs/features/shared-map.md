@@ -2,11 +2,17 @@
 
 SharedMap saves community exploration and discoveries, then shares them through vanilla cartography tables. Install HeimKit on the dedicated server; players use unmodified clients and choose **Read Map** to receive updates. Collection works before any table exists.
 
-SharedMap and portal/resource/dungeon/runestone/recurring-spawner markers default enabled. Each source works independently. See [safety and limitations](../limitations.md#sharedmap) for discovery, client-update and upload limitations, and [server setup](../server-setup.md) for installation and shared settings.
+SharedMap and its portal, resource, dungeon, runestone, recurring-spawner and Dvergr structure marker settings default enabled. See [safety and limitations](../limitations.md#sharedmap) for discovery, client-update and upload limitations, and [server setup](../server-setup.md) for installation and shared settings.
 
 ![SharedMap: explore, save and Read Map, with Portal Marker, Resource Marker, Dungeon Marker, Runestone Marker and Spawner Marker options](../images/shared-map-workflow.jpg)
 
 ## Shared exploration
+
+Background discovery, metadata preparation, dungeon loot observation and table updates now share bounded work admission. They pause entirely during native raids and server-observed fights, then resume through ordinary bounded scheduling. Routine discovery/publication stores flush snapshots in the background; orderly lifecycle changes still finish pending writes. See [performance observations](../server-setup.md#performance-observations) and [limitations](../limitations.md#server-observations-and-logs).
+
+Nearby cartography tables use shared targeted discovery across occupied regions. Periodic table preparation cooperates with other scheduled work and spreads decoding, terrain merging, pins and compression across updates; its existing rotating table limit still applies. Only completed results against an unchanged table field are published. The shared [performance observations](../server-setup.md#performance-observations) describe this workload.
+
+Runestone/spawner metadata, dungeon metadata and room templates reuse scene-scoped decoded data when players return. First preparation uses native asynchronous asset requests rather than synchronous asset waits. Periodic pin diagnostics reuse already-validated table data. Normal performance records distinguish metadata inspection, async request admission, table processing and save preparation; optional Debug adds bounded cache/load outcomes and observed wait duration.
 
 Terrain is recorded around usable outdoor player positions using the native minimap radius and interval. Accepted table exploration is unioned with the community map, so a smaller upload never erases existing exploration. Readers receive it in vanilla's shared-exploration layer; personally explored terrain remains separate.
 
@@ -22,13 +28,17 @@ While enabled, automatic portal management reserves every portal-icon pin in tab
 
 ## Resource Marker
 
-Records outdoor Copper, Tin, Silver, Obsidian and static Flametal deposits with labeled dot markers. Scraps, dungeon resources, creatures, dropped items, ordinary stone and player-built objects are excluded.
+Records outdoor Copper, Tin, Silver, Obsidian, static Flametal deposits, Black Marble skull/rib remains and discovered Ancient Roots with labeled dot markers. Scraps, dungeon resources, creatures, dropped items, ordinary stone and player-built objects are excluded.
+
+Black Marble remains use labels such as `Black Marble 65%`. Both intact remains and their fractured mining forms qualify. Existing resource grouping, retrospective discovery, depletion removal and nearby-landmark hiding apply. See [discovery and client-update limits](../limitations.md#sharedmap).
+
+Ancient Roots receive individual labels such as `Ancient Root 65%`, showing the last observed native sap reserve. Nearby roots remain separate. No extractor is needed for discovery, and this percentage does not describe an extractor's stored sap. Temporarily empty roots remain visible at `0%` and update when native regeneration is observed. Unknown reserve shows `?%`. Roots use ordinary near-player discovery, with optional previously-explored discovery under ResourceDiscoverPreviouslyExplored, and the existing nearby-landmark display rule. See [root observation limits](../limitations.md#sharedmap).
 
 Silver requires a direct pickaxe hit or a qualifying pickaxe impact near the nearest eligible vein. SilverDiscoveryRadiusMeters controls nearby impact discovery; direct hits select the struck vein. Travel, Wishbone pings and retrospective exploration do not unlock Silver.
 
-ResourceClusterDistanceMeters groups the same resource type around fixed discovery anchors; zero shows each deposit. Tin groups show remaining discovered nodes, such as `Tin (3)`. Copper and Silver show remaining-section percentages, such as `Copper 65%`; `?%` means progress is unknown. Confirmed depleted nodes disappear when ResourceRemoveDepleted is true; false retains historical nodes.
+ResourceClusterDistanceMeters groups the same resource type around fixed discovery anchors; zero shows each deposit. Tin groups show remaining discovered nodes, such as `Tin (3)`. Copper, Silver and Black Marble show remaining-section percentages, such as `Copper 65%`; `?%` means progress is unknown. Confirmed depleted nodes disappear when ResourceRemoveDepleted is true; false retains historical nodes.
 
-ResourceMarkerHideDistanceMeters defaults to 10 metres. A generated resource marker or group at or within that horizontal distance of a published portal, dungeon, runestone or physical-spawner marker is hidden to reduce clutter. Resource discoveries, grouping and depletion tracking are retained; another resource marker does not hide it. The comparison uses final published map positions after marker exclusions and offsets. Resources can reappear when the nearby landmark marker is removed or its source is disabled. Set the distance to 0 to disable this display rule. Personal pins are preserved. See [client map updates](../limitations.md#client-map-updates) for existing personal-map copies.
+ResourceMarkerHideDistanceMeters defaults to 10 metres. A generated resource marker or group at or within that horizontal distance of a published portal, dungeon, runestone, physical-spawner or Dvergr structure marker is hidden to reduce clutter. Resource discoveries, grouping and depletion tracking are retained; another resource marker does not hide it. The comparison uses final published map positions after marker exclusions and offsets. Resources can reappear when the nearby landmark marker is removed or its source is disabled. Set the distance to 0 to disable this display rule. Personal pins are preserved. See [client map updates](../limitations.md#client-map-updates) for existing personal-map copies.
 
 ResourceDiscoverPreviouslyExplored also discovers eligible deposits in saved community-explored terrain without a revisit. Silver keeps its mining requirement. Turning the setting off retains accepted discoveries. Player-created dot pins keep their original records.
 
@@ -43,7 +53,6 @@ Records supported dungeon **exterior entrances** within the native exploration r
 | Troll caves | Troll Cave |
 | Mountain caves | Frost Cave |
 | Mistlands mines | Infested Mine |
-| Queen dungeon | Infested Citadel |
 | Hildir crypt | Smouldering Tomb |
 | Hildir cave | Howling Cavern |
 | Morgen caves | Putrid Hole |
@@ -52,7 +61,7 @@ Records supported dungeon **exterior entrances** within the native exploration r
 | Winding tunnels | Winding Tunnels |
 | Mörkhalla | Mörkhalla |
 
-Only verified placed entrances qualify. Sealed Tower, ordinary buildings, disabled dungeon variants and the condition-controlled Prison entrance are excluded. The [specification](../specs/shared-map.md#automatic-dungeon-entrances) lists exact prefabs.
+Only verified placed entrances qualify. The Queen’s dungeon uses the native boss marker. SharedMap removes its earlier Infested Citadel copies from shared table data. Sealed Tower, ordinary buildings, disabled dungeon variants and the condition-controlled Prison entrance are excluded. The [specification](../specs/shared-map.md#automatic-dungeon-entrances) lists exact prefabs.
 
 DungeonDiscoverPreviouslyExplored also discovers placed entrances whose exterior points lie in saved community-explored terrain. It scans gradually without generating locations or loading scenes. Disabling retrospective discovery retains accepted records. Disabling DungeonMarkerSync retains its store and removes generated dungeon pins during table normalization.
 
@@ -82,13 +91,19 @@ Visits and progress survive restarts. Existing saves without visit history unloc
 
 ### Shared X checkmarks
 
-SharePinCheckmarks defaults false, keeping player X marks personal. Enable it with AllowPlayerMapWrites to share checked/unchecked changes through Write Map and Read Map across dungeon, portal, resource, runestone, spawner and ordinary player pins. For a grey shared marker, the first click makes it personal and the next toggles its X; Write Map shares the change. Manual X marks are independent of pickup percentages. Checkmarks and publication positions survive restarts in `.pin-state`. Percentage/checkmark changes use small publication offsets around the original source; see [client map updates](../limitations.md#client-map-updates).
+SharePinCheckmarks defaults false, keeping player X marks personal. Enable it with AllowPlayerMapWrites to share checked/unchecked changes through Write Map and Read Map across dungeon, portal, resource, runestone, spawner, Dvergr structure and ordinary player pins. For a grey shared marker, the first click makes it personal and the next toggles its X; Write Map shares the change. Manual X marks are independent of pickup percentages. Checkmarks and publication positions survive restarts in `.pin-state`. Percentage/checkmark changes use small publication offsets around the original source; see [client map updates](../limitations.md#client-map-updates).
 
 ## Runestone Marker
 
 This source defaults enabled and shares separate vanilla dot markers for placed Boar, Greydwarf, Draugr and biome lore runestones. The [specification](../specs/shared-map.md#runestone-eligibility-and-placement) lists all eleven supported location prefabs. Stones qualify through their actual placed point; reading them is unnecessary. Boss trophy stones, Vegvisirs and decorative writing are excluded. Boar Runestones identify Meadows landmarks, not recurring boar farms.
 
 Eligible placed stones inside saved community exploration are also discovered automatically. Disabling RunestoneMarkerSync retains discoveries and removes its generated table publications during reconciliation.
+
+## Dvergr Structure Marker
+
+Share placed Dvergr Guard Tower, Dvergr Lighthouse and Dvergr Excavation locations as vanilla house pins, including ruined variants. The server discovers locations within native exploration range or in saved community-explored terrain. Choose **Read Map** at a cartography table to receive the markers.
+
+The three Dvergr settings control publication independently. While any switch is enabled, SharedMap records discoveries for all three kinds. Disabling a kind and restarting removes its generated pins from shared table data at the next reconciliation and keeps its discovery history. See [client map updates](../limitations.md#client-map-updates) for personal copies and icon filters.
 
 ## Spawner Marker
 
@@ -159,7 +174,7 @@ Settings belong under `[SharedMap]`. Stop the server before editing; restart to 
 | Enabled | true | Community exploration and table filtering. |
 | PortalMarkerSync | true | Named player-built portal markers. |
 | PortalClusterDistanceMeters | 60 | Portal anchor grouping distance; 0–100 metres, zero disables grouping. |
-| ResourceMarkerSync | true | Outdoor metal and Obsidian markers. |
+| ResourceMarkerSync | true | Outdoor resource and Ancient Root sap-reserve markers. |
 | ResourceDiscoverPreviouslyExplored | false | Discover eligible deposits in old community exploration. |
 | ResourceClusterDistanceMeters | 30 | Same-type resource grouping; 0–100 metres, zero disables grouping. |
 | ResourceMarkerHideDistanceMeters | 10 | Hide resource markers within this horizontal distance of another generated landmark; 0–100 metres, zero disables hiding. |
@@ -171,6 +186,9 @@ Settings belong under `[SharedMap]`. Stop the server before editing; restart to 
 | DungeonDiscoverPreviouslyExplored | false | Discover placed entrances in old community exploration. |
 | RunestoneMarkerSync | true | Share eligible placed lore stones, including community-explored points. |
 | SpawnerMarkerSync | true | Share eligible recurring sources, including community-explored points; hide confirmed destroyed sources. |
+| DvergrGuardTowerMarkerSync | true | Share discovered Dvergr guard towers, including ruins. |
+| DvergrLighthouseMarkerSync | true | Share discovered Dvergr lighthouses, including ruins. |
+| DvergrExcavationMarkerSync | true | Share discovered Dvergr excavations, including ruins. |
 | AllowPlayerMapWrites | true | Accept player terrain/pin uploads; false retains server map data. |
 | TableIntervalSeconds | 10 | Nearby reconciliation interval; 2–120 seconds. |
 | MaxTablesPerPass | 1 | Table payloads per import/reconciliation/admin pass; 1–8. |
@@ -191,6 +209,7 @@ Files live in `HeimKit/SharedMap` beneath the active BepInEx configuration direc
 | `.entrances` | Dungeon gateway identities, exterior coordinates, labels, visits and pickup progress. |
 | `.runestones` | Placed lore-stone discoveries and actual source points. |
 | `.spawners` | Recurring-source discoveries and terminal-destruction tombstones. |
+| `.structures` | Placed Dvergr structure discoveries. |
 | `.pin-state` | Shared checkmarks, source identities and marker refresh positions. |
 | `.pin-removals` | Selected pin exclusions. |
 
@@ -210,8 +229,12 @@ Discovery/publication details are capped at six per stream per minute; the [spec
 - `portals`: Portal marker publication.
 - `resources`: Outdoor resource discovery and retirement.
 - `dungeons`: Entrance discovery and pickup progress.
-- `landmarks`: Runestone and recurring-spawner observations.
+- `landmarks`: Runestone, recurring-spawner and Dvergr structure observations.
 - `tables`: Cartography table and pin reconciliation.
 - `save`: Persistent state loading and saving.
 
 Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.
+
+Optional [arrival diagnostics](../server-setup.md#performance-observations) correlate existing processing with player arrivals. They report passive protection or table-work observations without changing this feature's behavior.
+
+During the first two seconds of a nearby observed arrival, optional pin-change comparisons are skipped before decoding/comparison; arrival summaries count the skipped attempts. Other locations retain their diagnostics once the destination is known. Table validation, exploration, normalization, publication, uploads and standard result logs continue unchanged. Skipped Debug comparisons are not queued or replayed. See the shared [arrival observation contract](../architecture.md#logging).

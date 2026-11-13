@@ -1,7 +1,13 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
-using HeimKit.Shared;
 using System.Runtime.CompilerServices;
 
 internal static class DebugLoggingDeliveryTests

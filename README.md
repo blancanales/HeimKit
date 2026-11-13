@@ -2,17 +2,21 @@
 
 ![HeimKit: shield and longhouse emblem beside the HeimKit name](docs/images/heimkit-banner.jpg)
 
-Quality-of-life features for Windows Valheim dedicated servers: infinite torches, shared map exploration and markers, weather protection, majority sleep, AFK raid protection, tame portal travel, door closing, tree renewal, sunken-loot recovery and gradual building repairs.
+Quality-of-life features for Windows Valheim dedicated servers: infinite torches, shared map exploration and markers, weather protection, majority sleep, AFK raid protection, tame portal travel, door closing, tree renewal, sunken-loot recovery, gradual building repairs and production-station feeding.
 
 Install on the server. Players use unmodified Valheim clients. Choose each feature independently in `heimkit.cfg`.
 
-DoorKeeper, ForestRenewal, SeaSalvage, TameTravel and HeimMender default enabled. Review their guides and disable any features you do not want before starting the server. Existing configuration values are preserved; missing settings are added automatically. Install only one HeimKit plugin DLL.
+DoorKeeper, ForestRenewal, SeaSalvage, TameTravel, HeimMender and StationSupply default enabled. Review their guides and disable any features you do not want before starting the server. Existing configuration values are preserved; missing settings are added automatically. Install only one HeimKit plugin DLL.
 
 Before enabling HeimKit, follow [world backups](docs/world-backups.md) and read [safety and limitations](docs/limitations.md).
 
+## Support HeimKit
+
+If HeimKit makes your Valheim server more enjoyable, you can [support its development and maintenance on Buy Me a Coffee](https://buymeacoffee.com/heimkit). Contributions are completely optional. Thank you for using HeimKit!
+
 ## Features
 
-![All ten HeimKit features: InfiniteTorches, WeatherGuard, AFKNightWatch, AFKRaidWatch, TameTravel, DoorKeeper, ForestRenewal, SeaSalvage, HeimMender and SharedMap](docs/images/feature-overview.jpg)
+![All eleven HeimKit features, including StationSupply production-station feeding](docs/images/feature-overview.jpg)
 
 ### InfiniteTorches
 
@@ -42,15 +46,16 @@ Excludes idle-only locations from new automatic random raids. Nearby active or u
 
 Saves community exploration and discoveries across restarts, independently of cartography tables. Players choose **Read Map** at a vanilla table to receive updates. Shared death pins are filtered.
 
-Five independent marker options default enabled:
+SharedMap’s marker options default enabled.
 
 - **Portal Marker:** named player-built portals, with optional nearby grouping.
-- **Resource Marker:** outdoor metal/Obsidian deposits, Tin node counts and Copper/Silver progress. Silver requires pickaxe discovery.
+- **Resource Marker:** outdoor metal/Obsidian deposits and Black Marble skull/rib remains, Tin node counts and Copper/Silver/Black Marble mining progress, and discovered Ancient Roots with observed sap-reserve percentages. Silver requires pickaxe discovery.
 - **Dungeon Marker:** labeled exterior entrance markers with the vanilla hammer icon and cleanup of nearby duplicate dungeon pins. Supported pickup percentages appear after observed entry or evidence of already-picked items.
 - **Runestone Marker:** placed lore-runestone landmarks as labeled dots.
+- **Dvergr Structure Marker:** house pins for discovered guard towers, lighthouses and excavations, including ruins, with a separate switch for each kind.
 - **Spawner Marker:** visible, player-destructible recurring spawner objects as labeled dots, removed after confirmed source destruction.
 
-Optional settings discover resources/dungeons in previously explored terrain or reject player map uploads while automatic collection continues. Enabled runestone/spawner markers automatically include eligible points in community-explored terrain. Optional shared X checkmarks default off. Server owners can remove a selected shared pin through server-side administration without clearing other pins or exploration.
+Optional settings discover resources/dungeons in previously explored terrain or reject player map uploads while automatic collection continues. Enabled runestone, spawner and Dvergr structure markers include eligible points in community-explored terrain. Optional shared X checkmarks default off. Server owners can remove a selected shared pin through server-side administration without clearing other pins or exploration.
 
 [Usage, settings and administration](docs/features/shared-map.md) · [Specification](docs/specs/shared-map.md)
 
@@ -84,6 +89,12 @@ Gradually repairs damaged player-built structures with configurable cycles, chan
 
 [Usage and administration](docs/features/heim-mender.md) · [Specification](docs/specs/heim-mender.md)
 
+### StationSupply
+
+Keeps production stations supplied with real materials from one nearby public chest per resource intake. Place separate chests beside the fuel and material hatches; an empty selected chest waits instead of drawing from other storage. Supports smelters, charcoal kilns, blast furnaces, windmills, spinning wheels, eitr refineries, Frigid Kilns and shield generators. Optional fermenter and Obliterator feeding default off. Obliterator input supports item categories and manual lever activation; output stays native.
+
+[Usage and settings](docs/features/station-supply.md) · [Illustrated chest placement](docs/features/station-supply.md#placement-examples) · [Specification](docs/specs/station-supply.md)
+
 ## Setup and compatibility
 
 Windows dedicated servers with BepInExPack Valheim are supported. Players use unmodified clients. See [supported environment](docs/server-setup.md#supported-environment) for exact requirements and [safety and limitations](docs/limitations.md) for gameplay/client constraints.
@@ -92,7 +103,7 @@ The default [server upgrade policy](docs/server-setup.md#server-upgrades) lets H
 
 ![Server installation: HeimKit and BepInEx belong on the dedicated server; clients remain unmodified](docs/images/server-installation.jpg)
 
-Follow [server setup](docs/server-setup.md#installation) for Thunderstore Mod Manager or manual installation. Gameplay processing pauses when the server is empty and resumes after a player joins; see [feature lifecycle](docs/server-setup.md#feature-lifecycle).
+Follow [server setup](docs/server-setup.md#installation) for Thunderstore Mod Manager or manual installation. Gameplay processing pauses when the server is empty and resumes after a player joins. Background conveniences pause during raids and detected battles while WeatherGuard continues protecting structures; see [feature lifecycle](docs/server-setup.md#feature-lifecycle).
 
 ## Documentation
 

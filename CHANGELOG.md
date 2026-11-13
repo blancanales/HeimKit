@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- SharedMap uses the native boss marker for the Queen’s dungeon and removes its earlier Infested Citadel pins from shared table data.
+- Added Dvergr house pins for discovered guard towers, lighthouses and excavations, including ruins. Each kind has an independent switch that defaults enabled.
+
+- Fixed a WeatherGuard slowdown that could persist after players explored or traveled across many areas in a long session.
+- Reduced WeatherGuard's per-frame scene work at large bases. Set `[WeatherGuard] ReuseSceneLists` to `false` and restart to rebuild the extra scene lists every frame.
+
+- StationSupply now moves up to `MaxItemsPerVisit` real items per atomic visit (default 10) and serves up to `MaxActiveTransactions` stations at once (default 2) when their station and chest records are separate. Set both settings to `1` to restore single-item visits and one transaction at a time.
+- Reduced repeated server work in WeatherGuard scene handling and incoming network inspection while preserving weather protection and ownership safeguards.
+
+- Reduced HeimMender's routine server work on large bases. It now follows only damaged pieces, picked up as their health changes, instead of re-checking every building piece every two seconds. Quiet periods, hostile clearance and per-cycle limits are unchanged.
+- HeimMender now restores a damaged base gradually instead of in fixed bursts. After damage stops and nearby untamed creatures leave, each piece is repaired at its own random point within the new `RepairSpreadSeconds` period (default 1320, about 22 minutes), so a base mends piece by piece over roughly a game day. The new `CatchUpIntervalSeconds` (default 15) sets how often HeimMender checks for pieces that have come due. Set `RepairSpreadSeconds` to `0` for prompt repairs, or `CatchUpIntervalSeconds` to `0` for fixed `IntervalSeconds` cycles. Existing configurations receive both settings automatically.
+- Added discovered Ancient Root map markers with the last observed sap-reserve percentage. Empty roots stay marked as they regenerate; extractors and root levels are left under native game control.
+- Added Black Marble resource markers for outdoor petrified skulls and ribs, including fractured mining forms, remaining-section percentages and depleted-marker cleanup. Uses the existing resource discovery, grouping and map-clutter settings.
+- Added StationSupply: keep smelters, charcoal kilns, blast furnaces, windmills, spinning wheels, eitr refineries, Frigid Kilns and shield generators supplied with real resources from nearby public chests. Production speeds, resource costs and outputs remain native.
+- Fuel and material intakes each use one nearest chest at their loading point. An empty or busy selected chest waits instead of drawing from other storage. StationSupply defaults enabled, with independent station-family controls.
+- Added optional fermenter filling and Obliterator feeding, both off by default. Obliterator input uses selectable item categories, initially All, while players continue to pull the lever manually and collect outputs normally.
+- Added a StationSupply chest-placement guide for every supported station, with in-game examples and guidance for separate fuel and material chests. The guide also includes Obliterator category examples.
+- Moved the server-wide performance window and slow-stage breakdown to global Verbose Debug. The reports omit unavailable measurements.
+- Updated the feature overview to include StationSupply.
+
 ## 0.2.2
 
 - HeimKit now attempts to run after Valheim updates by default. The new `[Compatibility] AllowUnverifiedVersions` switch replaces the manual exact-version override; set it to `false` to require the audited baseline. See [server upgrade settings](https://github.com/blancanales/HeimKit/blob/v0.2.2/docs/server-setup.md#server-upgrades).

@@ -23,7 +23,7 @@ if ($taskVersion -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 if ($taskProject.Project.PropertyGroup.IncludeSourceRevisionInInformationalVersion -ne 'false') {
     throw 'Disable the automatic source-revision suffix before building.'
 }
-$taskTestsPath = Join-Path $PSScriptRoot 'tests/HeimKit2/HeimKit.Tests.csproj'
+$taskTestsPath = Join-Path $PSScriptRoot 'tests/HeimKit/HeimKit.Tests.csproj'
 $taskTestsDirectory = Split-Path -Parent $taskTestsPath
 $taskTests = [xml][IO.File]::ReadAllText($taskTestsPath)
 $taskTestsFramework = [string]$taskTests.Project.PropertyGroup.TargetFramework

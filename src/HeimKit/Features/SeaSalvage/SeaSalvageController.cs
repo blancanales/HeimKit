@@ -56,11 +56,11 @@ internal sealed class SeaSalvageController : IDisposable
     }
     public void Tick(float now)
     {
-        if (!ModuleScheduler.Current.Due(this, "processing", now, _settings.IntervalSeconds.Value)) return;
-        using var timing = _diagnostics.OptionalEnabled ? _diagnostics.Measure(now, () => _scope.Records.Count) : null;
         // Do not release a consumed record before native destruction removes it.
         _remove.Clear(); foreach (var id in _held) if (_world.GetZDO(id) == null) _remove.Add(id);
         foreach (var id in _remove) { _authority.Release(id); _held.Remove(id); }
+        if (!ModuleScheduler.Current.Due(this, "processing", now, _settings.IntervalSeconds.Value, cooperative: true)) return;
+        using var timing = _diagnostics.OptionalEnabled ? _diagnostics.Measure(now, () => _scope.Records.Count) : null;
         if (!_scope.Refresh(_settings.ScanRangeMeters.Value)) { _settling.Clear(); _terrain.Clear(); return; }
         _remove.Clear();
         foreach (var p in _settling) if (now - p.Value.Seen > 120 || now < p.Value.Since || _world.GetZDO(p.Key) == null) _remove.Add(p.Key);

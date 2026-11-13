@@ -20,7 +20,8 @@ internal sealed class HeimMenderController : IDisposable
     private readonly HeimMenderSettings _settings;
     private readonly ManualLogSource _log;
     private readonly PlayerServices _players;
-    private readonly PlayerWorldScope _scope;
+    private PlayerWorldScope _scope;
+    private float _healthScale;
     private readonly HeimMenderRules _rules = new();
     private readonly HeimMenderDiagnostics _diagnostics;
     private readonly Dictionary<ZDOID, RepairObservation> _observations = new();
@@ -46,31 +47,54 @@ internal sealed class HeimMenderController : IDisposable
         _settings = settings; _log = log; _players = players; _scope = WorldObjectProvider.Current.CreateScope("HeimMender");
         _diagnostics = new(log, settings.DebugLogging); _interval = settings.IntervalSeconds.Value; _cycle.Postpone(Time.unscaledTime, _interval);
         _messages = players.RoutedMessages.Subscribe(Observe, fail);
-        try { _scope.Index(z => _rules.Monster(z.GetPrefab()) || _rules.Eligible(z, out _, out _)); } catch { _messages.Dispose(); throw; }
+        _healthScale = _rules.HealthScale();
+        try { _scope.Index(Tracked); } catch { _messages.Dispose(); throw; }
     }
+    // Selection membership is damage, not eligibility: healthy structures never enter a pass.
+    // Core reclassifies a record whenever its replicated or local data changes.
+    private bool Tracked(ZDO record) => _rules.Monster(record.GetPrefab()) || _rules.Damaged(record);
+    private void Reindex()
+    {
+        var previous = _scope; _scope = WorldObjectProvider.Current.CreateScope("HeimMender");
+        try { _scope.Index(Tracked); } finally { previous.Dispose(); }
+    }
+    // A restored, replaced or no-longer-eligible piece leaves the selection without another change
+    // to observe, so its slot is released here rather than by a later scope pass.
+    private bool Settled(RepairObservation observation) =>
+        !ReferenceEquals(ZDOMan.instance.GetZDO(observation.Identity), observation.Record) || !_rules.Damaged(observation.Record);
     public void Tick(float now)
     {
-        if (!ModuleScheduler.Current.Due(this, "processing", now, 2)) return;
-        using var timing = _diagnostics.OptionalEnabled ? _diagnostics.Measure(now, () => _observations.Count) : null;
-        if (_interval != _settings.IntervalSeconds.Value) { _interval = _settings.IntervalSeconds.Value; _cycle.Postpone(now, _interval); }
-        _expiredAdmins.Clear();
-        foreach (var id in _adminRate.Keys)
+        bool service = ModuleScheduler.Current.Due(this, "processing", now, 2);
+        if (service)
         {
-            bool ready = false;
-            for (int rosterIndex1 = 0; rosterIndex1 < _players.Presence.Peers.Count && _players.Presence.Peers[rosterIndex1] is var peer; rosterIndex1++) if (peer.m_uid == id && peer.IsReady()) { ready = true; break; }
-            if (!ready) _expiredAdmins.Add(id);
+            if (_interval != _settings.IntervalSeconds.Value) { _interval = _settings.IntervalSeconds.Value; _cycle.Postpone(now, _interval); }
+            // Maximum health follows native world-level scaling; a changed scale alters which stored values count as damage.
+            float scale = _rules.HealthScale();
+            if (scale != _healthScale) { _healthScale = scale; Reindex(); }
+            _expiredAdmins.Clear();
+            foreach (var id in _adminRate.Keys)
+            {
+                bool ready = false;
+                for (int rosterIndex1 = 0; rosterIndex1 < _players.Presence.Peers.Count && _players.Presence.Peers[rosterIndex1] is var peer; rosterIndex1++) if (peer.m_uid == id && peer.IsReady()) { ready = true; break; }
+                if (!ready) _expiredAdmins.Add(id);
+            }
+            foreach (var id in _expiredAdmins) _adminRate.Remove(id);
+            Reconcile(now);
+            _expiredRecords.Clear();
+            foreach (var pair in _observations) if (now - pair.Value.Seen > 180 || Settled(pair.Value)) _expiredRecords.Add(pair.Key);
+            foreach (var id in _expiredRecords) _observations.Remove(id);
+            _expiredRecords.Clear();
+            foreach (var pair in _threats) if (now - pair.Value.Seen > 180) _expiredRecords.Add(pair.Key);
+            foreach (var id in _expiredRecords) _threats.Remove(id);
         }
-        foreach (var id in _expiredAdmins) _adminRate.Remove(id);
-        Reconcile(now);
-        _expiredRecords.Clear();
-        foreach (var pair in _observations) if (now - pair.Value.Seen > 180) _expiredRecords.Add(pair.Key);
-        foreach (var id in _expiredRecords) _observations.Remove(id);
-        _expiredRecords.Clear();
-        foreach (var pair in _threats) if (now - pair.Value.Seen > 180) _expiredRecords.Add(pair.Key);
-        foreach (var id in _expiredRecords) _threats.Remove(id);
+        // Poll a deferred background job every update so its FIFO place survives
+        // between the separate two-second confirmation/administration passes.
+        if (_kind == "administrative" ? !service : !ModuleScheduler.Current.Due(this, "background", now, 2, cooperative: true))
+        { if (service) Finish(now); return; }
+        using var timing = _diagnostics.OptionalEnabled ? _diagnostics.Measure(now, () => _observations.Count) : null;
         if (_scope.Refresh(_settings.ScanRangeMeters.Value))
         {
-            bool omitted = false;
+            bool omitted = false, discovered = false;
             foreach (var record in _scope.Records)
             {
                 if (_rules.Monster(record.GetPrefab()) && !record.GetBool(ZDOVars.s_tamed) && record.GetFloat(ZDOVars.s_health, 0) > 0)
@@ -80,11 +104,14 @@ internal sealed class HeimMenderController : IDisposable
                 // Healthy buildings must not occupy the damaged-candidate budget.
                 if (health >= maximum) { _observations.Remove(record.m_uid); continue; }
                 if (!_observations.TryGetValue(record.m_uid, out var observation))
-                { if (_observations.Count >= 4096) { omitted = true; continue; } _observations[record.m_uid] = observation = new RepairObservation { Record = record, Identity = record.m_uid, Health = health, Damaged = now }; }
+                { if (_observations.Count >= 4096) { omitted = true; continue; } _observations[record.m_uid] = observation = new RepairObservation { Record = record, Identity = record.m_uid, Health = health, Damaged = now, Share = (float)_random.NextDouble() }; discovered = true; }
                 if (!ReferenceEquals(observation.Record, record)) { _observations.Remove(record.m_uid); continue; }
                 if (health < observation.Health) observation.Damaged = now;
                 observation.Health = health; observation.Maximum = maximum; observation.Position = record.GetPosition(); observation.Seen = now;
             }
+            // Newly observed damage must not wait out an idle interval that was set while nothing was damaged.
+            if (discovered && _settings.CatchUpIntervalSeconds.Value > 0 && _settings.CatchUpIntervalSeconds.Value < _settings.IntervalSeconds.Value)
+                _cycle.Hasten(now, _settings.CatchUpIntervalSeconds.Value);
             if (omitted != _observationCapacity)
             {
                 _observationCapacity = omitted;
@@ -118,7 +145,7 @@ internal sealed class HeimMenderController : IDisposable
     }
     private void SelectAutomatic(float now)
     {
-        int damaged = 0, quiet = 0, threats = 0, owners = 0;
+        int damaged = 0, quiet = 0, threats = 0, owners = 0, unselected = 0, scheduled = 0;
         _playerPositions.Clear(); _threatPositions.Clear();
         for (int rosterIndex3 = 0; rosterIndex3 < _players.Presence.Peers.Count && _players.Presence.Peers[rosterIndex3] is var peer; rosterIndex3++)
             if (peer.IsReady() && !peer.m_characterID.IsNone() && ZDOMan.instance.GetZDO(peer.m_characterID) is ZDO actor &&
@@ -136,12 +163,19 @@ internal sealed class HeimMenderController : IDisposable
             if (!ReferenceEquals(record, candidate.Record) || !_rules.Eligible(record!, out float health, out float maximum) || health >= maximum || !NearAny(_playerPositions, record!.GetPosition(), _settings.ScanRangeMeters.Value)) continue;
             damaged++;
             if (now - candidate.Damaged < _settings.DamageQuietSeconds.Value) { quiet++; continue; }
+            // Restoration is gradual: each piece becomes due at its own point in the spread period.
+            if (now - candidate.Damaged < candidate.Share * _settings.RepairSpreadSeconds.Value) { scheduled++; continue; }
             if (_settings.HostileClearanceMeters.Value > 0 && (now < _threatUnknownUntil || NearAny(_threatPositions, record.GetPosition(), _settings.HostileClearanceMeters.Value))) { threats++; continue; }
             if (!HeimMenderRules.OwnerReady(record)) { owners++; continue; }
-            if (_random.NextDouble() * 100 >= _settings.RepairChancePercent.Value) continue;
-            if (_queue.Count < _settings.MaxRepairsPerCycle.Value) _queue.Enqueue(record.m_uid);
+            if (_random.NextDouble() * 100 >= _settings.RepairChancePercent.Value) { unselected++; continue; }
+            if (_queue.Count < _settings.MaxRepairsPerCycle.Value) _queue.Enqueue(record.m_uid); else unselected++;
         }
-        _diagnostics.Cycle(now, "automatic", candidates.Count, damaged, quiet, threats, owners, _queue.Count);
+        _diagnostics.Cycle(now, "automatic", candidates.Count, damaged, quiet, threats, owners, _queue.Count, scheduled);
+        // Work that this cycle deferred or left unselected returns after the shorter catch-up delay. Each cycle
+        // keeps its own request cap and every live check; a zero chance can never select, so it does not hurry.
+        float catchUp = _settings.CatchUpIntervalSeconds.Value;
+        if (_settings.RepairChancePercent.Value <= 0) unselected = 0;
+        if (quiet + threats + scheduled + unselected > 0 && catchUp > 0 && catchUp < _settings.IntervalSeconds.Value) _cycle.Postpone(now, catchUp);
         if (_queue.Count > 0) _kind = "automatic";
     }
     private static bool NearAny(List<Vector3> positions, Vector3 point, float radius)
@@ -181,7 +215,7 @@ internal sealed class HeimMenderController : IDisposable
         {
             var id = _queue.Dequeue(); var record = ZDOMan.instance.GetZDO(id);
             if (record == null || _pending.ContainsKey(id) || !_rules.Eligible(record, out float health, out float maximum) || health >= maximum || !HeimMenderRules.OwnerReady(record)) continue;
-            if (_kind == "automatic" && (!_observations.TryGetValue(id, out var observation) || now - observation.Damaged < _settings.DamageQuietSeconds.Value || Threat(record.GetPosition(), now) || !Nearby(record.GetPosition()))) continue;
+            if (_kind == "automatic" && (!_observations.TryGetValue(id, out var observation) || now - observation.Damaged < _settings.DamageQuietSeconds.Value || now - observation.Damaged < observation.Share * _settings.RepairSpreadSeconds.Value || Threat(record.GetPosition(), now) || !Nearby(record.GetPosition()))) continue;
             _pending.Add(id, new RepairRequest { Record = record, Sent = now, Maximum = maximum });
             _sent++; _diagnostics.Request(now, record, health, maximum);
             ZRoutedRpc.instance.InvokeRoutedRPC(record.GetOwner(), id, "RPC_Repair");

@@ -36,9 +36,10 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
         if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Save, "Selected community map storage.", new (string, object?)[] { ("world_uid", world), ("map_path", path), ("loaded_existing", loaded), ("explored_pixels_loaded", pixels) }, LogLevel.Debug);
     }
 
-    public void LandmarkResults(int runestones, int spawners, int retired)
+    public void LandmarkResults(int runestones, int spawners, int retired, int structures)
     {
         if (runestones + spawners > 0) DiagnosticLog.Write(_logger, "SharedMap", $"Discovered {runestones} runestones and {spawners} recurring spawner sources.");
+        if (structures > 0) DiagnosticLog.Write(_logger, "SharedMap", $"Discovered {structures} Dvergr structures.");
         if (retired > 0) DiagnosticLog.Write(_logger, "SharedMap", $"Recorded confirmed destruction of {retired} discovered spawner sources.");
     }
     public void DungeonPinCleanup(int sources, int pins)
@@ -49,13 +50,16 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
         if (sources + pins == 0 || !DiagnosticsEnabled || !_budget.Reserve(UnityEngine.Time.unscaledTime, "dungeon_pin_cleanup", 6)) return;
         if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Dungeons, "Prepared cleanup of obsolete dungeon publications.", new (string, object?)[] { ("nearby_sources_suppressed", sources), ("obsolete_uploaded_pins", pins), ("duplicate_distance_m", SharedMapDungeonPins.DuplicateDistanceMeters), ("client_read_confirmed", false) }, LogLevel.Debug);
     }
-    public void LandmarkCatalog(int runestones, int spawners, IReadOnlyList<string> unavailable,
-        bool runestonesEnabled, bool spawnersEnabled, int spawnerCandidates, string spawnerRejections)
+    public void LandmarkCatalog(int runestones, int spawners, int structures, IReadOnlyList<string> unavailable,
+        bool runestonesEnabled, bool spawnersEnabled, SharedMapSettings settings, int spawnerCandidates, string spawnerRejections)
     {
         if (unavailable.Count > 0) DiagnosticLog.Write(_logger, "SharedMap", $"Skipped {unavailable.Count} incompatible runestone prefabs; review the supported game metadata.", level: LogLevel.Warning);
         if (spawnersEnabled && spawners == 0) DiagnosticLog.Write(_logger, "SharedMap", "Spawner markers are enabled, but no compatible physical spawner types were registered; new spawner discovery is unavailable. Enable SharedMap.DebugMode for catalog rejection details.", level: LogLevel.Warning);
         if (!DiagnosticsEnabled) return;
-        if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Landmarks, "Completed the landmark prefab audit.", new (string, object?)[] { ("runestone_families", runestones), ("spawner_families", spawners), ("runestone_marker_sync", runestonesEnabled), ("spawner_marker_sync", spawnersEnabled), ("spawner_candidates", spawnerCandidates), ("spawner_rejections", spawnerRejections), ("interior_sources", "omitted_without_verified_layout_and_gateway"), ("pin_type", 3) }, LogLevel.Debug);
+        if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Landmarks, "Completed the landmark prefab audit.", new (string, object?)[] { ("runestone_families", runestones), ("spawner_families", spawners),
+            ("structure_locations", structures), ("dvergr_guard_tower_marker_sync", settings.DvergrGuardTowerMarkerSync.Value),
+            ("dvergr_lighthouse_marker_sync", settings.DvergrLighthouseMarkerSync.Value),
+            ("dvergr_excavation_marker_sync", settings.DvergrExcavationMarkerSync.Value), ("runestone_marker_sync", runestonesEnabled), ("spawner_marker_sync", spawnersEnabled), ("spawner_candidates", spawnerCandidates), ("spawner_rejections", spawnerRejections), ("interior_sources", "omitted_without_verified_layout_and_gateway"), ("pin_type", 3) }, LogLevel.Debug);
     }
     public void LandmarkEvidence(string identity, UnityEngine.Vector3 point, string reason, UnityEngine.Vector3? player = null, float? radius = null)
     {
@@ -87,7 +91,7 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
         bool markerSync, int portalCount, long playerPixels, long tablePixels)
     {
         if (!DiagnosticsEnabled || !_budget.Reserve(now, "summary", 1, false)) return;
-        { if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", CoreLogTopics.Scope, "Observed community exploration and table reconciliation in the last minute.", new (string, object?)[] { ("radius_m", exploration.Radius), ("pixel_size_m", exploration.PixelSize), ("grid_size", exploration.Size), ("sample_interval_s", exploration.Interval), ("explored_pixels", exploration.ExploredPixels), ("usable_players", players), ("table_candidates", tables), ("tables_prepared", prepared) }, LogLevel.Debug); if (VerboseEnabled && DiagnosticLog.DebugAvailable(_logger, "SharedMap", true)) DiagnosticLog.Write(_logger, "SharedMap", CoreLogTopics.Scope, "Exploration and portal marker evidence for the last minute.", new (string, object?)[] { ("portal_marker_sync", markerSync), ("eligible_portal_markers", portalCount), ("player_pixels_added_controller", playerPixels), ("table_pixels_added_controller", tablePixels) }, LogLevel.Debug, verbose: true); }
+        { if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", CoreLogTopics.Scope, "Observed community exploration and table scheduling in the last minute.", new (string, object?)[] { ("radius_m", exploration.Radius), ("pixel_size_m", exploration.PixelSize), ("grid_size", exploration.Size), ("sample_interval_s", exploration.Interval), ("explored_pixels", exploration.ExploredPixels), ("usable_players", players), ("table_candidates", tables), ("tables_queued", prepared) }, LogLevel.Debug); if (VerboseEnabled && DiagnosticLog.DebugAvailable(_logger, "SharedMap", true)) DiagnosticLog.Write(_logger, "SharedMap", CoreLogTopics.Scope, "Exploration and portal marker evidence for the last minute.", new (string, object?)[] { ("portal_marker_sync", markerSync), ("eligible_portal_markers", portalCount), ("player_pixels_added_controller", playerPixels), ("table_pixels_added_controller", tablePixels) }, LogLevel.Debug, verbose: true); }
     }
 
     public void Saved(float now, int pixels)
@@ -130,15 +134,21 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
         { if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Portals, $"Selected publication of portal marker {published.Name}.", new (string, object?)[] { ("marker_id", actual.Identity), ("reason", previous == null ? "new_marker" : previous.Name != actual.Name ? "label_changed" : "position_changed"), ("old_name", previous?.Name), ("new_name", published.Name), ("slot", slot), ("actual_x_m", actual.X), ("actual_z_m", actual.Z), ("published_x_m", published.X) }, LogLevel.Debug); if (VerboseEnabled && DiagnosticLog.DebugAvailable(_logger, "SharedMap", true)) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Portals, $"Portal marker evidence for {published.Name}.", new (string, object?)[] { ("published_z_m", published.Z), ("previous_x_m", previous?.X), ("previous_z_m", previous?.Z), ("previous_distance_m", previous == null ? (double?)null : Math.Sqrt(dx * dx + dz * dz)), ("client_read_confirmed", false) }, LogLevel.Debug, verbose: true); }
     }
 
+    internal bool WantsPinChanges => DiagnosticsEnabled && DiagnosticLog.DebugAvailable(_logger, "SharedMap");
     public void PinChanges(int size, ZDOID table, uint revision, byte[]? before, byte[]? after,
-        string stage, long? sender = null, string senderName = "")
+        string stage, long? sender = null, string senderName = "",
+        SharedMapTableData.ValidatedTable? validatedBefore = null, SharedMapTableData.ValidatedTable? validatedAfter = null, bool alreadyValidated = false, bool defer = false)
     {
-        if (!DiagnosticsEnabled || SharedMapController.Equal(before, after)) return;
+        if (defer) return;
+        if (!DiagnosticsEnabled || !DiagnosticLog.DebugAvailable(_logger, "SharedMap") || SharedMapController.Equal(before, after)) return;
         float now = UnityEngine.Time.unscaledTime;
         try
         {
-            if (!_budget.Reserve(now, "pin_comparisons", 60)) return;
-            var changes = SharedMapPinChanges.Compare(SharedMapTableData.ReadPins(size, before, true), SharedMapTableData.ReadPins(size, after, true));
+            if (!_budget.Reserve(now, "pin_comparisons", 6)) return;
+            using var timing = PerformanceStages.Measure("SharedMap", "pin_diagnostics", bytes: (before?.Length ?? 0) + (after?.Length ?? 0));
+            var changes = SharedMapPinChanges.Compare(
+                alreadyValidated ? SharedMapTableData.ReadValidatedPins(size, validatedBefore, true) : SharedMapTableData.ReadPins(size, before, true),
+                alreadyValidated ? SharedMapTableData.ReadValidatedPins(size, validatedAfter, true) : SharedMapTableData.ReadPins(size, after, true));
             if (!changes.Any) return;
             if (_budget.Reserve(now, "pin_summary_" + stage, 6))
                 { if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", CoreLogTopics.Scope, "Observed changes to the table pin list.", new (string, object?)[] { ("table_id", table), ("data_revision", revision), ("stage", stage), ("added_pins", changes.Added.Count), ("removed_pins", changes.Removed.Count), ("updated_pins", changes.Updated.Count), ("sender_peer_id", sender), ("sender_character_name", CleanPinText(senderName)) }, LogLevel.Debug); if (VerboseEnabled && DiagnosticLog.DebugAvailable(_logger, "SharedMap", true)) DiagnosticLog.Write(_logger, "SharedMap", CoreLogTopics.Scope, $"Pin list evidence for table {table}.", new (string, object?)[] { ("sender_role", sender.HasValue ? "replication_peer" : "unknown"), ("writer_confirmed", false), ("omitted_debug", _budget.TakeOmitted()), ("client_read_confirmed", false) }, LogLevel.Debug, verbose: true); }
@@ -157,6 +167,22 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
             }
             catch { }
         }
+    }
+
+    internal void AssetPreparation(float now, string name, string outcome, float waitSeconds)
+    {
+        try
+        {
+            if (!DiagnosticsEnabled || !DiagnosticLog.DebugAvailable(_logger, "SharedMap") || !_budget.Reserve(now, "asset_preparation", 6)) return;
+            DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Tables, "Prepared native metadata asset.",
+                new[] { DiagnosticLog.Field("asset_name", name), DiagnosticLog.Field("outcome", outcome), DiagnosticLog.FieldAlways("wait_seconds", waitSeconds) }, LogLevel.Debug);
+        }
+        catch { /* Metadata preparation and reference release do not depend on optional output. */ }
+    }
+    internal void RoomPreparation(float now, int hash, string outcome, float waitSeconds)
+    {
+        if (!DiagnosticsEnabled || !DiagnosticLog.DebugAvailable(_logger, "SharedMap")) return;
+        AssetPreparation(now, "room_" + hash, outcome, waitSeconds);
     }
 
     private static string CleanPinText(string value) => new string(value.Take(128).Select(c => char.IsControl(c) ? ' ' : c).ToArray());
@@ -303,7 +329,7 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
     public void DungeonLayout(float now, string gateway, string location, UnityEngine.Vector3 position, int bytes, int rooms, bool valid, string reason)
     {
         if (!DiagnosticsEnabled || !NewResult(_dungeonLayouts, gateway, (bytes, rooms, valid, reason)) || !_budget.Reserve(now, "dungeon_layout", 6)) return;
-        if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Dungeons, $"{Dungeon(location)} layout {(valid ? "is ready" : "was rejected")} — {reason.Replace('_', ' ')}.", new LogField[] { ("location", location), ("gateway", gateway), ("pos", position), DiagnosticLog.FieldAlways("layout_bytes", bytes), DiagnosticLog.FieldAlways("room_count", rooms), ("expected_layout_bytes", 4L + (long)rooms * SharedMapDungeonLayout.RoomBytes), DiagnosticLog.FieldAlways("layout_valid", valid), ("reason", reason) }, LogLevel.Debug);
+        if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Dungeons, $"{Dungeon(location)} layout {(valid ? "is ready" : "was rejected")} â€” {reason.Replace('_', ' ')}.", new LogField[] { ("location", location), ("gateway", gateway), ("pos", position), DiagnosticLog.FieldAlways("layout_bytes", bytes), DiagnosticLog.FieldAlways("room_count", rooms), ("expected_layout_bytes", 4L + (long)rooms * SharedMapDungeonLayout.RoomBytes), DiagnosticLog.FieldAlways("layout_valid", valid), ("reason", reason) }, LogLevel.Debug);
     }
     public void DungeonLootResults(int count)
     {
@@ -314,7 +340,7 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
         string filter = _pinNameFilter();
         if (filter.Length > 0 && !string.Equals(filter, pin.Name, StringComparison.Ordinal)) return;
         if (!DiagnosticsEnabled || !_budget.Reserve(UnityEngine.Time.unscaledTime, reason, 6)) return;
-        if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Tables, $"Shared pin {pin.Name} changed — {reason.Replace('_', ' ')}.", new (string, object?)[] { ("identity", identity), ("label", pin.Name), ("owner", pin.Owner), ("checked", pin.Checked), ("x", pin.X), ("y", pin.Y), ("z", pin.Z), ("reason", reason) }, LogLevel.Debug);
+        if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Tables, $"Shared pin {pin.Name} changed â€” {reason.Replace('_', ' ')}.", new (string, object?)[] { ("identity", identity), ("label", pin.Name), ("owner", pin.Owner), ("checked", pin.Checked), ("x", pin.X), ("y", pin.Y), ("z", pin.Z), ("reason", reason) }, LogLevel.Debug);
     }
     public void CheckmarksAccepted(int count)
     {

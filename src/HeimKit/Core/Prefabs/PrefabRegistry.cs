@@ -14,13 +14,20 @@ internal sealed class PrefabRegistry
     private ZNetScene? _scene;
     private readonly Dictionary<int, PrefabInfo> _prefabs = new();
     private readonly Dictionary<GameObject, PrefabInfo> _objects = new();
+    private void EnsureScene()
+    {
+        if (ReferenceEquals(_scene, ZNetScene.instance)) return;
+        Clear(); _scene = ZNetScene.instance;
+    }
     internal PrefabCatalog<T> Catalog<T>(string name) => new(this, name);
     internal GameObject? Prefab(int hash) => TryGet(hash, out var info) ? info.Prefab : null;
     internal GameObject? Prefab(string name) => Prefab(name.GetStableHashCode());
+    internal bool TryKnown(int hash, out PrefabInfo info)
+    { EnsureScene(); return _prefabs.TryGetValue(hash, out info!) && info.Prefab != null; }
     internal PrefabInfo Get(int hash) => TryGet(hash, out var info) ? info : throw new InvalidOperationException("Native prefab is unavailable: " + hash);
     internal bool TryGet(int hash, out PrefabInfo info)
     {
-        if (!ReferenceEquals(_scene, ZNetScene.instance)) { Clear(); _scene = ZNetScene.instance; }
+        EnsureScene();
         if (_prefabs.TryGetValue(hash, out info!) && info.Prefab != null) return true;
         var prefab = _scene?.GetPrefab(hash);
         if (prefab == null) { info = null!; return false; }
@@ -30,6 +37,7 @@ internal sealed class PrefabRegistry
     }
     internal PrefabInfo Entry(int hash)
     {
+        EnsureScene();
         if (!_prefabs.TryGetValue(hash, out var info))
         {
             if (_prefabs.Count >= Capacity) throw new InvalidOperationException("Shared prefab classification capacity exceeded.");
@@ -38,7 +46,14 @@ internal sealed class PrefabRegistry
         return info;
     }
     internal void Observe(GameObject prefab)
-    { if (_objects.ContainsKey(prefab)) return; var info = Entry(prefab.name.GetStableHashCode()); info.Prefab = prefab; Register(prefab, info); }
+    { EnsureScene(); if (_objects.ContainsKey(prefab)) return; var info = Entry(prefab.name.GetStableHashCode()); info.Prefab = prefab; Register(prefab, info); }
+    internal bool TryMetadata<T>(string name, int hash, out T value)
+    {
+        EnsureScene();
+        if (_prefabs.TryGetValue(hash, out var info) && info.Metadata.TryGetValue((name, typeof(T)), out var data))
+        { value = (T)data!; return true; }
+        value = default!; return false;
+    }
     private void Register(GameObject obj, PrefabInfo info)
     {
         _objects[obj] = info;
@@ -113,6 +128,12 @@ internal sealed class PrefabCatalog<T>
     internal IEnumerable<int> Keys => _selected;
     internal IEnumerable<T> Values { get { foreach (var hash in _selected) yield return this[hash]; } }
     internal bool ContainsKey(int hash) => _selected.Contains(hash);
+    // Reattach an independently recreated consumer to scene-owned pure metadata.
+    internal bool TryReuse(int hash, out T value)
+    {
+        if (!_registry.TryMetadata(_name, hash, out value)) return false;
+        _selected.Add(hash); return true;
+    }
     internal bool TryGetValue(int hash, out T value)
     {
         if (_selected.Contains(hash) && _registry.Entry(hash).Metadata.TryGetValue((_name, typeof(T)), out var data))

@@ -29,16 +29,32 @@ public sealed class SharedMapDungeonPins
         foreach (var marker in markers.OrderBy(p => p.Identity, StringComparer.Ordinal)
             .ThenBy(p => p.X).ThenBy(p => p.Z).ThenBy(p => p.Name, StringComparer.Ordinal))
         {
-            if (!SharedMapExploration.Finite(marker.X) || !SharedMapExploration.Finite(marker.Y) || !SharedMapExploration.Finite(marker.Z))
-                throw new System.IO.InvalidDataException("Invalid dungeon publication point.");
+            if (Retired(marker)) continue;
+            Validate(marker);
             if (Near(marker.X, marker.Z).Any()) { suppressed++; continue; }
             kept.Add(marker);
-            var cell = Cell(marker.X, marker.Z);
-            if (!_anchors.TryGetValue(cell, out var group)) _anchors.Add(cell, group = new List<MapMarker>());
-            group.Add(marker);
+            AddAnchor(marker);
+        }
+        foreach (var marker in markers)
+        {
+            if (!Retired(marker)) continue;
+            Validate(marker);
+            AddAnchor(marker);
         }
         Markers = kept;
         Suppressed = suppressed;
+    }
+    private static bool Retired(MapMarker marker) => SharedMapDungeonPrefab.Retired(Family(marker.Name) ?? marker.Name);
+    private static void Validate(MapMarker marker)
+    {
+        if (!SharedMapExploration.Finite(marker.X) || !SharedMapExploration.Finite(marker.Y) || !SharedMapExploration.Finite(marker.Z))
+            throw new System.IO.InvalidDataException("Invalid dungeon publication point.");
+    }
+    private void AddAnchor(MapMarker marker)
+    {
+        var cell = Cell(marker.X, marker.Z);
+        if (!_anchors.TryGetValue(cell, out var group)) _anchors.Add(cell, group = new List<MapMarker>());
+        group.Add(marker);
     }
     private static (int X, int Z) Cell(float x, float z) =>
         ((int)Math.Floor(x / DuplicateDistanceMeters), (int)Math.Floor(z / DuplicateDistanceMeters));
@@ -60,7 +76,14 @@ public sealed class SharedMapDungeonPins
         if (split > 0 && name.EndsWith("%", StringComparison.Ordinal) &&
             int.TryParse(name.Substring(split + 1, name.Length - split - 2), NumberStyles.None, CultureInfo.InvariantCulture, out int percent) &&
             percent >= 0 && percent <= 100) name = name.Substring(0, split);
-        return SharedMapDungeonPrefab.Labels.Values.FirstOrDefault(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+        return SharedMapDungeonPrefab.Labels.Values.FirstOrDefault(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase)) ??
+            SharedMapDungeonPrefab.RetiredLabels.FirstOrDefault(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
     }
-    public bool Obsolete(MapPin pin) => pin.Icon == (int)Minimap.PinType.Icon2 && Family(pin.Name) != null && Near(pin.X, pin.Z).Any();
+    public bool Obsolete(MapPin pin)
+    {
+        if (pin.Icon != (int)Minimap.PinType.Icon2 || Family(pin.Name) is not string family) return false;
+        return SharedMapDungeonPrefab.Retired(family)
+            ? Near(pin.X, pin.Z).Any(marker => Family(marker.Name) == family)
+            : Near(pin.X, pin.Z).Any(marker => !Retired(marker));
+    }
 }

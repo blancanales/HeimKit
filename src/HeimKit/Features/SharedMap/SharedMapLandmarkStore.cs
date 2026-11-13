@@ -24,17 +24,22 @@ public sealed class SharedMapLandmarkStore
     private const uint Magic = 0x4C4D4B48;
     private readonly long _world;
     private readonly bool _spawners;
+    private readonly byte _kind;
+    private readonly Func<string, bool>? _publish;
     private Dictionary<string, MapMarker> _records = new(StringComparer.Ordinal);
     private HashSet<string> _retired = new(StringComparer.Ordinal);
-    private bool _dirty;
+    private long _revision, _savedRevision;
     private readonly ScheduleToken _nextSave = new();
     private IReadOnlyList<MapMarker>? _activeMarkers, _historicalMarkers;
     public string FilePath { get; }
     public int Count => _records.Count;
     public SharedMapLandmarkStore(string directory, long world, bool spawners)
+        : this(directory, world, spawners ? ".spawners" : ".runestones", spawners ? (byte)1 : (byte)0) { }
+
+    public SharedMapLandmarkStore(string directory, long world, string extension, byte kind, Func<string, bool>? publish = null)
     {
-        _world = world; _spawners = spawners;
-        FilePath = Path.Combine(directory, "world-" + world.ToString("X16", CultureInfo.InvariantCulture) + (spawners ? ".spawners" : ".runestones"));
+        _world = world; _spawners = kind == 1; _kind = kind; _publish = publish;
+        FilePath = Path.Combine(directory, "world-" + world.ToString("X16", CultureInfo.InvariantCulture) + extension);
     }
     public bool Contains(string identity) => _records.ContainsKey(identity);
     public static string SourceIdentity(string prefab, float x, float y, float z, string path, bool spawner)
@@ -64,12 +69,12 @@ public sealed class SharedMapLandmarkStore
             return false;
         }
         if (Count >= MaximumDiscoveries) throw new InvalidOperationException("Landmark discovery limit exceeded; prior data was retained.");
-        _records.Add(marker.Identity, marker); _dirty = true; _activeMarkers = _historicalMarkers = null; return true;
+        _records.Add(marker.Identity, marker); _revision++; _activeMarkers = _historicalMarkers = null; return true;
     }
     public bool Retire(string identity)
     {
         if (!_spawners || !_records.ContainsKey(identity) || !_retired.Add(identity)) return false;
-        _dirty = true; _activeMarkers = null; return true;
+        _revision++; _activeMarkers = null; return true;
     }
     public IReadOnlyList<MapMarker> Read(bool enabled, bool removeDestroyed = true)
     {
@@ -80,7 +85,7 @@ public sealed class SharedMapLandmarkStore
         // Suppress legacy hidden-point labels before the publication limit while retaining
         // discoveries/tombstones. Never infer native source destruction from this policy filter.
         var markers = _records.Where(p => (!_spawners || SharedMapLandmarkPrefab.PhysicalSpawnerLabel(p.Value.Name)) &&
-            (!removeDestroyed || !_retired.Contains(p.Key))).OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Value).ToArray();
+            (!removeDestroyed || !_retired.Contains(p.Key)) && (_publish == null || _publish(p.Value.Name))).OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Value).ToArray();
         if (markers.Length > MaximumMarkers) throw new InvalidOperationException("Landmark publication limit exceeded; prior table data must be retained.");
         if (removeDestroyed) _activeMarkers = markers; else _historicalMarkers = markers;
         return markers;
@@ -99,7 +104,7 @@ public sealed class SharedMapLandmarkStore
         using var sha = SHA256.Create();
         if (!sha.ComputeHash(body).SequenceEqual(reader.ReadBytes(32))) throw new InvalidDataException("Landmark checksum mismatch.");
         using var fields = new BinaryReader(new MemoryStream(body, false), new UTF8Encoding(false, true));
-        if (fields.ReadUInt32() != Magic || fields.ReadInt32() != 1 || fields.ReadInt64() != _world || fields.ReadByte() != (_spawners ? 1 : 0))
+        if (fields.ReadUInt32() != Magic || fields.ReadInt32() != 1 || fields.ReadInt64() != _world || fields.ReadByte() != _kind)
             throw new InvalidDataException("Landmark schema, world or source kind mismatch.");
         int count = fields.ReadInt32();
         if (count < 0 || count > MaximumDiscoveries) throw new InvalidDataException("Invalid landmark record count.");
@@ -116,16 +121,32 @@ public sealed class SharedMapLandmarkStore
             loaded.Add(marker.Identity, marker); if (terminal == 1) retired.Add(marker.Identity);
         }
         if (fields.BaseStream.Position != fields.BaseStream.Length) throw new InvalidDataException("Trailing landmark data.");
-        _records = loaded; _retired = retired; _dirty = false; _activeMarkers = _historicalMarkers = null; return true;
+        _records = loaded; _retired = retired; _savedRevision = _revision; _activeMarkers = _historicalMarkers = null; return true;
     }
-    public bool SaveIfDue(float now, float interval) { if (!_nextSave.Ready(now)) return false; _nextSave.Postpone(now, interval); return Save(); }
+    private SnapshotFile? _snapshotFile;
+    private SnapshotFile Persistence => _snapshotFile ??= new SnapshotFile(FilePath);
+    public bool SaveIfDue(float now, float interval)
+    {
+        bool saved = Persistence.Poll();
+        if (saved) _savedRevision = Persistence.CompletedGeneration;
+        if (Persistence.Pending || !_nextSave.Ready(now)) return saved;
+        _nextSave.Postpone(now, interval);
+        if (_revision != _savedRevision) Persistence.Queue(Snapshot(), _revision);
+        return saved;
+    }
     public bool Save()
     {
-        if (!_dirty) return false;
+        bool saved = Persistence.Poll(wait: true);
+        if (saved) _savedRevision = Persistence.CompletedGeneration;
+        if (_revision == _savedRevision) return saved;
+        long generation = _revision; Persistence.Write(Snapshot()); _savedRevision = generation; return true;
+    }
+    private byte[] Snapshot()
+    {
         using var body = new MemoryStream();
         using (var writer = new BinaryWriter(body, Encoding.UTF8, true))
         {
-            writer.Write(Magic); writer.Write(1); writer.Write(_world); writer.Write((byte)(_spawners ? 1 : 0)); writer.Write(Count);
+            writer.Write(Magic); writer.Write(1); writer.Write(_world); writer.Write(_kind); writer.Write(Count);
             foreach (var marker in _records.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Value))
             {
                 for (int i = 0; i < 64; i += 2) writer.Write(byte.Parse(marker.Identity.Substring(i, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture));
@@ -133,15 +154,6 @@ public sealed class SharedMapLandmarkStore
                 writer.Write(marker.X); writer.Write(marker.Y); writer.Write(marker.Z); writer.Write((byte)(Retired(marker.Identity) ? 1 : 0));
             }
         }
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!); string temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            byte[] bytes = body.ToArray(); using var sha = SHA256.Create();
-            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            { file.Write(bytes, 0, bytes.Length); byte[] checksum = sha.ComputeHash(bytes); file.Write(checksum, 0, checksum.Length); file.Flush(true); }
-            if (File.Exists(FilePath)) File.Replace(temporary, FilePath, FilePath + ".bak"); else File.Move(temporary, FilePath);
-            _dirty = false; return true;
-        }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        return body.ToArray();
     }
 }

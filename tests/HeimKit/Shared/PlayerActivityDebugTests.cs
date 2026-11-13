@@ -1,9 +1,15 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
-using HeimKit.Shared;
-using HeimKit.Shared.Players;
-using HeimKit.Shared.Players.Models;
+using HeimKit.Core.Players;
+using HeimKit.Core.Players.Models;
 
 internal static class PlayerActivityDebugTests
 {
@@ -12,7 +18,7 @@ internal static class PlayerActivityDebugTests
     {
         using var log = new ManualLogSource("PlayerActivity debug policy");
         var records = new List<(LogLevel Level, string Text)>();
-        log.LogEvent += (_, e) => records.Add((e.Level, e.Data.ToString()!));
+        log.LogEvent += (_, e) => records.Add((e.Level, LogCapture.Text(e.Data)));
         string root = Path.Combine(AppContext.BaseDirectory, "player-activity-debug-" + Guid.NewGuid());
         Directory.CreateDirectory(root);
         try

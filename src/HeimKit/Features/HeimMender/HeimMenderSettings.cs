@@ -20,10 +20,12 @@ public sealed class HeimMenderSettings
     public DebugLoggingPolicy DebugLogging { get; }
     public ConfigEntry<bool> AutomaticEnabled { get; }
     public ConfigEntry<float> IntervalSeconds { get; }
+    public ConfigEntry<float> CatchUpIntervalSeconds { get; }
     public ConfigEntry<float> RepairChancePercent { get; }
     public ConfigEntry<int> MaxRepairsPerCycle { get; }
     public ConfigEntry<float> ScanRangeMeters { get; }
     public ConfigEntry<float> DamageQuietSeconds { get; }
+    public ConfigEntry<float> RepairSpreadSeconds { get; }
     public ConfigEntry<float> HostileClearanceMeters { get; }
     public ConfigEntry<float> AdminRadiusMeters { get; }
     public ConfigEntry<int> AdminMaxPieces { get; }
@@ -36,11 +38,13 @@ public sealed class HeimMenderSettings
         Enabled = Bind("Enabled", true, "Enable HeimMender.");
         DebugMode = Bind("DebugMode", false, "Enable shared-policy feature diagnostics.");
         AutomaticEnabled = Bind("AutomaticEnabled", true, "Enable gradual automatic repairs.");
-        IntervalSeconds = Bind("IntervalSeconds", 300f, "Seconds between automatic repair cycles.", new AcceptableValueRange<float>(10, 86400));
+        IntervalSeconds = Bind("IntervalSeconds", 300f, "Seconds between automatic repair cycles when no damaged piece is waiting.", new AcceptableValueRange<float>(10, 86400));
+        CatchUpIntervalSeconds = Bind("CatchUpIntervalSeconds", 15f, "Seconds until the next automatic cycle while damaged pieces are still waiting; zero always uses IntervalSeconds.", new AcceptableValueRange<float>(0, 3600));
         RepairChancePercent = Bind("RepairChancePercent", 50f, "Independent chance per damaged candidate per cycle.", new AcceptableValueRange<float>(0, 100));
         MaxRepairsPerCycle = Bind("MaxRepairsPerCycle", 10, "Maximum automatic requests per cycle.", new AcceptableValueRange<int>(1, 200));
         ScanRangeMeters = Bind("ScanRangeMeters", 64f, "Nearby rotating-player scan radius.", new AcceptableValueRange<float>(16, 128));
         DamageQuietSeconds = Bind("DamageQuietSeconds", 60f, "Automatic deferral after observed health loss.", new AcceptableValueRange<float>(0, 3600));
+        RepairSpreadSeconds = Bind("RepairSpreadSeconds", 1320f, "Automatic repairs are spread over this many seconds: each damaged piece waits its own random share of it after its last observed health loss. Zero disables.", new AcceptableValueRange<float>(0, 86400));
         HostileClearanceMeters = Bind("HostileClearanceMeters", 30f, "Automatic deferral around untamed MonsterAI; zero disables.", new AcceptableValueRange<float>(0, 64));
         AdminRadiusMeters = Bind("AdminRadiusMeters", 64f, "Default administrative repair radius.", new AcceptableValueRange<float>(1, 128));
         AdminMaxPieces = Bind("AdminMaxPieces", 200, "Maximum native requests per administrative batch.", new AcceptableValueRange<int>(1, 2000));

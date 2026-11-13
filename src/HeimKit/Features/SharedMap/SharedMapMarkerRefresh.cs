@@ -183,34 +183,33 @@ public sealed class SharedMapMarkerRefresh
         throw new InvalidDataException("Invalid marker refresh string length.");
     }
 
+    private SnapshotFile? _snapshotFile;
+    private SnapshotFile Persistence => _snapshotFile ??= new SnapshotFile(FilePath);
     public bool SaveIfDue(float now, float interval)
     {
-        if (!_nextSave.Ready(now)) return false;
-        _nextSave.Postpone(now, interval); return Save();
+        bool saved = Persistence.Poll();
+        if (saved) _savedRevision = Persistence.CompletedGeneration;
+        if (Persistence.Pending || !_nextSave.Ready(now)) return saved;
+        _nextSave.Postpone(now, interval);
+        if (_revision != _savedRevision) Persistence.Queue(Snapshot(), _revision);
+        return saved;
     }
-
     public bool Save()
     {
-        if (_revision == _savedRevision) return false;
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        string temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
+        bool saved = Persistence.Poll(wait: true);
+        if (saved) _savedRevision = Persistence.CompletedGeneration;
+        if (_revision == _savedRevision) return saved;
+        long generation = _revision; Persistence.Write(Snapshot()); _savedRevision = generation; return true;
+    }
+    private byte[] Snapshot()
+    {
+        using var body = new MemoryStream();
+        using (var writer = new BinaryWriter(body, new UTF8Encoding(false, true), true))
         {
-            using var body = new MemoryStream();
-            using (var writer = new BinaryWriter(body, new UTF8Encoding(false, true), true))
-            {
-                writer.Write(_magic); writer.Write(1); writer.Write(_world); writer.Write(_states.Count);
-                foreach (var pair in _states.OrderBy(p => p.Key, StringComparer.Ordinal))
-                { writer.Write(pair.Key); writer.Write(pair.Value.Name); writer.Write(pair.Value.Slot); writer.Write(pair.Value.X); writer.Write(pair.Value.Z); }
-            }
-            byte[] bytes = body.ToArray();
-            using var sha = SHA256.Create(); byte[] checksum = sha.ComputeHash(bytes);
-            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            { output.Write(bytes, 0, bytes.Length); output.Write(checksum, 0, checksum.Length); output.Flush(true); }
-            if (File.Exists(FilePath)) File.Replace(temporary, FilePath, FilePath + ".bak");
-            else File.Move(temporary, FilePath);
-            _savedRevision = _revision; return true;
+            writer.Write(_magic); writer.Write(1); writer.Write(_world); writer.Write(_states.Count);
+            foreach (var pair in _states.OrderBy(p => p.Key, StringComparer.Ordinal))
+            { writer.Write(pair.Key); writer.Write(pair.Value.Name); writer.Write(pair.Value.Slot); writer.Write(pair.Value.X); writer.Write(pair.Value.Z); }
         }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        return body.ToArray();
     }
 }

@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
@@ -44,7 +51,7 @@ internal static class WeatherGuardControlsTests
             coverage.SkipReasons["excluded_prefab"] == 1 && coverage.WaitReasons["waiting_instance"] == 1, "Coverage claimed unloaded/excluded objects as protected or miscounted reasons.");
         using var logger = new ManualLogSource("WeatherGuard controls checks");
         var messages = new List<(string Text, LogLevel Level)>();
-        logger.LogEvent += (_, args) => messages.Add((args.Data.ToString()!, args.Level));
+        logger.LogEvent += (_, args) => messages.Add((LogCapture.Text(args.Data), args.Level));
         var suppressed = new WeatherGuardDiagnostics(logger, false);
         suppressed.Coverage(coverage);
         Check(messages.Count == 1 && messages[0].Level == LogLevel.Info && messages[0].Text.Contains("Requested coverage report") && messages[0].Text.Contains("protected 1") &&
@@ -64,7 +71,7 @@ internal static class WeatherGuardControlsTests
         {
             var config = new ConfigFile(configPath, false) { SaveOnConfigSet = false };
             var settings = new WeatherGuardSettings(config, logger);
-            Check(settings.ProtectRain.Value && settings.ProtectUnderwater.Value && settings.ExcludedPrefabs.Value == "", "Protection defaults changed existing behavior.");
+            Check(settings.ProtectRain.Value && settings.ProtectUnderwater.Value && settings.ExcludedPrefabs.Value == "" && settings.ReuseSceneLists.Value, "Protection defaults changed existing behavior.");
             File.WriteAllText(configPath, "[WeatherGuard]\nDebugLogLevel = 123\n");
             var invalidLevel = new WeatherGuardSettings(new ConfigFile(configPath, false) { SaveOnConfigSet = false }, logger);
             Check(invalidLevel.DebugLogLevel.Value == DebugLogLevel.Detailed, "Undefined numeric diagnostic level must fall back to Detailed.");
@@ -74,9 +81,9 @@ internal static class WeatherGuardControlsTests
                 var validLevel = ConfigurationLoader.Load(root, logger, cfg => new WeatherGuardSettings(cfg, logger));
                 Check(validLevel.DebugLogLevel.Value == level, "Diagnostic-level validation reset a recognized setting.");
             }
-            File.WriteAllText(configPath, "[WeatherGuard]\nProtectRain = false\nProtectUnderwater = true\nExcludedPrefabs = wood_floor\nDisableDebugLogging = true\n[Diagnostics]\nDebugMode = true\n");
+            File.WriteAllText(configPath, "[WeatherGuard]\nProtectRain = false\nProtectUnderwater = true\nExcludedPrefabs = wood_floor\nReuseSceneLists = false\nDisableDebugLogging = true\n[Diagnostics]\nDebugMode = true\n");
             var migrated = ConfigurationLoader.Load(root, logger, cfg => new WeatherGuardSettings(cfg, logger));
-            Check(!migrated.ProtectRain.Value && migrated.ProtectUnderwater.Value && migrated.ExcludedPrefabs.Value == "wood_floor" && !migrated.DebugLogging.Enabled,
+            Check(!migrated.ProtectRain.Value && migrated.ProtectUnderwater.Value && migrated.ExcludedPrefabs.Value == "wood_floor" && !migrated.ReuseSceneLists.Value && !migrated.DebugLogging.Enabled,
                 "Existing source/exclusion/hidden settings not preserved.");
             var requests = new WeatherGuardCoverageRequests(root, logger);
             int reports = 0;
@@ -108,14 +115,14 @@ internal static class WeatherGuardControlsTests
             var moduleConfig = new ConfigFile(configPath, false) { SaveOnConfigSet = false };
             moduleConfig.Bind("WeatherGuard", "Enabled", true).Value = false;
             var module = new WeatherGuard(moduleConfig, logger, PlayerServicesTests.For(moduleConfig, logger));
-            module.Initialize("1.0.20");
+            module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
             File.WriteAllText(requestPath, ""); module.Tick(10);
             Check(!module.IsActive && messages[^1].Text.Contains("module_inactive") && !File.Exists(requestPath), "Inactive module ignored explicit coverage request.");
             module.Shutdown();
             // Gameplay stays gated while operator requests survive every presence state.
             var hub = PlayerServicesTests.For(moduleConfig, logger);
             moduleConfig.Bind("WeatherGuard", "Enabled", false).Value = true;
-            module.Initialize("1.0.20");
+            module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion);
             var controller = typeof(WeatherGuard).GetField("_controller", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
             Check(controller.GetValue(module) == null, "Unknown presence initialized WeatherGuard gameplay.");
             Check(module.IsActive && hub.Events.Subscribers == 1, "WeatherGuard did not subscribe while enabled.");
@@ -134,7 +141,7 @@ internal static class WeatherGuardControlsTests
             Check(!module.IsActive && hub.Events.Subscribers == 0, "WeatherGuard failure retained its registration.");
             hub.Events.Observe(false); hub.Events.Observe(true);
             Check(!module.IsActive, "Failed WeatherGuard restarted on connection.");
-            module.Initialize("1.0.20"); module.Shutdown(); module.Shutdown();
+            module.Initialize(HeimKit.Configuration.GameVersionCompatibility.AuditedVersion); module.Shutdown(); module.Shutdown();
             Check(hub.Events.Subscribers == 0, "Repeated WeatherGuard shutdown retained its registration.");
         }
         finally

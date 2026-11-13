@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Logging;
 using HeimKit.Features.AFKNightWatch;
 using HeimKit.Features.AFKNightWatch.Models;
@@ -7,7 +14,7 @@ internal static class SleepNoticesTests
     {
         using var log = new ManualLogSource("Sleep outcome notice checks");
         var messages = new List<(LogLevel Level, string Text)>();
-        log.LogEvent += (_, args) => messages.Add((args.Level, args.Data.ToString()!));
+        log.LogEvent += (_, args) => messages.Add((args.Level, LogCapture.Text(args.Data)));
         int evidence = 0;
         var notices = new AFKNightWatchSleepNotices(log, _ => evidence++);
         var vote = new SleepDecision { Participants = 3, Sleepers = 2, Required = 2, Met = true, AllowedAfterDelay = true };

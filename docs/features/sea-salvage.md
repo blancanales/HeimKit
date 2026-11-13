@@ -8,6 +8,8 @@ The vanilla CargoCrate has four inventory slots. Each source occupies a separate
 
 Defaults require four to fifty metres of water depth and thirty seconds of unchanged source state, with no living player within ten metres. Recovery scans within 128 metres of a rotating ready player. Active client-owned drops wait for native ownership release. Unknown terrain/water or source state defers recovery.
 
+New recovery work pauses during native raids or detected fights. Already-consumed source cleanup continues, and ordinary scans resume afterward.
+
 ## Configuration
 
 Use `[SeaSalvage]` in `heimkit.cfg`. This feature defaults enabled; set Enabled=false to disable it. Stop the server before editing and restart to apply settings. HeimKit preserves existing values and supplies missing defaults.

@@ -1,7 +1,13 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using System.Runtime.CompilerServices;
 using BepInEx.Logging;
-using HeimKit.Shared;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 
 internal static class PlayerConnectionNoticesTests
 {
@@ -15,7 +21,7 @@ internal static class PlayerConnectionNoticesTests
     {
         using var log = new ManualLogSource("Connection notice checks");
         var records = new List<(LogLevel Level, string Text)>();
-        log.LogEvent += (_, args) => records.Add((args.Level, args.Data.ToString()!));
+        log.LogEvent += (_, args) => records.Add((args.Level, LogCapture.Text(args.Data)));
         var notices = new PlayerConnectionNotices(log);
         IReadOnlyList<ZNetPeer>? peers = Array.Empty<ZNetPeer>();
         var presence = new PlayerPresence(() => peers, notices);

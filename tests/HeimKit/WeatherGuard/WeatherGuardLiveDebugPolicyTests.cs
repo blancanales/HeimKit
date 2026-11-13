@@ -1,8 +1,14 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Features.WeatherGuard;
 using HeimKit.Features.WeatherGuard.Models;
-using HeimKit.Shared;
 
 internal static class WeatherGuardLiveDebugPolicyTests
 {
@@ -12,7 +18,7 @@ internal static class WeatherGuardLiveDebugPolicyTests
         DiagnosticLog.StartSession();
         using var log = new ManualLogSource("WeatherGuard live debug policy");
         var messages = new List<(LogLevel Level, string Text)>();
-        log.LogEvent += (_, args) => messages.Add((args.Level, args.Data.ToString()!));
+        log.LogEvent += (_, args) => messages.Add((args.Level, LogCapture.Text(args.Data)));
         foreach (var level in new[] { DebugLogLevel.Medium, DebugLogLevel.Detailed })
         {
             var config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
@@ -23,7 +29,7 @@ internal static class WeatherGuardLiveDebugPolicyTests
             Check(messages.Count == 0, "Disabled policy emitted logs");
             settings.DebugMode.Value = true;
             diagnostics.Report(1, () => new WeatherGuardStatus());
-            Check(messages.Any(m => m.Level == LogLevel.Debug && m.Text.Contains("SUMMARY")), "Feature-only enablement retained the old false snapshot");
+            Check(messages.Any(m => m.Level == LogLevel.Debug && m.Text.Contains(".scope:")), "Feature-only enablement retained the old false snapshot");
             settings.DebugMode.Value = false; messages.Clear();
             diagnostics.Report(62, () => throw new Exception("Disabled feature collected evidence"));
             Check(messages.Count == 0, "Feature disablement retained the old true snapshot");

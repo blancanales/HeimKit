@@ -49,16 +49,10 @@ internal sealed class SharedMapResources : IDisposable
         _silverDiscovery = new SharedMapSilverDiscovery(world, presence, messages, MiningImpact, failed);
     }
 
+    private int _catalogCursor;
+    private readonly List<string> _unsupported = new();
     public void Install()
     {
-        var unsupported = new List<string>();
-        foreach (var entry in Catalog)
-        {
-            var prefab = SharedMapResourcePrefab.Read(entry.Name, entry.Kind, entry.Drop, entry.Successor);
-            if (prefab == null) { unsupported.Add(entry.Name); continue; }
-            _prefabs.Add(prefab.Hash, prefab); _scanPrefabs.Add(prefab);
-        }
-        _diagnostics.UnsupportedResources(unsupported);
         _silverDiscovery.Install();
         _world.m_onZDODestroyed += Destroyed;
     }
@@ -80,7 +74,12 @@ internal sealed class SharedMapResources : IDisposable
         ("rock3_silver", ResourceKind.Silver, "SilverOre", "rock3_silver_frac"),
         ("rock3_silver_frac", ResourceKind.Silver, "SilverOre", null),
         ("MineRock_Obsidian", ResourceKind.Obsidian, "Obsidian", null),
-        ("MineRock_Meteorite", ResourceKind.Flametal, "FlametalOreNew", null)
+        ("MineRock_Meteorite", ResourceKind.Flametal, "FlametalOreNew", null),
+        ("giant_ribs", ResourceKind.BlackMarble, "BlackMarble", "giant_ribs_frac"),
+        ("giant_ribs_frac", ResourceKind.BlackMarble, "BlackMarble", null),
+        ("giant_skull", ResourceKind.BlackMarble, "BlackMarble", "giant_skull_frac"),
+        ("giant_skull_frac", ResourceKind.BlackMarble, "BlackMarble", null),
+        ("YggdrasilRoot", ResourceKind.AncientRoot, "Sap", null)
     };
 
     private bool Eligible(ZDO zdo, out SharedMapResourcePrefab prefab, out Vector3 position)
@@ -104,16 +103,19 @@ internal sealed class SharedMapResources : IDisposable
         return progress;
     }
     private bool? Depleted(ZDO zdo, SharedMapResourcePrefab prefab)
-    { var progress = Progress(zdo, prefab); return progress.HasValue ? progress.Value.RemainingSections == 0 : (bool?)null; }
+    {
+        if (prefab.Kind == ResourceKind.AncientRoot) return false;
+        var progress = Progress(zdo, prefab); return progress.HasValue ? progress.Value.RemainingSections == 0 : (bool?)null;
+    }
     private void Observe(ZDO zdo, SharedMapResourcePrefab prefab, Vector3 position, bool discoverSilver = false, MiningProgress? handoff = null)
     {
         int before = _store.Deposits.Count;
         var old = _store.Find(prefab.Kind, position.x, position.y, position.z, out _);
         bool wasDepleted = old?.Depleted == true;
         bool wasHidden = old != null && prefab.Kind == ResourceKind.Silver && !old.SilverDiscovered;
-        MiningProgress? progress = prefab.Kind == ResourceKind.Copper || prefab.Kind == ResourceKind.Silver ? handoff ?? Progress(zdo, prefab) : null;
+        MiningProgress? progress = SharedMapResourceHealth.TracksProgress(prefab.Kind) ? handoff ?? Progress(zdo, prefab) : null;
         bool? depleted = progress.HasValue ? progress.Value.RemainingSections == 0 : Depleted(zdo, prefab);
-        var accepted = _store.Observe(prefab.Kind, position.x, position.y, position.z, depleted, true, progress, discoverSilver);
+        var accepted = _store.Observe(prefab.Kind, position.x, position.y, position.z, depleted, true, progress, discoverSilver, prefab.SapPercentage(zdo));
         _added += _store.Deposits.Count - before;
         if (accepted != null && wasHidden && accepted.SilverDiscovered) _added++;
         if (accepted != null && !wasDepleted && accepted.Depleted) _retired++;
@@ -196,6 +198,15 @@ internal sealed class SharedMapResources : IDisposable
     public void Tick(float now)
     {
         if (_disposed) return;
+        if (_catalogCursor < Catalog.Length)
+        {
+            var entry = Catalog[_catalogCursor++];
+            var prefab = SharedMapResourcePrefab.Read(entry.Name, entry.Kind, entry.Drop, entry.Successor);
+            if (prefab == null) _unsupported.Add(entry.Name);
+            else { _prefabs.Add(prefab.Hash, prefab); _scanPrefabs.Add(prefab); }
+            if (_catalogCursor == Catalog.Length) { _diagnostics.UnsupportedResources(_unsupported); _unsupported.Clear(); }
+            return;
+        }
         if (_settings.ResourceDiscoverPreviouslyExplored.Value && _scanPrefabs.Count > 0 && _nextRetro.Ready(now))
         {
             if (_retrospective.Count == 0)
@@ -214,6 +225,7 @@ internal sealed class SharedMapResources : IDisposable
             }
             for (int i = 0; i < 256 && _retrospective.Count > 0; i++)
             {
+                if (i > 0 && !ModuleScheduler.Current.HasBudget) break;
                 var zdo = _world.GetZDO(_retrospective.Dequeue());
                 if (zdo != null && Eligible(zdo, out var prefab, out var p) && _map.IsExplored(p.x, p.z)) Observe(zdo, prefab, p);
             }

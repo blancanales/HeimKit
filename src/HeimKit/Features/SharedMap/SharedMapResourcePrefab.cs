@@ -22,14 +22,14 @@ internal sealed class SharedMapResourcePrefab
     private readonly int _sections;
     private readonly int[] _healthKeys;
     private readonly bool _mineRock, _mineRock5;
-    private readonly float _health;
+    private readonly float _health, _rootMaximum;
 
     private SharedMapResourcePrefab(string name, ResourceKind kind, bool replacement, int sections,
-        bool mineRock, bool mineRock5, float health)
+        bool mineRock, bool mineRock5, float health, float rootMaximum = 0)
     {
         Name = name; Kind = kind; Hash = name.GetStableHashCode(); ReplacesWithMining = replacement;
         _healthKeys = new int[mineRock ? sections : 0]; for (int index = 0; index < _healthKeys.Length; index++) _healthKeys[index] = ("Health" + index).GetStableHashCode();
-        _sections = sections; _mineRock = mineRock; _mineRock5 = mineRock5; _health = health;
+        _sections = sections; _mineRock = mineRock; _mineRock5 = mineRock5; _health = health; _rootMaximum = rootMaximum;
     }
 
     public static SharedMapResourcePrefab? Read(string name, ResourceKind kind, string drop, string? successor)
@@ -38,6 +38,14 @@ internal sealed class SharedMapResourcePrefab
         if (prefab == null || PrefabRegistry.Component<Piece>(prefab) != null || PrefabRegistry.Component<ItemDrop>(prefab) != null ||
             PrefabRegistry.Component<Character>(prefab) != null || PrefabRegistry.Component<Leviathan>(prefab) != null ||
             PrefabRegistry.Component<ZNetView>(prefab)?.m_persistent != true) return null;
+        if (kind == ResourceKind.AncientRoot)
+        {
+            var root = PrefabRegistry.Component<ResourceRoot>(prefab);
+            if (name != "YggdrasilRoot" || drop != "Sap" || successor != null || root == null ||
+                !SharedMapExploration.Finite(root.m_maxLevel) || root.m_maxLevel <= 0 ||
+                !SharedMapExploration.Finite(root.m_regenPerSec) || root.m_regenPerSec < 0) return null;
+            return new SharedMapResourcePrefab(name, kind, false, 1, false, false, float.NaN, root.m_maxLevel);
+        }
         var mine = PrefabRegistry.Component<MineRock>(prefab);
         var mine5 = PrefabRegistry.Component<MineRock5>(prefab);
         var destructible = PrefabRegistry.Component<Destructible>(prefab);
@@ -66,14 +74,19 @@ internal sealed class SharedMapResourcePrefab
     public MiningProgress InitialProgress => new MiningProgress(_sections, _sections);
     public float HealthBaseline(ZDO zdo) => zdo.GetFloat(ZDOVars.s_health, _health);
 
+    internal int? SapPercentage(ZDO zdo) => Kind == ResourceKind.AncientRoot
+        ? SharedMapAncientRoot.Percentage(zdo.GetFloat(ZDOVars.s_level, _rootMaximum), _rootMaximum) : null;
+
     public bool? Depleted(ZDO zdo)
     {
+        if (Kind == ResourceKind.AncientRoot) return false; // Empty sap regenerates; it is not destroyed.
         var progress = Progress(zdo);
         return progress.HasValue ? progress.Value.RemainingSections == 0 : (bool?)null;
     }
 
     public MiningProgress? Progress(ZDO zdo)
     {
+        if (Kind == ResourceKind.AncientRoot) return null;
         if (_mineRock5) return SharedMapResourceHealth.Progress(zdo.GetString(ZDOVars.s_health), _sections);
         if (_mineRock)
         {

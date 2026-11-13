@@ -21,6 +21,19 @@ internal sealed class SharedMapLandmarkPrefab
         ["Runestone_Mountains"] = "Mountain Runestone", ["Runestone_Plains"] = "Plains Runestone", ["Runestone_Mistlands"] = "Mistlands Runestone",
         ["Runestone_Ashlands"] = "Ashlands Runestone", ["Runestone_DeepNorth"] = "Deep North Runestone"
     };
+    internal static readonly (string Prefix, string Label)[] Structures = {
+        ("Mistlands_GuardTower", "Dvergr Guard Tower"), ("Mistlands_Lighthouse", "Dvergr Lighthouse"), ("Mistlands_Excavation", "Dvergr Excavation")
+    };
+    internal static string? StructureLabel(string location)
+    {
+        foreach (var entry in Structures)
+            if (location.StartsWith(entry.Prefix, StringComparison.Ordinal)) return entry.Label;
+        return null;
+    }
+    // The placed location root supplies the only point; no asset inspection is needed.
+    internal static SharedMapLandmarkPrefab LocationRoot(string name, string label) =>
+        new(name, new List<(string Path, string Label, Vector3 Offset)> { ("root", label, Vector3.zero) });
+
     private static readonly IReadOnlyDictionary<string, string> SourceLabels = new Dictionary<string, string>(StringComparer.Ordinal) {
         ["Spawner_GreydwarfNest"] = "Greydwarf Nest", ["BonePileSpawner"] = "Skeleton Bone Pile", ["BonePileSpawner_swamp"] = "Swamp Skeleton Bone Pile",
         ["Spawner_DraugrPile"] = "Draugr Pile", ["Spawner_CharredStone"] = "Charred Stone", ["Spawner_CharredStone_Elite"] = "Charred Elite Stone",

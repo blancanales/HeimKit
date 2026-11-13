@@ -43,31 +43,62 @@ internal sealed class SharedMapDungeons : IDisposable
         if (proxy == null || PrefabRegistry.Component<LocationProxy>(proxy) == null || PrefabRegistry.Component<ZNetView>(proxy) == null)
             throw new InvalidOperationException("Native dungeon location-proxy metadata is unavailable.");
         _proxyName = proxy.name; _proxyHash = _proxyName.GetStableHashCode();
-        var unavailable = new List<string>();
-        var found = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var location in ZoneSystem.instance.m_locations)
+    }
+    private readonly List<string> _unavailable = new();
+    private readonly HashSet<string> _found = new(StringComparer.Ordinal);
+    private int _locationCursor;
+    private bool _metadataReady;
+    private readonly PrefabAssetRequest _asset = new();
+    private SoftReference<GameObject> _inspecting;
+    private string? _inspectingName;
+    private void InspectOne(float now)
+    {
+        if (_inspectingName != null)
         {
-            if (!location.m_prefab.IsValid) continue;
-            string name = location.m_prefab.Name;
-            if (!SharedMapDungeonPrefab.Labels.ContainsKey(name) || !found.Add(name)) continue;
-            var reference = location.m_prefab;
-            if (!reference.IsValid) { unavailable.Add(name); continue; }
-            var loaded = reference.Load();
+            if (!_asset.TryGet(_inspecting, now, out var prefab, _inspectingName)) return;
+            string name = _inspectingName;
             try
             {
-                if (loaded != LoadResult.Succeeded || reference.Asset == null)
-                    throw new InvalidDataException("Dungeon prefab could not be loaded for metadata inspection.");
-                var metadata = new SharedMapDungeonPrefab(reference.Asset);
-                int hash = name.GetStableHashCode();
-                if (_prefabs.ContainsKey(hash)) throw new InvalidDataException("Ambiguous dungeon location hash.");
-                _prefabs.Add(hash, metadata);
+                if (prefab == null) throw new InvalidDataException("Dungeon asset " + _asset.LastOutcome + ".");
+                using var timing = PerformanceStages.Measure("SharedMap", "dungeon_metadata", 1, subject: name);
+                var metadata = new SharedMapDungeonPrefab(prefab);
+                _prefabs.Add(name.GetStableHashCode(), metadata);
                 _maximumOffset = Math.Max(_maximumOffset, metadata.MaximumOffset);
             }
-            catch (InvalidDataException) { unavailable.Add(name); }
-            finally { reference.Release(); }
+            catch (InvalidDataException) { _unavailable.Add(name); }
+            finally
+            {
+                try { _diagnostics.AssetPreparation(now, name, _asset.LastOutcome, _asset.LastWaitSeconds); }
+                finally { try { _asset.Dispose(); } finally { _inspectingName = null; _inspecting = default; } }
+            }
+            return;
         }
-        _diagnostics.UnsupportedDungeons(unavailable);
-        _diagnostics.DungeonReady(_prefabs.Count, _prefabs.Values.Sum(p => p.Gateways.Count), _store.Count,
+        int examined = 0;
+        while (_locationCursor < ZoneSystem.instance.m_locations.Count && examined++ < 16)
+        {
+            var location = ZoneSystem.instance.m_locations[_locationCursor++];
+            if (!location.m_prefab.IsValid) continue;
+            string name = location.m_prefab.Name;
+            if (!SharedMapDungeonPrefab.Labels.ContainsKey(name) || !_found.Add(name)) continue;
+            int hash = name.GetStableHashCode();
+            if (_prefabs.TryReuse(hash, out var cached))
+            {
+                if (cached.Name != name) throw new InvalidDataException("Ambiguous cached dungeon prefab hash.");
+                _maximumOffset = Math.Max(_maximumOffset, cached.MaximumOffset);
+                _diagnostics.AssetPreparation(now, name, "cached", 0);
+                return;
+            }
+            var reference = location.m_prefab;
+            if (!reference.IsValid) { _unavailable.Add(name); return; }
+            _inspecting = reference; _inspectingName = name;
+            _asset.TryGet(reference, now, out _, name);
+            return;
+        }
+        if (_locationCursor < ZoneSystem.instance.m_locations.Count) return;
+        _metadataReady = true;
+        _diagnostics.UnsupportedDungeons(_unavailable); _unavailable.Clear();
+        int gateways = 0; foreach (var definition in _prefabs.Values) gateways += definition.Gateways.Count;
+        _diagnostics.DungeonReady(_prefabs.Count, gateways, _store.Count,
             _map.Radius, _map.Interval, _settings.DungeonDiscoverPreviouslyExplored.Value, _settings.AllowPlayerMapWrites.Value);
     }
 
@@ -83,6 +114,7 @@ internal sealed class SharedMapDungeons : IDisposable
 
     public void Sample(Vector3 player)
     {
+        if (!_metadataReady) return;
         float zoneSize = ZoneSystem.instance.m_zoneSize;
         if (!SharedMapExploration.Finite(zoneSize) || zoneSize < 16)
             throw new InvalidOperationException("Unsupported native dungeon-sector geometry.");
@@ -95,6 +127,7 @@ internal sealed class SharedMapDungeons : IDisposable
 
     public void SampleInterior(Vector3 player, long peer, float now)
     {
+        if (!_metadataReady) return;
         // Native Location.GetLocation resolves interior positions through GetZoneLocation.
         // Use saved proxies rather than loaded Location instances; never reveal new entrances here.
         if (!SharedMapDungeonPrefab.Finite(player) || !Character.InInterior(player)) return;
@@ -150,6 +183,7 @@ internal sealed class SharedMapDungeons : IDisposable
 
     public void Tick(float now)
     {
+        if (!_metadataReady) { InspectOne(now); return; }
         // Queue real observations, including their original usable player position, before deferring evaluation.
         if ((_settings.DungeonDiscoverPreviouslyExplored.Value || _store.Count > 0 && _loot != null) && _nextScan.Ready(now) && _pending.Count < 32768)
         {
@@ -172,6 +206,7 @@ internal sealed class SharedMapDungeons : IDisposable
         }
         for (int i = 0; i < 256 && _pending.Count > 0; i++)
         {
+            if (i > 0 && !ModuleScheduler.Current.HasBudget) break;
             var candidate = _pending.Dequeue();
             Vector3 point = candidate.Root + candidate.Rotation * candidate.Gateway.Offset;
             if (!SharedMapDungeonPrefab.Finite(point) || Character.InInterior(point)) continue;
@@ -192,8 +227,8 @@ internal sealed class SharedMapDungeons : IDisposable
             _added++;
             _diagnostics.DungeonDiscovered(marker, candidate.Prefab.Name, candidate.Root, candidate.Player, _map.Radius);
         }
-        if (DungeonDB.instance != null) _loot?.Tick(now, _settings.TableIntervalSeconds.Value);
     }
+    internal void TickLoot(float now) { if (_metadataReady && DungeonDB.instance != null) _loot?.Tick(now, _settings.TableIntervalSeconds.Value); }
 
     private readonly Dictionary<(string Name, Vector3 Root), string[]> _gatewayIdentities = new();
     private string[] GatewayIdentities(SharedMapDungeonPrefab prefab, Vector3 root)
@@ -229,5 +264,16 @@ internal sealed class SharedMapDungeons : IDisposable
     }
 
     public void Dispose()
-    { _index?.Dispose(); _index = null; _pending.Clear(); _gatewayIdentities.Clear(); _scan.Clear(); _near.Clear(); _prefabs.Clear(); _added = 0; }
+    {
+        try { _asset.Dispose(); }
+        finally
+        {
+            try { _loot?.Dispose(); }
+            finally
+            {
+                try { _index?.Dispose(); }
+                finally { _index = null; _pending.Clear(); _gatewayIdentities.Clear(); _scan.Clear(); _near.Clear(); _prefabs.Clear(); _added = 0; }
+            }
+        }
+    }
 }

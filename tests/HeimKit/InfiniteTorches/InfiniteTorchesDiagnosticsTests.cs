@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Features.InfiniteTorches;
@@ -16,7 +23,7 @@ internal static class InfiniteTorchesDiagnosticsTests
         statusLogger.LogEvent += (_, args) =>
         {
             if (args.Level != LogLevel.Debug) throw new Exception("Optional torch diagnostics must use Debug severity.");
-            statusMessages.Add(args.Data.ToString()!);
+            statusMessages.Add(LogCapture.Text(args.Data));
         };
         var status = new InfiniteTorchesDiagnostics(statusConfig, statusLogger);
         status.Report(0f, () => throw new Exception("Debug mode off must suppress diagnostic formatting."));
@@ -66,11 +73,11 @@ internal static class InfiniteTorchesDiagnosticsTests
         int outcomeStart = statusMessages.Count;
         for (int i = 0; i < 100; i++) status.Result(0, new HeimKit.Features.InfiniteTorches.Models.RefillResult
             { Object = "1:" + i, Outcome = "fuel_increase", Before = 0, Fuel = 10, Target = 10 });
-        if (statusMessages.Count != outcomeStart + 6 || !statusMessages[^1].Contains(": RESULT |") ||
+        if (statusMessages.Count != outcomeStart + 6 || !statusMessages[^1].Contains(".refill:") ||
             !statusMessages[^1].Contains("delivery acknowledgement unavailable"))
             throw new Exception("Refill outcomes are unbounded or overstate delivery evidence.");
         status.Report(0, () => "Pending refill outcomes collected");
-        if (!statusMessages[^1].Contains("omitted_messages_interval=RESULT:94")) throw new Exception("Omitted outcome count missing.");
+        if (!statusMessages[^1].Contains("omitted_messages=refill_results:94")) throw new Exception("Omitted outcome count missing.");
         statusConfig.Bind("Diagnostics", "DebugMode", false).Value = false;
         int offCount = statusMessages.Count;
         status.Result(60, new HeimKit.Features.InfiniteTorches.Models.RefillResult { Outcome = "timeout" });

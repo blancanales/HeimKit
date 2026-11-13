@@ -1,9 +1,15 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
 using HeimKit.Features.SharedMap;
-using HeimKit.Shared;
-using HeimKit.Shared.Players;
+using HeimKit.Core.Players;
 
 internal static class SharedMapTests
 {
@@ -17,7 +23,7 @@ internal static class SharedMapTests
         DiagnosticLog.StartSession();
         using var logger = new ManualLogSource("SharedMap checks");
         var messages = new List<string>();
-        logger.LogEvent += (_, args) => messages.Add(args.Data.ToString()!);
+        logger.LogEvent += (_, args) => messages.Add(LogCapture.Text(args.Data));
         string directory = Path.Combine(AppContext.BaseDirectory, "shared-map-" + Guid.NewGuid());
         Directory.CreateDirectory(directory);
         try
@@ -45,7 +51,7 @@ internal static class SharedMapTests
             Check(!config.ContainsKey(new ConfigDefinition("SharedMap", "DisableDebugLogging")), "Hidden suppression key was generated.");
 
             settings.Enabled.Value = true;
-            module.Initialize("unsupported");
+            module.Initialize("");
             Check(!module.IsActive && players.Events.Subscribers == 0, "Version mismatch activated SharedMap.");
             module.Initialize(GameVersionCompatibility.AuditedVersion);
             Check(module.IsActive && players.Events.Subscribers == 1, "Enabled module missed presence hookup. " + string.Join(" | ", messages));

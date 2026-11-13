@@ -1,5 +1,7 @@
 # HeimMender
 
+Automatic background work pauses during native raids or observed combat; confirmation cleanup and explicitly requested administrative repair batches continue. See [performance observations](../server-setup.md#performance-observations).
+
 Gradually repairs damaged player-built static structures and accepts bounded administrative repair requests. It restores existing pieces to native maximum health without consuming materials or changing their creator. Destroyed pieces and world-created ruins are excluded. See [specification](../specs/heim-mender.md) and [shared limitations](../limitations.md).
 
 ![HeimMender: observe damaged player-built pieces and repair through automatic cycles or bounded administrative requests](../images/heim-mender-workflow.jpg)
@@ -13,18 +15,20 @@ Settings are in `[HeimMender]` in the loader-provided `heimkit.cfg`. This sectio
 | Enabled | true | Enable the module |
 | DebugMode | false | Optional shared-policy diagnostics |
 | AutomaticEnabled | true | Gradual repair cycles |
-| IntervalSeconds | 300 | Seconds between automatic cycles |
+| IntervalSeconds | 300 | Seconds between automatic cycles while nothing is waiting |
+| CatchUpIntervalSeconds | 15 | Seconds until the next cycle while damaged pieces are still waiting; 0 always uses IntervalSeconds |
 | RepairChancePercent | 50 | Chance per damaged candidate per cycle |
 | MaxRepairsPerCycle | 10 | Maximum automatic repair requests per cycle |
 | ScanRangeMeters | 64 | Range around a rotating ready player |
 | DamageQuietSeconds | 60 | Deferral after observed health loss |
+| RepairSpreadSeconds | 1320 | Period over which automatic repairs are spread; each piece waits a random share of it after its last health loss; 0 disables |
 | HostileClearanceMeters | 30 | Automatic deferral near untamed MonsterAI; 0 disables |
 | AdminRadiusMeters | 64 | Default manual repair radius |
 | AdminMaxPieces | 200 | Maximum requests per manual batch |
 | RepairRequestId | 0 | Increase to request manual repairs during play |
 | RepairTarget | empty | Exact joined player name or peer UID; empty requires one ready player |
 
-Five-minute cycles and a ten-piece cap provide gradual maintenance. Chance and caps apply independently: a cycle may repair fewer pieces. Automatic damage/threat deferrals do not classify the original cause of damage. Manual batches bypass those deferrals, cycle timing and chance.
+Repairs never start while a piece is still taking damage or an untamed creature is nearby. Once those deferrals clear, cycles repeat at CatchUpIntervalSeconds until every waiting piece has been handled, then return to IntervalSeconds. Restoration is gradual. Each damaged piece waits its own random share of RepairSpreadSeconds after it last lost health, so a damaged base mends piece by piece over about 22 minutes with the default, close to a full game day. Lower the value for faster recovery or set it to 0 to repair as soon as the deferrals clear. Set CatchUpIntervalSeconds to 0 for fixed IntervalSeconds cycles. Chance and caps apply independently: a cycle may repair fewer pieces. Automatic damage/threat deferrals do not classify the original cause of damage. Manual batches bypass those deferrals, the repair spread, cycle timing and chance.
 
 ## Administrative repair
 
@@ -36,9 +40,9 @@ From the **dedicated-server terminal**, use `heimmender repair <peerUID-or-singl
 
 Player-built static building-category walls, floors, roofs, structural beams, doors and gates qualify, including weather-immune materials. Furniture, crafting stations, containers, vehicles and moving pieces are excluded. Repairs use the existing native owner; unavailable owners postpone work.
 
-Normal output reports accepted/rejected requests and confirmed repair totals per completed batch. Debug scope summary records show damaged candidates, quiet/threat deferrals, unavailable owners and selected requests. Request samples include ZDO identity, health, maximum health and owner; outcome sample records separate requests, confirmations and timeouts. A sent request alone is not a repair confirmation.
+Normal output reports accepted/rejected requests and confirmed repair totals per completed batch. Debug scope summary records show damaged candidates, quiet/scheduled/threat deferrals, unavailable owners and selected requests. Request samples include ZDO identity, health, maximum health and owner; outcome sample records separate requests, confirmations and timeouts. A sent request alone is not a repair confirmation.
 
-The observation budget retains damaged candidates rather than healthy building pieces. Completed repairs release their slots. Normal output warns if damaged-candidate capacity is exhausted and reports when capacity recovers.
+The observation budget retains damaged candidates rather than healthy building pieces. HeimMender follows a piece from the health change that leaves it below maximum; healthy pieces are not re-checked on each pass, so a fully repaired base adds almost no routine work. Completed repairs release their slots. Normal output warns if damaged-candidate capacity is exhausted and reports when capacity recovers.
 
 ## HeimKit log topics
 

@@ -18,6 +18,7 @@ public sealed class WeatherGuardSettings
     public ConfigEntry<bool> ProtectRain { get; }
     public ConfigEntry<bool> ProtectUnderwater { get; }
     public ConfigEntry<string> ExcludedPrefabs { get; }
+    public ConfigEntry<bool> ReuseSceneLists { get; }
     public ConfigEntry<bool> DebugMode { get; }
     public ConfigEntry<bool> GlobalDebugMode { get; }
     public DebugLoggingPolicy DebugLogging { get; }
@@ -31,6 +32,7 @@ public sealed class WeatherGuardSettings
         ProtectRain = config.Bind("WeatherGuard", "ProtectRain", true, "Prevent rain wear on eligible structures. Restart after edits.");
         ProtectUnderwater = config.Bind("WeatherGuard", "ProtectUnderwater", true, "Prevent underwater wetness wear on eligible structures. Restart after edits.");
         ExcludedPrefabs = config.Bind("WeatherGuard", "ExcludedPrefabs", "", "Comma-separated exact case-sensitive prefab identifiers to leave under native processing; no wildcards. Restart after edits.");
+        ReuseSceneLists = config.Bind("WeatherGuard", "ReuseSceneLists", true, "Reuse the extra scene-object list between frames while nothing relevant has changed. Set false to rebuild it every frame. Restart after edits.");
         GlobalDebugMode = DiagnosticsSettings.Bind(config);
         DebugMode = config.Bind("WeatherGuard", "DebugMode", false, "Enable diagnostics for this feature even when global DebugMode is off. The hidden suppression override still takes precedence. Restart after edits.");
         DebugLogging = DebugLoggingResolver.Resolve(config, "WeatherGuard", GlobalDebugMode, logger, DebugMode);

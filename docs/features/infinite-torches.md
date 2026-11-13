@@ -12,6 +12,8 @@ Below 75% fuel, the server sends a native refill request to the object's current
 
 The default list includes wooden, iron, green, blue and wall torches, the hanging brazier, and both standing brazier variants. Campfires, hearths and bonfires (the large outdoor fire) are excluded by default. Set IncludeFireplaces to true to enable their refilling, then use Campfires, Hearths and Bonfires to choose individual types. A false master or type switch excludes those fires even if manually listed in Prefabs. Unsupported configured prefabs are skipped with a grouped warning.
 
+New refill scans pause during native raids or detected fights; pending refill confirmation and expiry continue. Ordinary scans resume afterward.
+
 ## Configuration
 
 Settings belong under `[Torches]`. Stop the server before edits and restart to apply them. Existing values are preserved.
@@ -51,3 +53,5 @@ Info groups observed fuel increases into one result per pass. Empty/unchanged pa
 - `refill`: Native fuel requests and observed results.
 
 Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.
+
+Initial discovery is spread across updates while weather protection starts first. Refill requests wait for a completed scan and current owner/range checks; existing confirmation handling continues. Settings and normal refill-result grouping are unchanged. See [processing limits](../limitations.md#server-observations-and-logs).

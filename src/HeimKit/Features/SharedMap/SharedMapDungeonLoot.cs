@@ -14,7 +14,7 @@ using UnityEngine;
 
 namespace HeimKit.Features.SharedMap;
 
-internal sealed class SharedMapDungeonLoot
+internal sealed class SharedMapDungeonLoot : IDisposable
 {
     private sealed class Target
     {
@@ -41,6 +41,11 @@ internal sealed class SharedMapDungeonLoot
     private readonly HashSet<ZDOID> _seen = new();
     private readonly HashSet<(int Hash, float X, float Y, float Z)> _matchedSites = new();
     private int _cursor, _changed;
+    private readonly PrefabAssetRequest _asset = new();
+    private SoftReferenceableAssets.SoftReference<GameObject> _roomReference;
+    private int _roomHash;
+    private bool _roomPending;
+    private readonly Dictionary<int, float> _roomRetry = new();
     public SharedMapDungeonLoot(ZDOMan world, SharedMapDungeonStore store, SharedMapDiagnostics diagnostics)
     { _world = world; _store = store; _diagnostics = diagnostics; }
 
@@ -87,6 +92,25 @@ internal sealed class SharedMapDungeonLoot
     }
     public void Tick(float now, float interval)
     {
+        if (_roomPending)
+        {
+            if (!_asset.TryGet(_roomReference, now, out var asset)) return;
+            try
+            {
+                if (asset != null)
+                {
+                    using var timing = PerformanceStages.Measure("SharedMap", "room_metadata", 1, subject: "room_" + _roomHash);
+                    _rooms[_roomHash] = Points(asset); _roomRetry.Remove(_roomHash);
+                }
+                else if (_roomRetry.Count < 2048 || _roomRetry.ContainsKey(_roomHash)) _roomRetry[_roomHash] = now + 60;
+            }
+            finally
+            {
+                try { _diagnostics.RoomPreparation(now, _roomHash, _asset.LastOutcome, _asset.LastWaitSeconds); }
+                finally { try { _asset.Dispose(); } finally { _roomPending = false; _roomReference = default; } }
+            }
+            return;
+        }
         if (_order.Count == 0) return;
         string key = _order[_cursor++ % _order.Count]; if (_cursor == int.MaxValue) _cursor = 0;
         var target = _targets[key]; if (!target.Next.Ready(now)) return;
@@ -123,14 +147,15 @@ internal sealed class SharedMapDungeonLoot
             {
                 int hash = placement.Hash; Vector3 position = placement.Position;
                 Quaternion rotation = Quaternion.Euler(placement.RotationEuler);
-                if (!_rooms.TryGetValue(hash, out var template))
+                if (!_rooms.TryGetValue(hash, out var template) && !_rooms.TryReuse(hash, out template))
                 {
+                    if (_roomRetry.TryGetValue(hash, out float retry) && now < retry && now >= retry - 60)
+                    { Unknown(target, now, "room_asset_retry_wait"); return; }
                     var room = DungeonDB.instance.GetRoom(hash);
                     if (room == null || _rooms.Count >= 2048) { Unknown(target, now, "room_metadata_unavailable"); return; }
-                    var reference = room.m_prefab;
-                    try { reference.Load(); if (reference.Asset == null) { Unknown(target, now, "room_asset_unavailable"); return; } _rooms[hash] = Points(reference.Asset); }
-                    finally { reference.Release(); }
-                    return; // At most one newly loaded room template per occupied tick.
+                    _roomHash = hash; _roomReference = room.m_prefab; _roomPending = true;
+                    _asset.TryGet(_roomReference, now, out _);
+                    return;
                 }
                 foreach (var point in template)
                     if (Objective(target.Prefab.Name, point.Item)) points.Add((point.Hash, position + rotation * point.Offset));
@@ -237,4 +262,5 @@ internal sealed class SharedMapDungeonLoot
         }
     }
     public int TakeChanges() { int count = _changed; _changed = 0; return count; }
+    public void Dispose() { try { _asset.Dispose(); } finally { _roomPending = false; _roomReference = default; _rooms.Clear(); _roomRetry.Clear(); } }
 }

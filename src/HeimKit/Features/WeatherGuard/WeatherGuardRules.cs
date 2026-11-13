@@ -10,6 +10,13 @@ namespace HeimKit.Features.WeatherGuard;
 
 public static class WeatherGuardRules
 {
+    internal static bool CanReuseSceneList(bool enabled, bool stale, int elapsedFrames, int reuseFrames, bool worldReady, bool indexed, bool sameSelection,
+        long builtRevision, long revision, (int Near, int Total, bool Classic) builtDistance, (int Near, int Total, bool Classic) distance, int builtZones, int zones) =>
+        enabled && !stale && elapsedFrames < reuseFrames && worldReady && indexed && sameSelection &&
+        builtRevision == revision && builtDistance == distance && builtZones == zones;
+    internal static bool SameSceneZone(Vector2s current, Vector2s saved) => current == saved;
+    internal static bool CanReuseSceneRecord(bool valid, ZDOID current, ZDOID saved, bool inRange) => valid && current == saved && inRange;
+
     public const int MaximumRegions = 8;
     public const int MaximumObjects = 32768;
     public const int MaximumProtected = 8192;

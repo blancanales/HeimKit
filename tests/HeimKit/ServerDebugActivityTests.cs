@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Configuration;
@@ -6,7 +13,6 @@ using HeimKit.Features.AFKNightWatch.Models;
 using HeimKit.Features.InfiniteTorches;
 using HeimKit.Features.WeatherGuard;
 using HeimKit.Features.WeatherGuard.Models;
-using HeimKit.Shared;
 
 internal static class ServerDebugActivityTests
 {
@@ -31,7 +37,7 @@ internal static class ServerDebugActivityTests
 
         using var logger = new ManualLogSource("Server debug activity checks");
         var records = new List<(LogLevel Level, string Text)>();
-        logger.LogEvent += (_, args) => records.Add((args.Level, args.Data.ToString()!));
+        logger.LogEvent += (_, args) => records.Add((args.Level, LogCapture.Text(args.Data)));
         var config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, "idle-debug-" + Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         var debug = DiagnosticsSettings.Bind(config); debug.Value = true;
         var policy = new DebugLoggingPolicy(debug, false);
@@ -48,11 +54,11 @@ internal static class ServerDebugActivityTests
             medium.Report(300, () => throw new Exception("Idle medium snapshot evaluated"),
                 protection: () => throw new Exception("Idle medium protection snapshot evaluated"));
             afk.Report(300, () => throw new Exception("Idle AFK snapshot evaluated"));
-            DiagnosticLog.Write(logger, "HeimKit", DiagnosticEvent.Detail, "Suppressed", InvalidFields(), LogLevel.Debug);
+            DiagnosticLog.Write(logger, "HeimKit", CoreLogTopics.Scope, "Suppressed", new (string, object?)[] { ("bad|key", 1) }, LogLevel.Debug);
             Check(records.Count == 0, "Automatic diagnostics emitted during idle suppression");
-            DiagnosticLog.Write(logger, "HeimKit", DiagnosticEvent.Lifecycle, "Ready.");
-            DiagnosticLog.Write(logger, "HeimKit", DiagnosticEvent.Lifecycle, "Warning", level: LogLevel.Warning);
-            DiagnosticLog.Write(logger, "HeimKit", DiagnosticEvent.Lifecycle, "Error", level: LogLevel.Error);
+            DiagnosticLog.Write(logger, "HeimKit", CoreLogTopics.Lifecycle, "Ready.");
+            DiagnosticLog.Write(logger, "HeimKit", CoreLogTopics.Lifecycle, "Warning", level: LogLevel.Warning);
+            DiagnosticLog.Write(logger, "HeimKit", CoreLogTopics.Lifecycle, "Error", level: LogLevel.Error);
             weather.Coverage(new CoverageSnapshot { State = "module_inactive" });
             Check(records.Count == 4 && records[1].Level == LogLevel.Warning && records[2].Level == LogLevel.Error &&
                 records[3].Text.Contains("Requested coverage report"), "Idle suppression hid ordinary output or requested coverage");

@@ -18,14 +18,15 @@ public static class SharedMapResourceClusters
     public static IReadOnlyList<MapMarker> Group(IEnumerable<ResourceDeposit> discoveries, float distance, bool removeDepleted)
     {
         var groups = SharedMapMarkerClusters.Group(discoveries.Where(d => d.Kind != ResourceKind.Silver || d.SilverDiscovered).OrderBy(d => d.Identity), distance,
-            d => d.X, d => d.Z, (a, b) => a.Kind == b.Kind);
+            d => d.X, d => d.Z, (a, b) => a.Kind == b.Kind && a.Kind != ResourceKind.AncientRoot);
         var markers = new List<MapMarker>();
         foreach (var group in groups)
         {
             var remaining = group.Where(d => !removeDepleted || !d.Depleted).ToArray();
             if (remaining.Length == 0) continue;
-            string name = group[0].Kind.ToString();
-            if (group[0].Kind == ResourceKind.Copper || group[0].Kind == ResourceKind.Silver) name = PercentageLabel(group);
+            string name = group[0].Kind == ResourceKind.AncientRoot
+                ? SharedMapAncientRoot.Label(group[0]) : group[0].Kind.ToString();
+            if (SharedMapResourceHealth.TracksProgress(group[0].Kind)) name = PercentageLabel(group);
             if (group[0].Kind == ResourceKind.Tin && remaining.Length > 1)
                 name += " (" + remaining.Length.ToString(CultureInfo.InvariantCulture) + ")";
             markers.Add(new MapMarker(name, (float)remaining.Average(d => (double)d.X),
@@ -38,7 +39,7 @@ public static class SharedMapResourceClusters
 
     private static string PercentageLabel(IReadOnlyList<ResourceDeposit> group)
     {
-        string label = group[0].Kind.ToString();
+        string label = group[0].Kind == ResourceKind.BlackMarble ? "Black Marble" : group[0].Kind.ToString();
         if (group.All(d => d.Depleted)) return label + " 0%";
         if (group.Any(d => !d.Progress.HasValue)) return label + " ?%";
         // Include depleted members' original totals. Otherwise mining a whole boulder

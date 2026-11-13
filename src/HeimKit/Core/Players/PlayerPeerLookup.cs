@@ -16,6 +16,7 @@ internal static class PlayerPeerLookup
 {
     public static ZNetPeer? Ready(IReadOnlyList<ZNetPeer> peers, ZRpc rpc)
     {
+        if (IncomingPackets.TryRosterPeer(rpc, peers, out var peer)) return peer;
         for (int i = 0; i < peers.Count; i++)
             if (ReferenceEquals(peers[i].m_rpc, rpc)) return peers[i].IsReady() ? peers[i] : null;
         return null;

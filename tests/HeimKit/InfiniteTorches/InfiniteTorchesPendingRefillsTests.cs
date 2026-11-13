@@ -1,3 +1,10 @@
+using HeimKit.Core.Scheduling;
+using HeimKit.Core.World;
+using HeimKit.Core.Prefabs;
+using HeimKit.Core.Native;
+using HeimKit.Core.Ownership;
+using HeimKit.Core.Diagnostics;
+using HeimKit.Core.Lifecycle;
 using HeimKit.Features.InfiniteTorches.Models;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -43,7 +50,7 @@ internal static class InfiniteTorchesPendingRefillsTests
         if (pending.Count != 0) throw new Exception("Shutdown did not clear pending tracking.");
         using var log = new ManualLogSource("Torch refill summary checks");
         var records = new List<(LogLevel Level, string Text)>();
-        log.LogEvent += (_, args) => records.Add((args.Level, args.Data.ToString()!));
+        log.LogEvent += (_, args) => records.Add((args.Level, LogCapture.Text(args.Data)));
         var diagnostics = new InfiniteTorchesDiagnostics(() => false, log);
         for (uint index = 1; index <= 32; index++)
             pending.TryTrack(new ZDOID(4L, index), 10L, 0f, 4f, 120f);

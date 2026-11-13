@@ -63,6 +63,12 @@ internal static class NativeAccess
         var field = ResolveField(owner, name);
         return Expression.Lambda<Func<V>>(Expression.Convert(Expression.Field(null, field), typeof(V))).Compile();
     }
+    internal static int EnumFieldValue(Type owner, string fieldName, string value)
+    {
+        var type = ResolveField(owner, fieldName).FieldType;
+        if (!type.IsEnum || !Enum.IsDefined(type, value)) throw new MissingFieldException(owner.FullName, fieldName + "." + value);
+        return Convert.ToInt32(Enum.Parse(type, value));
+    }
 
     // Private nested peer types cannot appear in public C# signatures. Compile their
     // accesses once to object-shaped delegates; no reflection runs when sending data.

@@ -104,9 +104,9 @@ internal sealed class ForestRenewalController : IDisposable
     }
     public void Tick(float now)
     {
-        if (!ModuleScheduler.Current.Due(this, "processing", now, _settings.IntervalSeconds.Value)) return;
-        using var timing = _diagnostics.OptionalEnabled ? _diagnostics.Measure(now, () => _scope.Records.Count) : null;
         PollSave(now);
+        if (!ModuleScheduler.Current.Due(this, "processing", now, _settings.IntervalSeconds.Value, cooperative: _placement == null)) return;
+        using var timing = _diagnostics.OptionalEnabled ? _diagnostics.Measure(now, () => _scope.Records.Count) : null;
         _destroyedIntake = 0;
         long scopeStarted = _diagnostics.BeginStage();
         bool scopeReady;

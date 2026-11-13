@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using HeimKit.Core.Native;
+using HeimKit.Core.Diagnostics;
 using HeimKit.Core.Players;
 using UnityEngine;
 using HarmonyLib;
+using BepInEx.Logging;
 
 namespace HeimKit.Core.World;
 
@@ -18,7 +20,14 @@ internal sealed class WorldObjectProvider : IDisposable
     private readonly Action<Vector2s, SimulationDistance, List<ZDO>, List<ZDO>?>? _nativeQuery;
     private readonly Func<Vector2s, Vector2s, int, bool, bool>? _geometry;
     private readonly bool _observe;
+    internal ManualLogSource? Logger { get; }
+    private IDisposable? _sceneLease;
     private const int MaximumCycleCells = 8192;
+    private const int MembershipPressure = WorldCandidateIndex.Capacity / 4 * 3;
+    private const int MembershipTarget = WorldCandidateIndex.Capacity / 2;
+    private const int TrimBatch = 64;
+    private bool _trimming;
+    private float _fallbackRetry;
     private static class LiveInstances
     {
         static LiveInstances() { }
@@ -51,12 +60,19 @@ internal sealed class WorldObjectProvider : IDisposable
     private readonly List<CandidateSubscription> _release = new();
     private readonly List<PlayerWorldScope> _releaseScopes = new();
     internal bool Ready { get; private set; }
+    internal int FrameRecords => _rawObjects.Count;
+    // Borrow only existing frame data. Diagnostic consumers must never cause discovery.
+    internal bool TryCachedCell(Vector2s zone, out IReadOnlyList<ZDO> records)
+    {
+        if (_cycle.TryGetValue(zone, out var cached)) { records = cached; return true; }
+        records = Array.Empty<ZDO>(); return false;
+    }
     internal IReadOnlyList<Vector3> PlayerPositions { get { SamplePlayers(); return Scope.Positions; } }
     internal PlayerWorldScope Scope { get; }
     internal WorldObjectProvider(IPlayerPresence presence,
         Action<Vector2s, SimulationDistance, List<ZDO>, List<ZDO>?>? nativeQuery = null,
-        Func<Vector2s, Vector2s, int, bool, bool>? geometry = null, bool observe = true)
-    { _presence = presence; _nativeQuery = nativeQuery; _geometry = geometry; _observe = observe; Current = this; Scope = new PlayerWorldScope(presence); }
+        Func<Vector2s, Vector2s, int, bool, bool>? geometry = null, bool observe = true, ManualLogSource? logger = null)
+    { _presence = presence; _nativeQuery = nativeQuery; _geometry = geometry; _observe = observe; Logger = logger; Current = this; Scope = new PlayerWorldScope(presence); }
     internal PlayerWorldScope CreateScope(string owner) { var scope = new PlayerWorldScope(_presence, owner); _scopes.Add(scope); return scope; }
     internal void ReleaseScope(PlayerWorldScope scope) => _scopes.Remove(scope);
     internal CandidateSubscription Subscribe(string owner, Func<ZDO, bool> accept, ScanKind kind = ScanKind.NearbyAndDistant)
@@ -64,7 +80,7 @@ internal sealed class WorldObjectProvider : IDisposable
     internal void Release(CandidateSubscription subscription)
     {
         if (!_leases.Remove(subscription) || subscription.Broad) return;
-        if (--_targetedCount == 0) { _index?.Dispose(); _index = null; ResetSelections(); }
+        if (--_targetedCount == 0) { _index?.Dispose(); _index = null; _trimming = false; ResetSelections(); }
     }
     internal void ReleaseOwner(string owner)
     {
@@ -73,7 +89,7 @@ internal sealed class WorldObjectProvider : IDisposable
         _release.Clear(); _subscriptions.Remove(owner);
         _releaseScopes.Clear(); foreach (var scope in _scopes) if (scope.Owner == owner) _releaseScopes.Add(scope);
         foreach (var scope in _releaseScopes) scope.Dispose(); _releaseScopes.Clear();
-        if (_leases.Count == 0 && _scopes.Count == 0) { _index?.Dispose(); _index = null; }
+        if (_leases.Count == 0 && _scopes.Count == 0) { _index?.Dispose(); _index = null; _trimming = false; }
     }
     internal CandidateSubscription For(string owner)
     {
@@ -81,18 +97,59 @@ internal sealed class WorldObjectProvider : IDisposable
         { result = new CandidateSubscription(this, owner, AcceptAll, ScanKind.NearbyAndDistant, broad: true); _subscriptions.Add(owner, result); _leases.Add(result); }
         return result;
     }
+    internal void SelectionFellBack(CandidateSubscription selection)
+    {
+        ServerPerformance.CandidateFallbacks.Add(0);
+        if (Logger != null) DiagnosticLog.Write(Logger, "HeimKit", "Candidate selection for " + selection.Owner + " reached its " + WorldCandidateIndex.Capacity + "-record limit and switched to slower full-cell scanning until coverage is rebuilt.", LogLevel.Warning);
+    }
+    private int LargestSelection()
+    {
+        int largest = 0;
+        foreach (var selection in _leases) if (selection.Count > largest) largest = selection.Count;
+        return largest;
+    }
+    // Active areas are never trimmed below the per-player working set.
+    private int AreaFloor => Math.Max(512, (_presence.JoinedCount ?? 1) * 512);
+    private void TrimMembership()
+    {
+        var index = _index; if (index == null) return;
+        if (!_trimming && LargestSelection() < MembershipPressure) return;
+        _trimming = true;
+        for (int i = 0; i < TrimBatch; i++)
+        {
+            if (LargestSelection() <= MembershipTarget || index.AreaCount <= AreaFloor || !index.EvictOldestArea()) { _trimming = false; return; }
+            ServerPerformance.CandidateTrims.Add(0);
+        }
+    }
+    // Separate from Tick so it can be exercised without Unity world services.
+    internal void MaintainSelections(float now)
+    {
+        ServerPerformance.Candidates(LargestSelection(), _index?.AreaCount ?? 0);
+        if (_index == null || now < _fallbackRetry) return;
+        bool fallen = false;
+        foreach (var selection in _leases) if (selection.Fallback) { fallen = true; break; }
+        if (!fallen) return;
+        _fallbackRetry = now + 120f;
+        _index.Invalidate();
+        if (Logger != null) DiagnosticLog.Write(Logger, "HeimKit", "Rebuilding world candidate coverage to return a full selection to indexed scanning.");
+    }
     private static bool AcceptAll(ZDO record) => true;
     internal void Tick(float now)
     {
+        TerrainContext.ThrowIfFailed();
+        SceneInstances.ThrowIfFailed();
         WorldServices.Refresh(); BeginCycle(WorldServices.World,
             WorldServices.World && WorldServices.Activity ? ZNet.instance.GetWorldUID() : 0);
+        MaintainSelections(now);
+        if (_observe && Ready && _presence.HasJoinedPlayers == true && (_leases.Count > 0 || _scopes.Count > 0)) _sceneLease ??= SceneInstances.Acquire(Logger);
+        else { _sceneLease?.Dispose(); _sceneLease = null; }
     }
     internal void SamplePlayers()
     {
         if (_playersSampled) return;
         _playersSampled = true;
         if (!Ready || _presence.HasJoinedPlayers != true || _leases.Count == 0 && _scopes.Count == 0) return;
-        Scope.SampleActors();
+        Scope.ReadActors();
     }
     internal void BeginCycle(bool ready, long worldIdentity = 0)
     {
@@ -103,7 +160,7 @@ internal sealed class WorldObjectProvider : IDisposable
         _cycleOrder.Clear(); _rawLocations.Clear(); _rawObjects.Clear(); ClearViews();
         if (!Ready || !ReferenceEquals(_world, ZDOMan.instance) || _worldIdentity != worldIdentity || _presence.HasJoinedPlayers != true)
         {
-            _index?.Dispose(); _index = null; _world = Ready ? ZDOMan.instance : null; _worldIdentity = worldIdentity;
+            _index?.Dispose(); _index = null; _trimming = false; _world = Ready ? ZDOMan.instance : null; _worldIdentity = worldIdentity;
             foreach (var subscription in _leases) subscription.Clear();
             Scope.ClearActors(); foreach (var scope in _scopes) scope.ClearActors();
             if (!Ready || _presence.HasJoinedPlayers != true) return;
@@ -129,11 +186,22 @@ internal sealed class WorldObjectProvider : IDisposable
     {
         // The sole native sector enumeration in HeimKit. Broad-only setups
         // use the original native scan without an index, hooks or frame cache.
-        if (_nativeQuery != null) _nativeQuery(sector, distance, records, distant);
-        else _world!.FindSectorObjects(sector, distance, records, distant);
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        int collections = GC.CollectionCount(0), before = records.Count + (distant?.Count ?? 0);
+        try
+        {
+            if (_nativeQuery != null) _nativeQuery(sector, distance, records, distant);
+            else _world!.FindSectorObjects(sector, distance, records, distant);
+        }
+        finally
+        {
+            PerformanceStages.Record("Core", "world_native_query", ServerPerformance.Milliseconds(System.Diagnostics.Stopwatch.GetTimestamp() - started),
+                Math.Max(0, records.Count + (distant?.Count ?? 0) - before), collections: GC.CollectionCount(0) - collections);
+        }
     }
     private int CellBudget => Math.Min(32768, Math.Max(MaximumCycleCells, (_presence.JoinedCount ?? 1) * 512));
     internal void Enqueue(ZDOID id) => _index?.Enqueue(id);
+    internal void RefreshCandidates() => Index.RefreshChanges();
     private WorldCandidateIndex Index => _index ??= new WorldCandidateIndex(Classify, NativeCell, _observe,
         retainCandidates: false, areaCapacity: CellBudget, evictCell: ForgetCell, changed: Changed, reset: ResetSelections);
     // Membership belongs to targeted selections, never an all-object ID index.
@@ -177,8 +245,38 @@ internal sealed class WorldObjectProvider : IDisposable
         => Compose(null, sector, distance, near, distant);
     internal void QueryCandidates(CandidateSubscription selection, Vector2s sector, SimulationDistance distance, List<ZDO> near, List<ZDO>? distant)
         => Compose(selection, sector, distance, near, distant);
+    internal bool WithinNear(Vector3 centre, int radius, bool classic, Vector3 point)
+    {
+        var origin = ZoneSystem.GetZone(centre); var cell = ZoneSystem.GetZone(point);
+        return Math.Max(Math.Abs(origin.x - cell.x), Math.Abs(origin.y - cell.y)) <= radius &&
+            (classic || Within(origin, cell, radius, false));
+    }
+    // Incremental optional discovery. Retain IDs only; borrowed native records are cleared before yielding.
+    internal IEnumerable<bool> CollectIds(CandidateSubscription selection, Vector3 centre, int radius, bool classic, List<ZDOID> result)
+    {
+        var world = ZDOMan.instance; var origin = ZoneSystem.GetZone(centre);
+        var records = new List<ZDO>();
+        try
+        {
+            for (int x = origin.x - radius; x <= origin.x + radius; x++)
+            for (int z = origin.y - radius; z <= origin.y + radius; z++)
+            {
+                if (!Ready || !_leases.Contains(selection) || _presence.HasJoinedPlayers != true || !ReferenceEquals(world, ZDOMan.instance)) yield break;
+                var cell = new Vector2s(x, z);
+                if (!classic && !Within(origin, cell, radius, false)) continue;
+                records.Clear();
+                QueryCandidates(selection, cell, new SimulationDistance(0, 0, true), records, null);
+                foreach (var record in records)
+                    if (record.IsValid() && result.Count < WorldCandidateIndex.Capacity) result.Add(record.m_uid);
+                records.Clear();
+                yield return true;
+            }
+        }
+        finally { records.Clear(); }
+    }
     private void Compose(CandidateSubscription? selection, Vector2s sector, SimulationDistance distance, List<ZDO> near, List<ZDO>? distant)
     {
+        using var timing = PerformanceStages.Measure("Core", "world_query");
         if (!Ready || _presence.HasJoinedPlayers != true) return;
         _world ??= ZDOMan.instance;
         if (selection == null && _targetedCount == 0)
@@ -188,6 +286,7 @@ internal sealed class WorldObjectProvider : IDisposable
         }
         Index.AreaCapacity = CellBudget;
         Index.RefreshChanges();
+        TrimMembership();
         if (selection == null)
         {
             ComposeBroad(sector, distance, near, distant);
@@ -259,22 +358,22 @@ internal sealed class WorldObjectProvider : IDisposable
             else if (record.Distant && (portalHashes == null || !portalHashes.Contains(record.GetPrefab()))) view.Far.Add(record);
         }
     }
-    internal void IncludeLiveInstances(List<ZDO> near, List<ZDO> distant, IReadOnlyList<Vector3> positions)
+    internal void IncludeLiveInstances(List<ZDO> near, List<ZDO> distant, IReadOnlyList<Vector3> positions, HashSet<ZDOID>? alreadySeen = null)
     {
-        _seen.Clear(); foreach (var z in near) _seen.Add(z.m_uid); foreach (var z in distant) _seen.Add(z.m_uid);
-        foreach (var pair in LiveInstances.Read(ZNetScene.instance))
+        var seen = alreadySeen ?? _seen;
+        if (alreadySeen == null)
         {
-            var record = pair.Key;
-            if (!record.IsValid() || _seen.Contains(record.m_uid)) continue;
-            foreach (var position in positions)
-                if (ZNetScene.InActiveArea(record.GetPosition(), position)) { _seen.Add(record.m_uid); near.Add(record); break; }
+            seen.Clear(); foreach (var z in near) seen.Add(z.m_uid); foreach (var z in distant) seen.Add(z.m_uid);
         }
+        SceneInstances.Include(near, positions, seen);
     }
     public void Dispose()
     {
-        _index?.Dispose(); _index = null;
+        _sceneLease?.Dispose(); _sceneLease = null;
+        _index?.Dispose(); _index = null; _trimming = false;
         foreach (var subscription in _subscriptions.Values) subscription.Dispose();
         _subscriptions.Clear(); _leases.Clear(); _targetedCount = 0; _cycle.Clear(); _buffers.Clear(); _cycleOrder.Clear(); _rawLocations.Clear(); _rawObjects.Clear(); _visitedSectors.Clear(); ClearViews(); _viewBuffers.Clear(); _scopes.Clear(); Scope.ClearActors();
+        _fallbackRetry = 0;
         if (ReferenceEquals(Current, this)) Current = null!;
     }
 }
