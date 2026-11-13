@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.3
 
 - SharedMap uses the native boss marker for the Queen’s dungeon and removes its earlier Infested Citadel pins from shared table data.
 - Added Dvergr house pins for discovered guard towers, lighthouses and excavations, including ruins. Each kind has an independent switch that defaults enabled.

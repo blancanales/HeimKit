@@ -26,7 +26,7 @@ using HeimKit.Features.StationSupply;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.2.2-station-supply.32")]
+[BepInPlugin("heimkit", "HeimKit", "0.2.3")]
 [BepInProcess("valheim_server.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -44,9 +44,9 @@ public sealed class Plugin : BaseUnityPlugin
         _host = new ModuleHost(Logger);
         DiagnosticLog.StartSession();
 #if DEBUG
-        DiagnosticLog.Write(Logger, "HeimKit", CoreLogTopics.Lifecycle, $"Starting version 0.2.2-station-supply.32 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Debug.");
+        DiagnosticLog.Write(Logger, "HeimKit", CoreLogTopics.Lifecycle, $"Starting version 0.2.3 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Debug.");
 #else
-        DiagnosticLog.Write(Logger, "HeimKit", $"Starting version 0.2.2-station-supply.32 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Release.");
+        DiagnosticLog.Write(Logger, "HeimKit", $"Starting version 0.2.3 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Release.");
 #endif
         try
         {

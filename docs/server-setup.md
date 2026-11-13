@@ -6,8 +6,7 @@ Install HeimKit on a Windows Valheim dedicated server. Players use unmodified cl
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit release baseline | 0.2.2 |
-| HeimKit development build | 0.2.2-station-supply.32 |
+| HeimKit release baseline | 0.2.3 |
 | Valheim Dedicated Server | 1.0.21; built-in audited baseline. Other versions follow [server upgrade policy](#server-upgrades). |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
