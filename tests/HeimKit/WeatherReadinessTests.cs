@@ -72,7 +72,7 @@ internal static class WeatherReadinessTests
         using var provider = new WorldObjectProvider(new ReviewRegressionTests.Presence(),
             (sector, _, near, _) =>
             {
-                if (sector != default) return;
+                if (sector != default(Vector2s)) return;
                 for (int i = 0; i < accepted; i++) near.Add(records[i]);
             }, observe: false);
         using var selection = provider.Subscribe("concentrated membership", _ => true);
@@ -112,7 +112,7 @@ internal static class WeatherReadinessTests
             (sector, _, near, _) =>
             {
                 nativeQueries++;
-                if (sector == default) near.AddRange(world.Records.Values);
+                if (sector == default(Vector2s)) near.AddRange(world.Records.Values);
             }, (_, _, _, _) => true, observe: false);
         provider.BeginCycle(true);
         using var readiness = new SectorReadiness(provider, "fallback readiness", _ => true, _ => loaded, () => binding, () => now);
