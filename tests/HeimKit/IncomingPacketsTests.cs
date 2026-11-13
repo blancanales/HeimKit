@@ -102,6 +102,7 @@ internal static class IncomingPacketsTests
     private static void RetainedIds(FieldInfo slot)
     {
         var net = (ZNet)RuntimeHelpers.GetUninitializedObject(typeof(ZNet)); var rpc = (ZRpc)RuntimeHelpers.GetUninitializedObject(typeof(ZRpc));
+        HeimKit.Core.Native.NativeAccess.Field<UnityEngine.Object, IntPtr>("m_CachedPtr")(net) = new IntPtr(1);
         var peer = (ZNetPeer)RuntimeHelpers.GetUninitializedObject(typeof(ZNetPeer)); peer.m_uid = 8; peer.m_rpc = rpc;
         typeof(ZNet).GetField("m_peers", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(net, new List<ZNetPeer> { peer }); slot.SetValue(null, net);
         try
@@ -113,7 +114,7 @@ internal static class IncomingPacketsTests
             { state = 0; if (IncomingPackets.NeedsDataFilter) second++; return true; }, retained: _ => false);
             var packet = new ZPackage(); packet.Write(1); packet.Write(id); packet.Write(id); packet.Write((ushort)1); packet.Write(2U); packet.Write(8L); packet.Write(UnityEngine.Vector3.zero); packet.Write(new ZPackage()); packet.Write(ZDOID.None); packet.SetPos(0);
             IncomingPackets.Before(channel, rpc, ref packet, out var call); IncomingPackets.Applied(call); IncomingPackets.Finished(null, call);
-            Check(first == 1 && second == 0 && predicate == 2 && packet.GetPos() == 0, "Retained-ID selection repeated the packet walk, lost invalidation IDs or ran an irrelevant filter.");
+            Check(first == 1 && second == 0 && predicate == 2 && packet.GetPos() == 0, $"Retained-ID counts: {first} {second} {predicate} {packet.GetPos()} {peer.IsReady()}");
             packet = new ZPackage(new byte[] { 1 }); IncomingPackets.Before(channel, rpc, ref packet, out call); IncomingPackets.Finished(null, call);
             Check(first == 2 && second == 1, "Malformed preinspection bypassed original filter failure policies.");
         }

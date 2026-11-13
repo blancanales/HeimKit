@@ -79,7 +79,7 @@ internal static class WeatherGuardDiagnosticsTests
         Check(timing.Text.Contains("completed_cycles=4") && timing.Text.Contains("context_checks=3") &&
             timing.Text.Contains("context_reuses=997") && timing.Text.Contains("last_cycle_slices=8") &&
             timing.Text.Contains("probe_pending=false") && !timing.Text.Contains("omitted_fields"),
-            "Completed-cycle timing lost readiness reuse, independent probe state or the Normal field limit.");
+            "Completed-cycle timing: " + timing.Text);
         System.Console.WriteLine("PASS: Normal/Verbose protection evidence, interval deltas, quiet unchanged health, repaired-loss uncertainty, phase deduplication and unchanged independent stream caps.");
     }
 }

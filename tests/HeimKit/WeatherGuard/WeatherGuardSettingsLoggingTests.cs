@@ -45,7 +45,7 @@ internal static class WeatherGuardSettingsLoggingTests
                     !entries[0].Text.Contains("excluded_prefabs=wood_floor") ||
                     !entries[0].Text.Contains("reuse_scene_lists=false") ||
                     !entries[0].Text.Contains("maximum_protected=8192")))
-                    throw new Exception("Detailed startup record lost configured values or fixed processing limits.");
+                    throw new Exception("Detailed startup record: " + entries[0].Text);
                 var settings = new WeatherGuardSettings(config, log);
                 var diagnostics = new WeatherGuardDiagnostics(log, settings.DebugLogging, scenario.Level, false);
                 records.Clear();

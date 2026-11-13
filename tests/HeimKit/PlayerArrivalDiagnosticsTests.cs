@@ -40,11 +40,16 @@ internal static class PlayerArrivalDiagnosticsTests
     private static object Field(object value, string field) => value.GetType().GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(value)!;
     internal static void Run()
     {
-        StageBoundaries(); Transitions(); CorrelatedFrame(); Admission(); FailureIsolation();
+        try { StageBoundaries(); } finally { LogCapture.ResetVerbosity(); }
+        Transitions(); CorrelatedFrame(); Admission(); FailureIsolation();
     }
     private static void StageBoundaries()
     {
-        DiagnosticLog.StartSession(); PerformanceStages.CaptureArrivals = true;
+        DiagnosticLog.StartSession();
+        var config = new ConfigFile(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
+        DiagnosticsSettings.Bind(config).Value = true;
+        config.Bind("Diagnostics", "DebugVerbosity", DebugVerbosity.Normal).Value = DebugVerbosity.Verbose;
+        PerformanceStages.CaptureArrivals = true;
         using var log = new ManualLogSource("Arrival stage boundaries");
         var lines = new List<string>(); log.LogEvent += (_, e) => lines.Add(LogCapture.Text(e.Data));
         PerformanceStages.Record("HeimKit", "player_services", 301, 7, 11, 1, "arrival");
