@@ -82,7 +82,7 @@ internal static class WorldAdditionsTests
         diagnostics.Traversal(peer, "source_entry", "outside_trigger", new ZDOID(456, 1));
         Check(lines.Count == 2, "A pair failure was hidden or routine source polling bypassed its separate interval.");
         diagnostics.Traversal(peer, "consent_ended", "animal_left_wait_area", animal: new ZDOID(456, 2), transition: true);
-        var journey = new PortalJourney { Peer = peer, Name = "Trevor", Entered = 0, Arrived = 3, Exit = Vector3.zero };
+        var journey = new PortalJourney { Traveller = peer, Name = "Trevor", Entered = 0, Arrived = 3, Exit = Vector3.zero };
         diagnostics.Cancel(journey, "destination_distance_exceeded", new Vector3(9, 0, 0), 11);
         Check(lines.Count == 4 && lines[^1].Contains("distance_m=9.0") && lines[^1].Contains("entry_age_s=11"), "Cancellation distance/timing or consent-loss evidence was lost.");
         for (int i = 0; i < 30; i++) diagnostics.Traversal(peer, "arrival", "linked_exit_observed", transition: true);

@@ -9,7 +9,7 @@ namespace HeimKit.Features.TameTravel.Models;
 
 internal sealed class FollowBinding
 {
-    public ZNetPeer Peer = null!;
+    public TameTravelActor Traveller;
     public ZDOID Character;
     public ZDOID Animal;
     public string Name = "";

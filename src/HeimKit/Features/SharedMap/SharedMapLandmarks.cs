@@ -92,7 +92,7 @@ internal sealed class SharedMapLandmarks : IDisposable
         {
             var location = ZoneSystem.instance.m_locations[_locationCursor++];
             if (!location.m_prefab.IsValid) continue;
-            string name = location.m_prefab.Name;
+            string name = PrefabAssetRequest.AssetName(ref location.m_prefab);
             if (!_inspectedLocations.Add(name)) continue;
             if (_structures != null && SharedMapLandmarkPrefab.StructureLabel(name) is string label)
             {
@@ -236,9 +236,9 @@ internal sealed class SharedMapLandmarks : IDisposable
         if (_bindings.Count >= 65536 && !_bindings.ContainsKey(identity)) throw new InvalidOperationException("Landmark source binding limit exceeded.");
         _bindings[identity] = zdo.m_uid; return true;
     }
-    public void Tick(float now)
+    public void Tick(float now, AdaptiveOperation? batch = null)
     {
-        if (!_metadataReady) { InspectOne(now); return; }
+        if (!_metadataReady) { batch?.Count(); InspectOne(now); return; }
         if (_scanNames.Count > 0 && _nextScan.Ready(now) && _pending.Count < 32768)
         {
             if (_scanCursor == _scan.Count)
@@ -251,15 +251,16 @@ internal sealed class SharedMapLandmarks : IDisposable
                 if (_nextScan.Ready(now))
                 {
                     _scan.Clear(); _scanCursor = 0;
+                    batch?.Count();
                     _chunkComplete = _world.GetAllZDOsWithPrefabIterative(_scanNames[_scanName], _scan, ref _sector);
                     if (_scan.Count > 65536) throw new InvalidOperationException("Landmark retrospective candidate limit exceeded.");
                 }
             }
-            for (int i = 0; i < 256 && _scanCursor < _scan.Count && _pending.Count < 32768; i++) Enqueue(_scan[_scanCursor++], null);
+            for (int i = 0; i < 256 && _scanCursor < _scan.Count && _pending.Count < 32768 && (batch?.Take() ?? true); i++) Enqueue(_scan[_scanCursor++], null);
         }
         // The source count is bounded as well as the candidate count: at most 256 actual points per tick.
         int remaining = 256, candidates = 0;
-        while (remaining >= 64 && candidates++ < 256 && _pending.Count > 0)
+        while (remaining >= 64 && candidates++ < 256 && _pending.Count > 0 && (batch?.Take() ?? true))
         {
             if (candidates > 1 && !ModuleScheduler.Current.HasBudget) break;
             var candidate = _pending.Dequeue(); _queued.Remove(candidate.Id);

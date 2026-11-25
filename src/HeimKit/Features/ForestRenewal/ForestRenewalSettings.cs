@@ -28,13 +28,13 @@ public sealed class ForestRenewalSettings
     public ConfigEntry<float> IntervalSeconds { get; }
     public ForestRenewalSettings(ConfigFile config, ManualLogSource logger)
     {
-        Enabled = config.Bind("ForestRenewal", "Enabled", true, "Enable ForestRenewal. Restart after edits.");
+        Enabled = config.Bind("ForestRenewal", "Enabled", true, "Enable ForestRenewal. File edits require a restart. HeimKit Settings applies changes live.");
         DebugMode = config.Bind("ForestRenewal", "DebugMode", false, "Enable feature diagnostics through the shared debug policy.");
         DelaySeconds = config.Bind("ForestRenewal", "DelaySeconds", 300f, new ConfigDescription("Delay from first stump observation or confirmed removal. Restart after edits.", new AcceptableValueRange<float>(10f, 86400f)));
         ChancePercent = config.Bind("ForestRenewal", "ChancePercent", 50, new ConfigDescription("One renewal chance per original stump. Restart after edits.", new AcceptableValueRange<int>(0, 100)));
         StructureExclusionMeters = config.Bind("ForestRenewal", "StructureExclusionMeters", 10f, new ConfigDescription("Horizontal clearance from player-built collision footprints; zero disables this exclusion. Restart after edits.", new AcceptableValueRange<float>(0f, 50f)));
         PlantExclusionMeters = config.Bind("ForestRenewal", "PlantExclusionMeters", 10f, new ConfigDescription("Horizontal clearance from existing saplings and crops. Native growth spacing remains a minimum. Restart after edits.", new AcceptableValueRange<float>(10f, 50f)));
-        ExcludeClearedGround = config.Bind("ForestRenewal", "ExcludeClearedGround", true, "Exclude dirt, cultivated and paved ground. Restart after edits.");
+        ExcludeClearedGround = config.Bind("ForestRenewal", "ExcludeClearedGround", true, "Exclude dirt, cultivated and paved ground. File edits require a restart. HeimKit Settings applies changes live.");
         ExclusionRadiusMeters = config.Bind("ForestRenewal", "ExclusionRadiusMeters", 3f, new ConfigDescription("Terrain paint exclusion radius. Restart after edits.", new AcceptableValueRange<float>(0f, 10f)));
         LocationCooldownHours = config.Bind("ForestRenewal", "LocationCooldownHours", 24f, new ConfigDescription("Native world hours between renewals within five metres. Restart after edits.", new AcceptableValueRange<float>(1f, 720f)));
         MaxPending = config.Bind("ForestRenewal", "MaxPending", 1024, new ConfigDescription("Maximum pending renewals. Restart after edits.", new AcceptableValueRange<int>(1, 4096)));

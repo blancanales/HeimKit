@@ -31,7 +31,7 @@ public sealed class StationSupplySettings
     public ConfigEntry<ObliteratorCategories> ObliteratorCategories { get; }
     public StationSupplySettings(ConfigFile config, ManualLogSource log)
     {
-        Enabled = config.Bind("StationSupply", "Enabled", true, "Feed production intakes from one nearby public chest each. Restart after edits.");
+        Enabled = config.Bind("StationSupply", "Enabled", true, "Feed production intakes from one nearby public chest each. File edits require a restart. HeimKit Settings applies changes live.");
         DebugMode = config.Bind("StationSupply", "DebugMode", false, "Enable StationSupply diagnostics through the shared policy.");
         ChestRangeMeters = Number(config, "ChestRangeMeters", 2f, 0.5f, 4f, "Horizontal chest-pivot distance from the actual resource intake, not the station centre.");
         ChestHeightToleranceMeters = Number(config, "ChestHeightToleranceMeters", 1.5f, 0.25f, 3f, "Maximum chest-pivot height difference from the station floor. High intakes accept floor-level chests.");
@@ -48,8 +48,8 @@ public sealed class StationSupplySettings
         EitrRefineries = Switch(config, "EitrRefineries", "eitr refineries");
         FrigidKilns = Switch(config, "FrigidKilns", "Frigid Kiln ice intakes");
         ShieldGenerators = Switch(config, "ShieldGenerators", "player-built shield generators");
-        Fermenters = config.Bind("StationSupply", "Fermenters", false, "Fill empty sheltered fermenters from their selected chest. Never tap or collect output. Restart after edits.");
-        Obliterators = config.Bind("StationSupply", "Obliterators", false, "Move items from one nearby supply chest into an Obliterator. Lever activation stays manual. Restart after edits.");
+        Fermenters = config.Bind("StationSupply", "Fermenters", false, "Fill empty sheltered fermenters from their selected chest. Never tap or collect output. File edits require a restart. HeimKit Settings applies changes live.");
+        Obliterators = config.Bind("StationSupply", "Obliterators", false, "Move items from one nearby supply chest into an Obliterator. Lever activation stays manual. File edits require a restart. HeimKit Settings applies changes live.");
         ObliteratorCategories = config.Bind("StationSupply", "ObliteratorCategories", Models.ObliteratorCategories.All,
             "Choose the item categories eligible for Obliterator feeding. All includes every category; None transfers nothing.\n" +
             "To enable multiple categories, separate their names with commas, without quotes.\n" +
@@ -60,7 +60,7 @@ public sealed class StationSupplySettings
         DebugLogging = DebugLoggingResolver.Resolve(config, "StationSupply", DiagnosticsSettings.Bind(config), log, DebugMode);
     }
     private static ConfigEntry<bool> Switch(ConfigFile config, string key, string description)
-        => config.Bind("StationSupply", key, true, "Feed " + description + ". Restart after edits.");
+        => config.Bind("StationSupply", key, true, "Feed " + description + ". File edits require a restart. HeimKit Settings applies changes live.");
     private static ConfigEntry<float> Number(ConfigFile config, string key, float value, float min, float max, string description)
     {
         var entry = config.Bind("StationSupply", key, value, new ConfigDescription(description + " Restart after edits.", new AcceptableValueRange<float>(min, max)));

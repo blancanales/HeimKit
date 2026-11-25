@@ -1,11 +1,13 @@
 # InfiniteTorches specification
 
+In player-hosted worlds, eligible host-owned lights refill through the same native fuel request and confirmation as guest-owned lights.
+
 Gameplay and observation limitations: [safety and limitations](../limitations.md).
 ## Purpose and scope
 
 The feature display name and log prefix are exactly `InfiniteTorches`. Its existing configuration section remains `[Torches]`.
 
-InfiniteTorches periodically refills eligible torches, braziers, campfires, hearths and bonfires to their ordinary maximum fuel on a Windows Valheim dedicated server, without spending player inventory materials (including brazier coal). It uses existing vanilla networking and is designed for unmodified clients.
+InfiniteTorches periodically refills eligible torches, braziers, campfires, hearths and bonfires to their ordinary maximum fuel in a supported hosted world, without spending player inventory materials (including brazier coal). It uses existing vanilla networking and is designed for unmodified clients.
 
 Supported game and loader versions are documented in [server setup](../server-setup.md#supported-environment).
 
@@ -20,7 +22,7 @@ Debug settings use the [shared suppression contract](../server-setup.md#hidden-p
 | Section | Setting | Default | Rules |
 | --- | --- | --- | --- |
 | Torches | Enabled | true | Independent control; restart after editing. |
-| Torches | IntervalSeconds | 5 | Range 2–60 seconds. |
+| Torches | IntervalSeconds | 5 | Range 2–60 seconds. F7 changes set the interval when scheduling the next refill pass. |
 | Torches | MaxMessagesPerPass | 32 | Range 1–256 requests. |
 | Torches | IncludeFireplaces | false | Master switch for campfires, hearths and bonfires; false excludes all three even if listed manually. |
 | Torches | Campfires | true | With IncludeFireplaces enabled, refill `fire_pit`. |
@@ -36,7 +38,7 @@ HeimKit creates `heimkit.cfg` in BepInEx's configuration directory, preserving e
 
 ## Eligibility and processing
 
-The module waits for dedicated-server networking and world services. Each configured prefab must have a refillable Fireplace, a finite positive maximum fuel, no inherent infinite-fuel flag, no toggle-off behavior and no wet low/high flame objects, except for the three exact default brazier prefabs and the three exact fireplace prefabs when IncludeFireplaces and their respective per-type switch are enabled. Their native wet-flame behavior remains active. Missing or unsupported definitions are warned about and skipped.
+The module waits for hosted-world networking and world services. Each configured prefab must have a refillable Fireplace, a finite positive maximum fuel, no inherent infinite-fuel flag, no toggle-off behavior and no wet low/high flame objects, except for the three exact default brazier prefabs and the three exact fireplace prefabs when IncludeFireplaces and their respective per-type switch are enabled. Their native wet-flame behavior remains active. Missing or unsupported definitions are warned about and skipped.
 
 Each pass scans ready connected players' nearby processing sectors. Valid candidate records must be owned by the corresponding peer. Duplicate records are suppressed across players. Off-state torches and nonfinite fuel values are skipped.
 

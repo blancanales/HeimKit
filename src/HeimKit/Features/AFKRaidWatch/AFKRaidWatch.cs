@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -14,7 +15,7 @@ using System;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 namespace HeimKit.Features.AFKRaidWatch;
-public sealed class AFKRaidWatch : IServerModule
+public sealed class AFKRaidWatch : IServerModule, IModuleSwitches
 {
     private readonly AFKRaidWatchSettings _settings;
     private readonly ManualLogSource _logger;
@@ -24,6 +25,14 @@ public sealed class AFKRaidWatch : IServerModule
     private IDisposable? _presenceRegistration;
     private bool _occupied;
     private readonly PlayerProcessingNotices _processing;
+    private SwitchBinding[]? _switches;
+    IReadOnlyList<SwitchBinding> IModuleSwitches.Switches => _switches ??= new SwitchBinding[]
+    {
+        new("Enabled", _settings.Enabled),
+        new("Debug logging", _settings.DebugMode, applyLive: true),
+    };
+    SwitchApplyMode IModuleSwitches.ApplyMode => SwitchApplyMode.Reinitialize;
+
     public string Name => "AFKRaidWatch";
     public bool IsActive { get; private set; }
     public AFKRaidWatch(ConfigFile config, ManualLogSource logger, PlayerServices players) { _logger = logger; _compatibility = GameVersionCompatibility.Resolve(config, logger); _settings = new(config, logger); _players = players; _processing = new(logger, Name, () => _settings.DebugLogging.Enabled); }

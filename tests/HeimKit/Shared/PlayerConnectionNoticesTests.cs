@@ -22,7 +22,7 @@ internal static class PlayerConnectionNoticesTests
         using var log = new ManualLogSource("Connection notice checks");
         var records = new List<(LogLevel Level, string Text)>();
         log.LogEvent += (_, args) => records.Add((args.Level, LogCapture.Text(args.Data)));
-        var notices = new PlayerConnectionNotices(log);
+        var notices = new PlayerConnectionNotices(log) { ClientDetectionAvailable = true };
         IReadOnlyList<ZNetPeer>? peers = Array.Empty<ZNetPeer>();
         var presence = new PlayerPresence(() => peers, notices);
         try
@@ -32,7 +32,7 @@ internal static class PlayerConnectionNoticesTests
             var first = Peer(12, "Trevor"); peers = new[] { first }; presence.Refresh();
             Check(records.Count == 0, "A handshake or empty startup announced character entry.");
             first.m_characterID = new ZDOID(12, 1); presence.Refresh(); presence.Refresh();
-            Check(records.Count == 1 && records[0].Text == "PlayerPresence: Player \"Trevor\" (peer 12) connected.",
+            Check(records.Count == 1 && records[0].Text == "PlayerPresence: Player \"Trevor\" (peer 12) connected (vanilla client).",
                 "First character entry was unnamed, missing or repeated.");
             first.m_characterID = ZDOID.None; presence.Refresh();
             Check(records.Count == 1, "Death/respawn generated a connection change.");
@@ -58,7 +58,7 @@ internal static class PlayerConnectionNoticesTests
             Check(records.Count == 6 && records[^1].Text.Contains("(peer 13) disconnected"), "Recovery missed a real departure while presence was unavailable.");
             var unnamed = Peer(14, ""); unnamed.m_characterID = new ZDOID(14, 1);
             peers = new[] { unnamed }; presence.Refresh();
-            Check(records[^1].Text == "PlayerPresence: Peer 14 connected.", "Missing character name lost the peer fallback.");
+            Check(records[^1].Text == "PlayerPresence: Peer 14 connected (vanilla client).", "Missing character name lost the peer fallback.");
             int before = records.Count; presence.Clear();
             Check(records.Count == before, "Shutdown fabricated a disconnect.");
             var longName = Peer(15, new string('x', 500));
@@ -69,6 +69,16 @@ internal static class PlayerConnectionNoticesTests
             notices.Observe(Array.Empty<ZNetPeer>(), Array.Empty<ZNetPeer>());
             Check(records[^1].Text.Contains("Renamed Player") && records[^1].Text.Contains("disconnected"),
                 "Name caching missed a later name change or lost sanitization.");
+            var modded = Peer(16, "Modded");
+            notices.ConfirmHeimKit(modded, "test", false);
+            notices.Observe(new[] { modded }, new[] { modded });
+            Check(records[^1].Text.Contains("connected (HeimKit client test, protocol mismatch)"),
+                "Pre-join identification did not appear in the join line.");
+            int afterJoin = records.Count;
+            notices.ConfirmHeimKit(modded, "test", false);
+            notices.ConfirmHeimKit(modded, "test", false);
+            Check(records.Count == afterJoin,
+                "Client handshake confirmation was missing or repeated.");
             Check(records.All(r => r.Level == LogLevel.Info), "Character notices depended on debugging or used incorrect severity.");
         }
         finally { presence.Clear(); DiagnosticLog.ServerActivity.Reset(); }

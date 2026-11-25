@@ -16,6 +16,7 @@ namespace HeimKit.Core.World;
 internal sealed class PlayerWorldScope : IDisposable
 {
     private readonly IPlayerPresence _presence;
+    private readonly List<WorldActor> _actors = new();
     internal string Owner { get; }
     private int _cursor;
     private readonly Dictionary<long, Vector3> _previous = new();
@@ -71,6 +72,23 @@ internal sealed class PlayerWorldScope : IDisposable
         if (Records.Count > 8192) { UnavailableReason = "record_limit_exceeded"; Records.Clear(); return false; }
         return true;
     }
+    internal bool ReadCandidatesAt(Vector3 point, float range, List<ZDO> result)
+    {
+        if (_index == null || !WorldObjectProvider.Current.Ready) return false;
+        _index.Read(point, (int)Math.Ceiling(range / 64) + 1, result);
+        return result.Count <= 8192;
+    }
+
+    internal bool BeginCandidateScan(float range, List<ZDOID> ids, out IEnumerator<bool>? scan, bool outdoorOnly = true, bool includeDistant = false)
+    {
+        scan = null;
+        if (_index == null || !ReadActors() || !SelectCenter(outdoorOnly)) return false;
+        _range = range;
+        scan = WorldObjectProvider.Current.CollectIds(_index, Center, (int)Math.Ceiling(range / 64) + 1, false, ids,
+            includeDistant: includeDistant, resultLimit: 8193).GetEnumerator();
+        return true;
+    }
+
     public bool SampleActors() => ReadActors() && SelectCenter(false);
     private bool SelectCenter(bool outdoorOnly)
     {
@@ -106,20 +124,20 @@ internal sealed class PlayerWorldScope : IDisposable
             _actorsReliable = true;
             return true;
         }
-        for (int rosterIndex1 = 0; rosterIndex1 < _presence.Peers.Count && _presence.Peers[rosterIndex1] is var peer; rosterIndex1++)
+        WorldActors.Read(_presence, _actors);
+        foreach (var observed in _actors)
         {
-            if (!peer.IsReady()) continue;
-            if (peer.m_characterID.IsNone()) { UnavailableReason = "player_character_unavailable"; return false; }
-            var actor = ZDOMan.instance.GetZDO(peer.m_characterID);
-            if (actor == null || !actor.IsValid() || actor.GetOwner() != peer.m_uid) { UnavailableReason = "player_record_or_owner_unavailable"; return false; }
+            if (observed.Character.IsNone()) { UnavailableReason = "player_character_unavailable"; return false; }
+            var actor = ZDOMan.instance.GetZDO(observed.Character);
+            if (actor == null || !actor.IsValid() || actor.GetOwner() != observed.Owner) { UnavailableReason = "player_record_or_owner_unavailable"; return false; }
             bool savedHealth = actor.GetFloat(ZDOVars.s_health, out float health);
             var position = actor.GetPosition();
             if (savedHealth && !Finite(health) || !Finite(position)) { UnavailableReason = "invalid_player_state"; return false; }
             if (!NativeCharacterHealth.IsAlive(actor)) continue;
             if (Positions.Count >= 64) { UnavailableReason = "player_limit_exceeded"; return false; }
             Positions.Add(position);
-            if (_previous.TryGetValue(peer.m_uid, out var previous)) _segments.Add((previous, position));
-            current[peer.m_uid] = position;
+            if (_previous.TryGetValue(observed.Owner, out var previous)) _segments.Add((previous, position));
+            current[observed.Owner] = position;
         }
         _previous.Clear(); foreach (var pair in current) _previous[pair.Key] = pair.Value;
         if (Positions.Count == 0) { UnavailableReason = "no_living_players"; return false; }

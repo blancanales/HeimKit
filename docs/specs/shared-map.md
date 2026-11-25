@@ -2,7 +2,17 @@
 
 ## Scope
 
-SharedMap owns persistent community exploration, vanilla cartography-table map fields, and independently configured portal, resource, dungeon, runestone, recurring-spawner and Dvergr structure markers. It runs on the Windows dedicated server with unmodified clients. Follow [architecture](../architecture.md), [contributing](../contributing.md), [supported environment](../server-setup.md#supported-environment) and the [user guide](../features/shared-map.md). Gameplay/client limitations are maintained once in [safety and limitations](../limitations.md#sharedmap).
+SharedMap owns persistent community exploration, vanilla cartography-table map fields, and independently configured portal, resource, dungeon, runestone, recurring-spawner and structure markers. It runs on Windows dedicated servers and in private or Start Server worlds hosted by the Windows client. Guests can use the vanilla client. Follow [architecture](../architecture.md), [contributing](../contributing.md), [supported environment](../server-setup.md#supported-environment) and the [user guide](../features/shared-map.md). Gameplay/client limitations are maintained once in [safety and limitations](../limitations.md#sharedmap).
+
+The F7 switches for `PortalMarkerSync`, `ResourceDiscoverPreviouslyExplored`, `ResourceRemoveDepleted`, `DungeonDiscoverPreviouslyExplored`, `AllowPlayerMapWrites` and `SharePinCheckmarks` apply in place after the existing idle boundary. SharedMap invalidates cached table reconciliations and retains its loaded world stores. Enabling portal markers refreshes the native portal list immediately.
+
+### Player-hosted worlds
+
+The host’s native minimap exploration pass reveals the same bounded circle in the world’s community mask. The host participates in marker and nearby table sampling through Core’s local actor identity. Remote guests continue to contribute through accepted replicated character samples. The host’s native routed pickaxe damage and digging calls provide local Silver discovery evidence under the same tool, actor and range checks. A bounded queue defers nearby discovery work to the resource pass.
+
+The outer host Read Map and Write Map actions reconcile the current table once. The inner read used by native Write Map consumes that result. Native AddSharedMapData imports community pixels and shared pins while retaining the personal map. The native MapData handler applies uploads on the table owner. HeimKit uses the shared map-field normalization on the host’s ZDO writes and on accepted guest replication, with unchanged inputs eligible for reconciliation cache reuse. Denied uploads and malformed bytes retain the accepted field. Native map callbacks leave persistence to the module lifecycle.
+
+Local stores live under the active world’s `BepInEx/config/HeimKit/Worlds/<world-id>/SharedMap` directory. Both local hosting modes use the same UID whether Valheim’s save is cloud or local. World changes and disablement dispose native hooks, capture queues and reconciliation state and flush accepted community data.
 
 Periodic table validation checks the complete contiguous terrain mask directly, retaining strict boolean, size, pin-format and trailing-byte rejection. Terrain/pin output equality uses span comparisons rather than per-byte enumerable iteration. Optional pin comparisons require shared Debug admission and are limited to six per minute; periodic server reconciliation supplies its already-validated original and normalized pin data, including removed death pins, without another decompression. Other native upload paths retain full validation; they never gate accepted-data validation or gameplay counters. Narrow elapsed stages and input-size/collection evidence use the shared normal performance path, independently of optional Debug.
 
@@ -54,13 +64,30 @@ ResourceMarkerSync validates exact native prefab families and their mining/drop 
 | Tin | MineRock_Tin |
 | Silver | silvervein, rock3_silver and supported fractured successors |
 | Obsidian | MineRock_Obsidian |
+| Flametal Pillar | LeviathanLava with a persistent root view, linked MineRock and Flametal ore drop |
 | Static Flametal | MineRock_Meteorite and supported fractured successors |
 | Black Marble remains | giant_ribs, giant_skull and their giant_ribs_frac / giant_skull_frac mining successors |
 | Ancient Root | YggdrasilRoot with validated ResourceRoot reserve |
 
-Exclude interiors, scraps, giant weapons/armour, creatures/Leviathans, dropped/pickable items, player-built objects, ordinary stone and Gold. Missing/incompatible families produce one grouped warning; supported families remain available. Read persistent native ZDO coordinates and replicated mining health without ownership changes, instantiation or scene loading.
+Exclude interiors, scraps, giant weapons/armour, other creatures and ocean Leviathans, dropped/pickable items, player-built objects, ordinary stone and Gold. Missing/incompatible families produce one grouped warning; supported families remain available. Read persistent native ZDO coordinates and replicated mining health without ownership changes, instantiation or scene loading.
 
 Black Marble is limited to the persistent outdoor petrified rib/skull resource families. Native prefab inspection requires the intact Destructible to name its exact fractured successor, and requires each successor to expose supported mining health and a BlackMarble drop. It uses the existing player-service hookup, bounded discovery/indexing, accepted native health/destruction observations, clustering, pin refresh and depletion rules without ownership changes, prefab instantiation or new hooks. Intact-to-fractured records at the same uniquely matched position retain one discovery. Giant weapons/armour, dungeon/building marble and placed pieces remain excluded. The BlackMarble resource-kind value is appended after existing saved enum values; earlier resource files retain their original identities and format. Normal discovery/depletion results and Debug catalog/unsupported-prefab evidence use the existing grouping boundaries and budgets.
+
+**Ashlands Flametal pillars.** Extend Resource Marker to the registered outdoor `LeviathanLava` prefab. Validate its native network view, Leviathan and mining configuration against the registered prefab before admitting the family. Publish one generated dot labeled `Flametal Pillar` per discovered, present pillar. Use native object identity within the world, independently of the static Flametal grouping and mining percentages. Honour existing discovery, exploration, marker visibility and publication limits.
+
+The simulation owner commits the dive by setting the native dead flag and destroys the networked object after submergence. In solo, Start Server and dedicated worlds the host retires a discovered pillar on the first accepted native dead flag or terminal ZDO destruction for its identity. A hit, shake, scene unload, unobserved sector or partial mining is insufficient. Retirement is permanent for that identity even with ResourceRemoveDepleted disabled. A new native identity at the same coordinates may qualify separately. Format 6 persists discovery identities, coordinates and terminal state. Valheim renumbers native objects at world load. Rebind a saved discovery using the matching registered pillar at its saved horizontal coordinates, with a maximum of 32 sector records per admitted restore slice. On reload or re-enable, reconcile saved active identities against the ready authoritative world object store in bounded batches before republishing them. Normalized table uploads cannot restore retired generated markers. Preserve hand-placed pins.
+
+Reuse the presence-gated Core candidate feed, prefab registry, accepted record and destruction callbacks, resource persistence and table reconciliation. During the battle pause defer discovery and ordinary table processing; accept terminal evidence for a known identity with a direct lookup. Mark the catalog dirty and coalesce publication through ordinary SharedMap scheduling. The optional retrospective search shares one existing resource sector pass, visiting at most 512 sectors and examining at most 256 records per slice. The host observes the owning Leviathan leave callback or accepted owner replication, plus terminal world destruction. Vanilla guests and HeimKit clients receive the same shared table publications through Read Map. Native interaction permissions and existing upload bounds apply; a player cannot add or retire a pillar by uploading a pin.
+
+Group discoveries and retirements in the existing resource summaries. Bounded Debug evidence identifies the pillar, position and transition reason, including dead-flag, destruction or authoritative missing identity after reload; use existing elapsed and item-count diagnostics. Acceptance requires independent nearby pillars, idempotent retirement across duplicate or reordered observations, restart-safe cleanup and preserved static Flametal and ordinary ocean Leviathan behavior. Personal-map delivery follows [client map updates](../limitations.md#client-map-updates).
+
+**Soft Tissue annotation.** The world host records the persistent outdoor `giant_brain` deposit and its `giant_brain_frac` mining successor through the existing resource service. Validate the successor link, mining state and Soft Tissue item drop through Core prefab metadata. Carry the deposit identity through fracture, save and reload. Preserve existing discovery IDs and interpret older files as having no tissue observations until bounded discovery supplies them.
+
+Publish a single resource dot for an associated skull and deposit. With marble and tissue remaining, show `Black Marble 65% (ST)`, substituting the existing marble-only percentage. Anchor the dot at the active tissue deposit. With only tissue remaining, show `(ST)`. With only marble remaining, restore the ordinary marble label and position. Ribs alone never supply tissue evidence. Partial mining retains the suffix until confirmed depletion. Apply the existing historical marble and depleted-pin settings after both resources are exhausted.
+
+Match the tissue origin inside one observed skull’s world-space collision bounds. Format 5 stores the bounds and Soft Tissue discoveries, and loads earlier formats with no skull bounds. Associate deposits with skulls using native placement evidence independently of the configurable marble clustering distance. Keep skull identity through fracture. Use a bounded spatial lookup and reject ambiguous matches. A positively observed unpaired tissue deposit gets its own `(ST)` dot. Grouped skulls with active tissue use the lowest active tissue discovery ID as a stable pin location. Preserve one dot per associated group even with clustering disabled. Tissue never contributes sections to the marble percentage.
+
+Use the existing presence-gated Core candidate feed, retrospective discovery budget, accepted native health and destruction observations, and cartography-table refresh. The host supplies labels through Read Map to vanilla and HeimKit players in private, Start Server and dedicated worlds. Use existing table permissions and packet bounds. Clients cannot declare deposits or their health. Keep grouped discovery and depletion in normal output. In Debug, include deposit and skull identities, association or skip reason, fracture handoff and refresh timing with candidate counts under existing volume limits.
 
 Ordinary discovery uses the same usable-character sampling and horizontal exploration radius as terrain. ResourceDiscoverPreviouslyExplored additionally accepts eligible records whose source position is in community-explored terrain. This optional scan advances one native prefab step and at most 256 queued records per tick; completed passes repeat no faster than TableIntervalSeconds. Nearby sampling uses rotating per-player candidate budgets. Silver always retains the mining rule below.
 
@@ -76,7 +103,7 @@ ResourceMarkerSync also records exact persistent outdoor YggdrasilRoot prefabs w
 
 Publish one `Ancient Root N%` dot per discovered root at its saved source position, independent of resource clustering. N is floor(100 times the last replicated native float level divided by the prefab's maximum); absent native level uses the same maximum default as ResourceRoot.GetLevel. Invalid/nonfinite/out-of-range values establish no percentage, displaying `?%` when none was accepted. Do not infer elapsed regeneration, extractor fill, extractor presence or extraction readiness. Valid newer levels update persisted sap percentage, including increases after regeneration. A temporarily empty root remains discovered and visible at 0%, even with ResourceRemoveDepleted enabled. Only accepted terminal root destruction retires it; historical display labels a retired root `Ancient Root (removed)`.
 
-Append AncientRoot after existing persisted resource-kind values. Resource-store format 4 adds one signed percentage integer per record (-1 means unobserved); formats 1-3 retain their existing parsing and defaults. Write format 4 only when a root discovery exists; mineral-only saves retain format 3. Mining-section progress remains separate from root reserve. Missing/unloaded or malformed observations retain the last accepted value. Normal discovery/retirement results and bounded Debug publication/catalog evidence use existing grouping and ceilings. The common resource-marker proximity display rule and personal-pin preservation still apply; observation/client limitations belong in the limitations page.
+Append AncientRoot after existing persisted resource-kind values. Resource-store format 4 adds one signed percentage integer per record (-1 means unobserved); formats 1-3 retain their existing parsing and defaults. Without skull bounds or tissue discoveries, write format 4 for root discoveries and format 3 otherwise. Mining-section progress remains separate from root reserve. Missing/unloaded or malformed observations retain the last accepted value. Normal discovery/retirement results and bounded Debug publication/catalog evidence use existing grouping and ceilings. The common resource-marker proximity display rule and personal-pin preservation still apply; observation/client limitations belong in the limitations page.
 
 ### Silver discovery observations
 
@@ -181,19 +208,26 @@ Persist separate world-scoped `.runestones` and `.spawners` stores with schema 1
 
 Use vanilla Icon3 (numeric 3), resolved through Minimap.m_icons to mapicon_pin. Owners are long.MinValue + 3 for runestones and long.MinValue + 4 for spawners, distinct from existing portal/resource/dungeon owners. Replace only service-owned publications; keep player dots and other families. Stale service-owned uploads are removed before rebuilding from the accepted catalog, so retired or disabled markers cannot recreate their source. Reuse issued identities, selected-pin exclusions, adoption handling, shared checkmarks and `.pin-state` offsets. Recognize grey-to-white adoption even with shared checkmarks disabled, suppress its duplicate publication, and retain ordinary unrelated pins. Ambiguous ownership edits lacking an issued counterpart are not treated as source deletion requests. Respect the existing combined 8192-pin and payload limits.
 
-## Automatic Dvergr structures
+## Automatic structure markers
 
-Match the names of native zone-location prefabs by ordinal, case-sensitive prefix. Each prefix covers occupied and ruined variants.
+Match native zone-location names case-sensitively. The three Dvergr prefixes cover occupied and ruined variants. Other structures use exact native location names.
 
-| Location prefab prefix | Marker label |
+| Location prefab name or Dvergr prefix | Marker label |
 | --- | --- |
 | `Mistlands_GuardTower` | Dvergr Guard Tower |
 | `Mistlands_Lighthouse` | Dvergr Lighthouse |
 | `Mistlands_Excavation` | Dvergr Excavation |
+| `GoblinCamp1`, `GoblinCamp2`, `GoblinCamp2_1` | Fuling Village |
+| `WoodVillage1` | Draugr Village |
+| `StoneTowerRuins03`, `StoneTowerRuins07`, `StoneTowerRuins08`, `StoneTowerRuins09`, `StoneTowerRuins10` | Black Forest Tower Ruin |
+| `SwampRuin1`, `SwampRuin2` | Swamp Ruin |
+| `AbandonedLogCabin02`, `AbandonedLogCabin03`, `AbandonedLogCabin04` | Mountain Cabin |
+| `CharredFortress` | Charred Fortress |
+| `NorthVillage` | Deep North Village |
 
 A valid persistent LocationProxy ZDO carries the location prefab hash in `ZDOVars.s_location`. Use its finite exterior root as the only source point and hash the prefab name, exact placed-root XYZ and `root` path for its stable identity. Use the existing landmark candidate subscription and bounded retrospective scan. Record the point when it lies within a sampled player's native exploration radius or saved community exploration. Catalog registration reads location names without loading their prefab assets. Discovery uses placed records without generating zones or instantiating locations. Occupancy and destruction are outside the discovery contract.
 
-All three publication switches default true and require restart. With at least one enabled, discover and retain all three kinds and publish only the enabled kinds. With all three disabled, skip structure store initialization and discovery, and remove generated structure pins at the next table normalization. History is retained for re-enablement.
+Publication switches default true. Fuling villages have their own switch. The additional Meadows, Black Forest, Swamp, Mountain, Ashlands and Deep North structures share a switch. File edits require a restart and HeimKit Settings applies changes live. With at least one switch enabled, discover and retain all listed kinds and publish only enabled kinds. With all structure switches disabled, skip structure store initialization and discovery, and remove generated structure pins at the next table normalization. History is retained for re-enablement.
 
 Persist discoveries in the world-scoped `.structures` landmark store with schema 1 and kind byte 2. Reuse landmark validation, atomic saves and backup handling. Structure records have a zero terminal byte. Apply the same landmark limits of 65,536 saved discoveries and 4,096 published markers to the structure family, plus the combined table limits. Publish one house pin (vanilla Icon1, numeric 1) per eligible source using owner `long.MinValue + 5`. Replace stale managed pins through normal reconciliation and preserve ordinary player house pins under the standard pin rules. Use the common checkmark, adoption and selected-removal rules. Published structures participate in resource proximity hiding.
 
@@ -239,7 +273,7 @@ The occupied controller owns a targeted Core cartography-table subscription, ind
 
 Follow the [required player-service hookup](../architecture.md#required-feature-hookup). Plugin injects PlayerServices. SharedMap owns presence registration, world mask, resource/dungeon discovery stores, shared pin state and portal/resource publication stores. SharedMapController owns sampling, discovery, resource depletion, portal/resource grouping, table normalization, pin administration and subscriptions. SharedMapDungeons owns dungeon metadata and transient encounter/retrospective queues. No AFK lease or local player census is created; Silver uses the shared routed observer independently.
 
-Ordinary work requires occupied presence and dedicated-server world, scene, routing, ZoneSystem and Minimap services. Dispose controller hooks, destruction/routed subscriptions and queues before acknowledging empty/unavailable presence. Retain accepted stores for reconnect. World-readiness loss removes the controller; shutdown/rollback/failure independently release owned resources without disposing Plugin's shared services.
+Ordinary work requires occupied presence and host world, scene, routing, ZoneSystem and Minimap services. Dispose controller hooks, destruction/routed subscriptions and queues before acknowledging empty/unavailable presence. Retain accepted stores for reconnect. World-readiness loss removes the controller; shutdown/rollback/failure independently release owned resources without disposing Plugin's shared services.
 
 Dirty accepted-state saves and lifecycle flushes use the save-management exception. Absent-file first-run terrain import is a separate read-only offline-processing exception: it reads tables, saves only a completed checkpoint and installs no gameplay hooks. Discovery/retrospective scans do not use that exception.
 
@@ -255,7 +289,7 @@ SharedMapSettings binds the following restart-required values in `[SharedMap]`; 
 | --- | --- | --- |
 | Enabled | true | Independent module switch. |
 | PortalMarkerSync | true | Portal catalog and portal-icon reconciliation. |
-| PortalClusterDistanceMeters | 60 | 0–100 metres; zero disables grouping. |
+| PortalClusterDistanceMeters | 60 | 0–100 metres, with zero disabling grouping. F7 changes apply as the server reconciles map tables. |
 | ResourceMarkerSync | true | Independent resource discovery/publication. |
 | ResourceDiscoverPreviouslyExplored | false | Additional explored-terrain discovery; Silver rule remains. |
 | ResourceClusterDistanceMeters | 30 | 0–100 metres; zero disables grouping. |
@@ -271,6 +305,8 @@ SharedMapSettings binds the following restart-required values in `[SharedMap]`; 
 | DvergrGuardTowerMarkerSync | true | Share discovered Dvergr guard towers, including ruins. |
 | DvergrLighthouseMarkerSync | true | Share discovered Dvergr lighthouses, including ruins. |
 | DvergrExcavationMarkerSync | true | Share discovered Dvergr excavations, including ruins. |
+| FulingVillageMarkerSync | true | Share discovered Fuling villages. |
+| OtherStructureMarkerSync | true | Share the additional structures listed in the structure marker section. |
 | AllowPlayerMapWrites | true | False rejects uploads before import. |
 | TableIntervalSeconds | 10 | 2–120 seconds. |
 | MaxTablesPerPass | 1 | 1–8 import/reconciliation/admin payloads. Incoming writes/new-table callbacks use their event boundary. |
@@ -282,7 +318,7 @@ Native Minimap owns exploration geometry/cadence. See [debug policy](../server-s
 
 ## Logging
 
-Use SharedMapDiagnostics and the [shared logging contract](../architecture.md#logging). Changed cleanup scope reports suppressed nearby dungeon publications and obsolete uploaded dungeon pins at Debug, capped at six records per minute; unchanged scopes stay quiet. These counts describe prepared normalization, while existing grouped table-change Info reports confirm accepted server table writes. Info covers enablement/readiness/failures, one storage decision per world initialization, completed terrain import, new discoveries/confirmed removals and changed table fields. Group runestone and spawner discoveries and confirmed spawner retirements by the normal table pass at Info. At the same boundary, emit a separate Info line for a positive Dvergr structure discovery count. Unchanged passes stay quiet. Landmark Debug evidence is capped at six details per reason per minute; it distinguishes actual-point proximity, retrospective exploration, ambiguous persistent identity and accepted terminal destruction. The metadata catalog reports effective landmark switches, available family counts, registered structure location count, the three Dvergr switches, audited spawner candidate count and grouped spawner rejection reasons once per occupied controller at Debug. An enabled spawner catalog with zero accepted families emits one Warning at that completed audit boundary; a disabled source does not emit this warning. Unknown prefab names outside the audited allowlist are silently excluded rather than counted as compatibility failures. Group results by TableIntervalSeconds pass or completed incoming packet; keep empty/unchanged batches quiet. Invalid startup payloads produce one completion warning. Persistence success stays Debug.
+Use SharedMapDiagnostics and the [shared logging contract](../architecture.md#logging). Changed cleanup scope reports suppressed nearby dungeon publications and obsolete uploaded dungeon pins at Debug, capped at six records per minute; unchanged scopes stay quiet. These counts describe prepared normalization, while existing grouped table-change Info reports confirm accepted server table writes. Info covers enablement/readiness/failures, one storage decision per world initialization, completed terrain import, new discoveries/confirmed removals and changed table fields. Group runestone and spawner discoveries and confirmed spawner retirements by the normal table pass at Info. At the same boundary, emit a separate Info line for a positive structure discovery count. Unchanged passes stay quiet. Landmark Debug evidence is capped at six details per reason per minute; it distinguishes actual-point proximity, retrospective exploration, ambiguous persistent identity and accepted terminal destruction. The metadata catalog reports effective landmark switches, available family counts, registered structure location count, the structure publication switches, audited spawner candidate count and grouped spawner rejection reasons once per occupied controller at Debug. An enabled spawner catalog with zero accepted families emits one Warning at that completed audit boundary; a disabled source does not emit this warning. Unknown prefab names outside the audited allowlist are silently excluded rather than counted as compatibility failures. Group results by TableIntervalSeconds pass or completed incoming packet; keep empty/unchanged batches quiet. Invalid startup payloads produce one completion warning. Persistence success stays Debug.
 
 | Debug stream | Evidence and bound |
 | --- | --- |
@@ -313,3 +349,13 @@ Module-disabling exceptions follow the shared [persistent failure protection con
 Arrival diagnostics use the shared [arrival observation contract](../architecture.md#logging) without changing gameplay admission. SharedMap publishes only primitive queued-table and active-reconciliation observations; table scheduling, discovery and normalization remain unchanged. Named per-player summaries use PlayerActivity Debug. The shared slow-stage breakdown is grouped once per window in global Verbose Debug.
 
 During the first two seconds of a nearby observed arrival, optional pin-change comparisons are skipped before decoding/comparison; arrival summaries count the skipped attempts. Other locations retain their diagnostics once the destination is known. Table validation, exploration, normalization, publication, uploads and standard result logs continue unchanged. Skipped Debug comparisons are not queued or replayed. See the shared [arrival observation contract](../architecture.md#logging).
+
+## Adaptive host scheduling
+
+Player samples resume by owner and character identity. Marker queues and table reconciliation retain their cursors under pressure. Each dirty store has its own preparation measurement, including payload bytes. Up to one store per host update can prepare early in the final second before its deadline. Due saves, final flushes, incoming map writes and atomic publication retain their existing paths. See [adaptive host throttling](adaptive-host-throttling.md).
+
+## Battle pause
+
+Core battle pressure suspends periodic sampling, discovery, table work and optional early snapshot preparation. Discard pending player positions and revalidate retained table work before publication. Preserve required persistence, player table operations and terminal record updates. For five seconds after the pause, bootstrap processes one table per pass and the scheduler admits at most one cooperative SharedMap job per update.
+
+WeatherGuard and SharedMap share the host battle detector. A bounded sample of replicated hostile creatures can trigger their pause even when the host has no live instance of the creature. See the [Core battle sampling bounds](../architecture.md) and [observation limits](../limitations.md).

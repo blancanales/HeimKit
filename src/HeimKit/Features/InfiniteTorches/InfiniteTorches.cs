@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -13,7 +14,7 @@ using BepInEx.Logging;
 
 namespace HeimKit.Features.InfiniteTorches;
 
-public sealed class InfiniteTorches : IServerModule
+public sealed class InfiniteTorches : IServerModule, IModuleSwitches, IModuleNumericSettings
 {
     private readonly InfiniteTorchesSettings _settings;
     private readonly ManualLogSource _logger;
@@ -24,6 +25,25 @@ public sealed class InfiniteTorches : IServerModule
     private bool _occupied;
     private ZDOMan? _world;
     private readonly PlayerProcessingNotices _processing;
+
+    private SwitchBinding[]? _switches;
+    IReadOnlyList<SwitchBinding> IModuleSwitches.Switches => _switches ??= new SwitchBinding[]
+    {
+        new("Enabled", _settings.Enabled),
+        new("Debug logging", _settings.DebugMode, applyLive: true),
+        new("Include fireplaces", _settings.IncludeFireplaces),
+        new("Campfires", _settings.Campfires),
+        new("Hearths", _settings.Hearths),
+        new("Bonfires", _settings.Bonfires),
+    };
+    SwitchApplyMode IModuleSwitches.ApplyMode => SwitchApplyMode.Reinitialize;
+
+    IReadOnlyList<NumericSettingBinding> IModuleNumericSettings.NumericSettings => new[]
+    {
+        NumericSettingBinding.Create("Refill interval (seconds)", _settings.IntervalSeconds,
+            "Time between refill passes. A pass already underway can finish.",
+            () => "Applies when the next refill pass is scheduled.")
+    };
 
     public string Name => "InfiniteTorches";
     public bool IsActive { get; private set; }

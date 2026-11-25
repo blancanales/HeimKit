@@ -20,7 +20,7 @@ internal sealed class DoorKeeperController : IDisposable
     private readonly ManualLogSource _log;
     private readonly DoorKeeperDiagnostics _diagnostics;
     private readonly PlayerWorldScope _scope;
-    private readonly ObjectAuthority _authority;
+    private readonly ObjectAuthority? _authority;
     private readonly StructureContext _context;
     private readonly DoorKeeperClearance _clearance = new();
     private readonly HashSet<int> _prefabs = new();
@@ -42,7 +42,11 @@ internal sealed class DoorKeeperController : IDisposable
         }
         if (_prefabs.Count == 0) throw new InvalidOperationException("No supported native doors are available.");
         _context = new();
-        try { _authority = new(module.Fail, log, players.Presence, true, "UseDoor", "RPC_Damage", "RPC_Repair", "RPC_Remove"); } catch { _context.Dispose(); throw; }
+        if (!WorldSession.IsPlayerHosted(WorldSession.Identify(ZNet.instance)))
+        {
+            try { _authority = new(module.Fail, log, players.Presence, true, "UseDoor", "RPC_Damage", "RPC_Repair", "RPC_Remove"); }
+            catch { _context.Dispose(); throw; }
+        }
         try { _scope.Index(z => _prefabs.Contains(z.GetPrefab())); } catch { Dispose(); throw; }
     }
     public void Tick(float now)
@@ -82,19 +86,19 @@ internal sealed class DoorKeeperController : IDisposable
             var view = ZNetScene.instance.FindInstance(zdo); var door = view == null ? null : view.GetComponent<Door>();
             if (door == null || !view!.IsValid() || !ReferenceEquals(view.GetZDO(), zdo) || !_canInteract(door)) continue;
             // Native toggle executes synchronously after the closed-state check: no delayed owner-routed toggle.
-            if (zdo.GetInt(ZDOVars.s_state) == 0) continue;
+            if (zdo.GetInt(ZDOVars.s_state) == 0 || (_authority == null && !view.IsOwner())) continue;
             try
             {
-                _authority.Retain(zdo);
+                _authority?.Retain(zdo);
                 _use(door, ZDOMan.GetSessionID(), false);
                 if (zdo.GetInt(ZDOVars.s_state) == 0) { closed++; _closed++; _doors.Remove(zdo.m_uid); }
             }
-            finally { _authority.Release(zdo.m_uid); }
+            finally { _authority?.Release(zdo.m_uid); }
         }
         if (closed > 0) DiagnosticLog.Write(_log, "DoorKeeper", closed == 1 ? "Closed one door." : $"Closed {closed} doors.");
         _diagnostics.Result(now, closed, _closed, _doors.Count);
         _diagnostics.Scan(now, _scope.Records.Count, _doors.Count, delayed, occupied, contextReady, _context.WaitReason, _context.WaitObject);
     }
-    private void ReleaseAll() { foreach (var id in _doors.Keys) _authority.Release(id); _doors.Clear(); }
-    public void Dispose() { try { ReleaseAll(); } finally { try { _authority.Dispose(); } finally { try { _scope.Dispose(); } finally { _context.Dispose(); } } } }
+    private void ReleaseAll() { foreach (var id in _doors.Keys) _authority?.Release(id); _doors.Clear(); }
+    public void Dispose() { try { ReleaseAll(); } finally { try { _authority?.Dispose(); } finally { try { _scope.Dispose(); } finally { _context.Dispose(); } } } }
 }

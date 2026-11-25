@@ -26,7 +26,7 @@ public sealed class SeaSalvageSettings
     public ConfigEntry<float> IntervalSeconds { get; }
     public SeaSalvageSettings(ConfigFile config, ManualLogSource logger)
     {
-        Enabled = config.Bind("SeaSalvage", "Enabled", true, "Enable SeaSalvage. Restart after edits.");
+        Enabled = config.Bind("SeaSalvage", "Enabled", true, "Enable SeaSalvage. File edits require a restart. HeimKit Settings applies changes live.");
         DebugMode = config.Bind("SeaSalvage", "DebugMode", false, "Enable feature diagnostics through the shared debug policy.");
         MinimumDepthMeters = config.Bind("SeaSalvage", "MinimumDepthMeters", 4f, new ConfigDescription("Minimum item depth beneath native water. Restart after edits.", new AcceptableValueRange<float>(3f, 100f)));
         MaximumDepthMeters = config.Bind("SeaSalvage", "MaximumDepthMeters", 50f, new ConfigDescription("Maximum salvage depth. Restart after edits.", new AcceptableValueRange<float>(4f, 500f)));

@@ -54,6 +54,27 @@ internal static class SharedMapResourceStoreTests
             Check(stable.X == changed.X && stable.Z == changed.Z, "Restart lost the resource publication slot.");
             Check(refresh.FilePath.EndsWith(".resource-pins") && !File.Exists(Path.ChangeExtension(refresh.FilePath, ".portal-pins")), "Resource publication touched portal storage.");
 
+            var remains = new SharedMapResourceStore(directory, 456);
+            var skull = remains.Observe(ResourceKind.BlackMarble, 0, 0, 0, false, true, new MiningProgress(13, 20))!;
+            remains.RecordSkull(skull, new SkullBounds(-3, -3, -3, 3, 3, 3));
+            remains.Observe(ResourceKind.SoftTissue, 1, 0, 1, false, true);
+            remains.Save();
+            var remainsReload = new SharedMapResourceStore(directory, 456);
+            remainsReload.Load();
+            var combined = SharedMapResourceClusters.Group(remainsReload.Deposits, 0, true).Single();
+            Check(combined.Name == "Black Marble 65% (ST)" && combined.X == 1 && combined.Identity == "1",
+                "Reload or zero cluster distance split the tissue from its skull.");
+            remainsReload.Retire(ResourceKind.BlackMarble, 0, 0, 0);
+            Check(SharedMapResourceClusters.Group(remainsReload.Deposits, 0, false).Single().Name == "(ST)",
+                "Historical marble masked remaining tissue.");
+            remainsReload.Retire(ResourceKind.SoftTissue, 1, 0, 1);
+            Check(SharedMapResourceClusters.Group(remainsReload.Deposits, 0, true).Count == 0 &&
+                SharedMapResourceClusters.Group(remainsReload.Deposits, 0, false).Single().Name == "Black Marble 0%",
+                "Tissue stayed published after confirmed depletion.");
+            remains.Retire(ResourceKind.SoftTissue, 1, 0, 1);
+            Check(SharedMapResourceClusters.Group(remains.Deposits, 30, true).Single().Name == "Black Marble 65%",
+                "Mining tissue changed the marble percentage.");
+
             var silver = new SharedMapResourceStore(directory, 789);
             Check(silver.Observe(ResourceKind.Silver, 0, 1, 0, false, true, new MiningProgress(8, 10)) == null,
                 "Travel or retrospective discovery revealed Silver.");

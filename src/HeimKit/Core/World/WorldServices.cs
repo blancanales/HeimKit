@@ -6,10 +6,12 @@ internal static class WorldServices
     internal static bool Activity { get; private set; }
     internal static bool World { get; private set; }
     internal static bool Terrain { get; private set; }
-    internal static void Refresh()
+    internal static void Refresh(bool playerHosted = false)
     {
         var net = ZNet.instance;
-        Network = net != null && net.IsServer() && net.IsDedicated() && ZDOMan.instance != null;
+        var role = WorldSession.Identify(net);
+        Network = (playerHosted ? WorldSession.IsPlayerHosted(role) : role == WorldSessionRole.DedicatedServer) &&
+            ZDOMan.instance != null;
         Activity = Network && Game.instance != null;
         World = Network && ZNetScene.instance != null && ZRoutedRpc.instance != null;
         Terrain = World && ZoneSystem.instance != null;

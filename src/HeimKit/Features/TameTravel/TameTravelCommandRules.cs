@@ -10,6 +10,7 @@ using HeimKit.Features.TameTravel.Models;
 namespace HeimKit.Features.TameTravel;
 internal static class TameTravelCommandRules
 {
+    internal static bool ExplicitNativeToggle(bool message, bool commandable) => message && commandable;
     internal static float SelectionRange(TameOrder order, float commandRange) => order == TameOrder.Stay ? 32 : commandRange;
     internal static bool AwaitingEarlierFollow(bool pending, TameOrder previous, bool sent) => pending && previous == TameOrder.Follow && sent;
     public static bool StopAssociated(string following, string player, bool bound, string reclaimName = "", bool pending = false)

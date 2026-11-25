@@ -14,6 +14,7 @@ internal static class IncomingPackets
     private static readonly Channel Data = new(false), Routed = new(true);
     [ThreadStatic] private static Context? _current;
     [ThreadStatic] private static Stack<Context>? _pool;
+    internal static ZNetPeer? CurrentDataPeer => _current != null && !_current.Channel.IsRouted ? _current.Peer : null;
     internal static bool NeedsDataFilter => _current == null || _current.Channel.IsRouted || !_current.Inspected || _current.ScanFailed || _current.Matches[_current.Index];
     internal static bool TryPeer(ZRpc rpc, out ZNetPeer? peer)
     {

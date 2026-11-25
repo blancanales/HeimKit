@@ -19,6 +19,30 @@ public sealed class PlayerPresenceEvents : IDisposable
     private readonly HashSet<Registration> _registrations = new();
     private Registration[] _snapshot = Array.Empty<Registration>();
     public bool? Occupied { get; private set; }
+    private int _administrativeDepth;
+    internal IDisposable AdministrativeChange()
+    {
+        _administrativeDepth++;
+        return new AdministrativeScope(this);
+    }
+
+    internal void MarkActivationFailed()
+    {
+        if (Occupied == true) _activationFailed = true;
+    }
+
+    private sealed class AdministrativeScope : IDisposable
+    {
+        private PlayerPresenceEvents? _owner;
+        internal AdministrativeScope(PlayerPresenceEvents owner) => _owner = owner;
+        public void Dispose()
+        {
+            if (_owner == null) return;
+            _owner._administrativeDepth--;
+            _owner = null;
+        }
+    }
+
     public int Subscribers => _registrations.Count;
     public PlayerPresenceEvents(ManualLogSource logger) { _logger = logger; _notices = new(logger); }
     public IDisposable Subscribe(Action<bool?> changed, Action<Exception> failed, Func<bool>? emptyPaused = null, Func<bool>? active = null, Func<bool>? serverReady = null)
@@ -88,7 +112,7 @@ public sealed class PlayerPresenceEvents : IDisposable
             var owner = _owner; _owner = null;
             if (owner == null) return;
             // A failed/inactive consumer must not disappear into a successful activation claim.
-            if (owner.Occupied == true && Active != null && !Active()) owner._activationFailed = true;
+            if (owner._administrativeDepth == 0 && owner.Occupied == true && Active != null && !Active()) owner._activationFailed = true;
             owner._registrations.Remove(this); owner._snapshot = new Registration[owner._registrations.Count]; owner._registrations.CopyTo(owner._snapshot);
         }
     }

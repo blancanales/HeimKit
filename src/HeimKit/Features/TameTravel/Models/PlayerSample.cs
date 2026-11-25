@@ -9,7 +9,7 @@ using UnityEngine;
 namespace HeimKit.Features.TameTravel.Models;
 internal sealed class PlayerSample
 {
-    public ZNetPeer Peer = null!;
+    public TameTravelActor Traveller;
     public ZDOID Character;
     public Vector3 Position;
     public float Time, CommandTime = -10, BlockedUntil;

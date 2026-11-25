@@ -19,6 +19,8 @@ internal abstract class OwnershipLease
     public bool SourceStateObserved, Moved, OwnerObserved;
     public float NextDestinationSend;
     public int DestinationRetries;
+    // Native lifecycle/command traffic can preempt a pending relocation.
+    public System.Func<int, bool>? PreemptOnInteraction;
     public bool FollowControl;
     public bool StaticControl;
     public bool ManualContainerAccess, ManualInteractionRequested;

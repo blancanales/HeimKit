@@ -274,6 +274,15 @@ internal sealed class StationSupplyDiagnostics : FeatureDiagnostics
         fields.Add(DiagnosticLog.FieldAlways(prefix + "_distance_m", Horizontal(candidate.GetPosition() - station.GetPosition() - anchor)));
         fields.Add(DiagnosticLog.FieldAlways(prefix + "_height_m", candidate.GetPosition().y - station.GetPosition().y));
     }
+    internal void ChestOpen(float now, ZDOID id, long peer, string status, long? owner = null, float? elapsed = null)
+    {
+        if (!RecordDue(now, elapsed.HasValue ? "chest_open_queue" : "chest_open_observed", 12)) return;
+        DiagnosticLog.Write(_log, "StationSupply", StationSupplyLogTopics.Supply, "Observed a manual chest open request.",
+            new[] { DiagnosticLog.Field("chest", id), DiagnosticLog.Field("requester", peer),
+                DiagnosticLog.Field("status", status), elapsed.HasValue ? DiagnosticLog.FieldAlways("queue_ms", (long)(elapsed.Value * 1000)) :
+                DiagnosticLog.FieldAlways("owner_seen", owner) }, LogLevel.Debug);
+    }
+
     internal void Configuration(float now, StationSupplyPrefabs prefabs)
     {
         if (!RecordDue(now, "config", 1)) return;

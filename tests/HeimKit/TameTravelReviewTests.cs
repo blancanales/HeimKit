@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using HeimKit.Core.Players;
+using HeimKit.Core.World;
 using HeimKit.Features.TameTravel;
 using UnityEngine;
 
@@ -19,8 +20,55 @@ internal static class TameTravelReviewTests
         public void Clear() => Roster.Clear();
     }
     private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
+    private static void CrowdedPortalScope()
+    {
+        using var world = new ReviewRegressionTests.World();
+        var piece = world.Add(1);
+        var skeleton = world.Add(2);
+        void Scan(Vector2s sector, SimulationDistance distance, List<ZDO> near, List<ZDO>? far)
+        {
+            for (int i = 0; i < 8192; i++) near.Add(piece);
+            near.Add(skeleton);
+        }
+        using var provider = new WorldObjectProvider(new ReviewRegressionTests.Presence(), Scan, observe: false);
+        provider.BeginCycle(true);
+        var subscription = provider.For("TameTravel");
+        var selected = subscription.Nearby(Vector3.zero, (z, _) => ReferenceEquals(z, skeleton));
+        Check(selected?.Count == 1 && ReferenceEquals(selected[0], skeleton), "Crowded portal hid the last matching record.");
+        Check(subscription.Nearby(Vector3.zero, (z, _) => ReferenceEquals(z, piece))?.Count == 8192 &&
+            subscription.Nearby(Vector3.zero, static (_, _) => true) == null &&
+            subscription.Nearby(Vector3.zero) == null, "Oversized context returned a partial view or changed the ordinary tame limit.");
+    }
+
     internal static void Run()
     {
+        CrowdedPortalScope();
+        Check(TameTravelCommandRules.ExplicitNativeToggle(true, true) &&
+            !TameTravelCommandRules.ExplicitNativeToggle(false, true) &&
+            !TameTravelCommandRules.ExplicitNativeToggle(true, false) &&
+            !TameTravelCommandRules.ExplicitNativeToggle(false, false),
+            "A silent restore or a non-commandable tame could change ordinary portal consent.");
+        int lox = "Lox".GetStableHashCode(), citadel = "Mistlands_DvergrBossEntrance1".GetStableHashCode();
+        Check(!TameTravelTraversalRules.DungeonAllows(lox, citadel, true) &&
+            TameTravelTraversalRules.DungeonAllows("Hen".GetStableHashCode(), citadel, true) &&
+            TameTravelTraversalRules.DungeonAllows(lox, "TrollCave02".GetStableHashCode(), true),
+            "Citadel entry restriction leaked into another animal or the Troll Cave clearance path.");
+        Check(!TameTravelTraversalRules.NeedsFullDoorClearance(new Vector3(.98f, 1.85f, 1), .49f, 1.85f) &&
+            TameTravelTraversalRules.NeedsFullDoorClearance(new Vector3(3, 3.5f, 4), .49f, 1.85f),
+            "A player-sized body or the Lox capsule was assigned the wrong doorway clearance.");
+        Check(TameTravelGuestSummons.CasterAtCreation(11, 11, 11, 11, 101, true, 3) == 101 &&
+            TameTravelGuestSummons.CasterAtCreation(22, 22, 22, 22, 202, true, 1) == 202 &&
+            TameTravelGuestSummons.CasterAtCreation(22, 11, 22, 22, 202, true, 3) == 0 &&
+            TameTravelGuestSummons.CasterAtCreation(11, 11, 11, 22, 202, true, 3) == 0 &&
+            TameTravelGuestSummons.CasterAtCreation(11, 11, 11, 11, 101, true, 0) == 0,
+            "Guest attribution mixed players, accepted a later simulator or ignored the staff's native limit.");
+        var exit = new Vector3(3, 5000, 4);
+        Check(!TameTravelGuestSummons.WalkedFromExit(exit, exit, exit) &&
+            !TameTravelGuestSummons.WalkedFromExit(exit, exit + Vector3.up, exit) &&
+            !TameTravelGuestSummons.WalkedFromExit(exit, exit - Vector3.up * 5000, exit) &&
+            !TameTravelGuestSummons.WalkedFromExit(exit + Vector3.right, exit + Vector3.right, exit) &&
+            TameTravelGuestSummons.WalkedFromExit(exit, exit + Vector3.right, exit),
+            "Guest summon arrival accepted a pinned, vertical, rolled-back or repeated sample, or rejected destination walking.");
         var presence = new Presence();
         Check(!TameTravelRules.ConnectedName(presence, "Bjorn Toulose"), "An absent saved follower was treated as online.");
         var oldOwner = (ZNetPeer)RuntimeHelpers.GetUninitializedObject(typeof(ZNetPeer)); oldOwner.m_playerName = "Bjorn Toulose";

@@ -40,7 +40,7 @@ internal sealed class ObjectTransferAuthority : IDisposable
     private static int _nonce = 10000000;
     private bool _disposed;
     public ObjectTransferAuthority(IPlayerPresence presence, Action<Exception> failed, string name = "TameTravel", bool staticObjects = false,
-        Action<ZDOID, long, int, string, float>? containerRequestStatus = null)
+        Action<ZDOID, long, int, string, float, float>? containerRequestStatus = null)
     {
         ZdoReplication.CheckCompatibility();
         NativeConnection.CheckCompatibility();
@@ -107,6 +107,7 @@ internal sealed class ObjectTransferAuthority : IDisposable
                         (pair.Value.Moved || ZNetScene.instance.FindInstance(pair.Value.Record) != null) && seen.Add(pair.Key)) currentNearObjects.Add(pair.Value.Record);
         seen.Clear();
     }
+    internal bool Idle => _leases.Count == 0 && _containerRequests?.Idle != false;
     public bool Contains(ZDOID id) => _leases.ContainsKey(id);
     public bool RunningFollow(ZDOID id) => _leases.TryGetValue(id, out var t) && t.FollowControl && t.Phase == 5;
     public bool Holds(OwnershipLease t) => _leases.TryGetValue(t.Id, out var current) && ReferenceEquals(current, t);
@@ -311,7 +312,7 @@ internal sealed class ObjectTransferAuthority : IDisposable
         if (body != null && _bodies.TryGetValue(body, out var b))
         { _bodies.Remove(body); body.isKinematic = b.Kinematic; body.useGravity = b.Gravity; }
     }
-    public void Release(ZDOID id, bool keepServerOwner = false, bool resetDestination = false)
+    public void Release(ZDOID id, bool keepServerOwner = false, bool resetDestination = false, bool restoreUndrainedOwner = false)
     {
         if (!_leases.TryGetValue(id, out var t)) return;
         _leases.Remove(id);
@@ -319,13 +320,14 @@ internal sealed class ObjectTransferAuthority : IDisposable
         // Releasing a failed drain must not turn an owner-zero cached snapshot
         // into trusted source state on the next visit. Retain the physical source
         // obligation until drained, replaced, or a new native owner can be drained.
-        if (_staticObjects && t.Phase == 0 && !t.SourceStateObserved && t.PreviousPeer != null)
-            _sourceWaits[id] = (t.Record, t.PreviousPeer);
+        bool undrained = t.Phase == 0 && !t.SourceStateObserved && t.PreviousPeer != null;
+        if (_staticObjects && undrained)
+            _sourceWaits[id] = (t.Record, t.PreviousPeer!);
         else _sourceWaits.Remove(id);
         RestoreBody(t.Record);
         if (!keepServerOwner && (t.Record.GetOwner() == ZDOMan.GetSessionID() ||
             resetDestination && t.Moved && !t.FollowControl && t.Record.GetOwner() == t.DestinationPeer.m_uid))
-            t.Record.SetOwner(_staticObjects && t.Phase == 0 && !t.SourceStateObserved && t.PreviousPeer != null ? t.PreviousOwner : 0);
+            t.Record.SetOwner((_staticObjects || restoreUndrainedOwner) && undrained ? t.PreviousOwner : 0);
         _world.ForceSendZDO(id);
     }
     public static void Send(ZNetPeer peer, ZDO z, uint? wireRevision = null)
@@ -457,6 +459,26 @@ internal sealed class ObjectTransferAuthority : IDisposable
             {
                 c = For(data.m_targetZDO);
                 if (c == null || !c._leases.TryGetValue(data.m_targetZDO, out var t)) return false;
+                if (t.PreemptOnInteraction?.Invoke(data.m_methodHash) == true)
+                {
+                    // A native command, damage or count-limit removal preempts relocation.
+                    // Restore an authoritative simulator before forwarding the original RPC.
+                    long owner = c.YieldToNative(t);
+                    if (data.m_targetPeerID == ZRoutedRpc.Everybody && owner == peer.m_uid)
+                    {
+                        // Native broadcast forwarding omits the sender. It may only have
+                        // processed its local copy as a non-owner before this handback.
+                        data.m_targetPeerID = owner;
+                        var local = new ZPackage(); data.Serialize(local);
+                        peer.m_rpc.Invoke("RoutedRPC", local);
+                    }
+                    else if (data.m_targetPeerID != ZRoutedRpc.Everybody && data.m_targetPeerID != owner)
+                    {
+                        data.m_targetPeerID = owner;
+                        var forwarded = new ZPackage(); data.Serialize(forwarded); forwarded.SetPos(0); pkg = forwarded;
+                    }
+                    return true;
+                }
                 if (t.StaticControl)
                 {
                     c._containerRequests?.Capture(peer, t, data, Time.unscaledTime);
@@ -470,12 +492,43 @@ internal sealed class ObjectTransferAuthority : IDisposable
             }
             var destroyed = ZdoPackets.ReadPackage(data.m_parameters);
             if (data.m_parameters.GetPos() != data.m_parameters.Size()) throw new InvalidDataException("Trailing destruction bytes.");
-            var filtered = ZdoPackets.FilterDestroyed(destroyed, Retained, out int blocked);
+            List<(ObjectTransferAuthority Owner, OwnershipLease Lease)>? relinquish = null;
+            bool Protect(ZDOID id)
+            {
+                var owner = For(id);
+                if (owner == null || !owner._leases.TryGetValue(id, out var lease)) return false;
+                if (lease.PreemptOnInteraction != null && (ReferenceEquals(peer, lease.PreviousPeer) && !lease.Moved ||
+                    lease.Phase >= 3 && peer.m_uid == lease.Record.GetOwner()))
+                {
+                    (relinquish ??= new()).Add((owner, lease));
+                    return false;
+                }
+                return true;
+            }
+            var filtered = ZdoPackets.FilterDestroyed(destroyed, Protect, out int blocked);
+            if (relinquish != null)
+                foreach (var item in relinquish)
+                    if (item.Owner.Holds(item.Lease)) item.Owner.Release(item.Lease.Id, keepServerOwner: true);
             if (blocked == 0) return true;
             data.m_parameters = new ZPackage(); data.m_parameters.Write(filtered);
             var output = new ZPackage(); data.Serialize(output); output.SetPos(0); pkg = output; return true;
         }
         catch (Exception error) { c?._failed(error); return false; }
+    }
+    private long YieldToNative(OwnershipLease lease)
+    {
+        long current = lease.Record.GetOwner();
+        var prior = lease.PreviousPeer;
+        bool returnToSource = !lease.Moved && prior != null && CanSend(prior) &&
+            (lease.Phase == 0 || ZNetScene.instance.FindInstance(lease.Record) == null);
+        Release(lease.Id, keepServerOwner: true);
+        if (returnToSource)
+        {
+            lease.Record.SetOwner(prior!.m_uid);
+            Send(prior, lease.Record, lease.Phase == 0 ? 0u : null);
+            _world.ForceSendZDO(lease.Id);
+        }
+        return returnToSource ? prior!.m_uid : current;
     }
     public void Dispose()
     {

@@ -1,5 +1,9 @@
 # WeatherGuard
 
+In player-hosted worlds, the host and ready guests define the protection regions. Protection applies to eligible pieces owned by the host process. Pieces owned by guests wait for native ownership to return to the host.
+
+See [optional client setup](../client-setup.md) for the in-game status and admin controls.
+
 Protects existing and newly player-built structures from configured weather wear while preserving their creators. Activation is automatic during play; repair, logout and rejoin are not required. Combat damage, repair, removal and structural support remain native. Protection scans advance in small batches across server updates, while already-managed structures retain protection between batches. Native terrain and scene coverage continue. Neighborhood readiness is reused until relevant dependencies or scene bindings change; optional geometry observations run separately from protection scans.
 
 ![WeatherGuard: protect player-built structures from rain and underwater wear while preserving combat and support](../images/weather-guard-workflow.jpg)
@@ -8,11 +12,13 @@ See [server setup](../server-setup.md), [safety and limitations](../limitations.
 
 ## Scope and configuration
 
+From F7, rain and underwater changes apply without restarting WeatherGuard while at least one protection type stays enabled.
+
 Eligible pieces are static player-built structural categories with native weather wear. World-created structures, containers, moving objects, non-building categories and already weather-immune materials are excluded. Repairing a world-created piece does not claim it.
 
 Protection waits for nearby terrain, roof and support geometry, and shields to load. Unloaded drops or creatures outside the game's roof/support collision layers do not interrupt protection unless they provide structural support or shielding. Items with a wear component but no support function are treated the same way.
 
-Settings belong under `[WeatherGuard]`. Stop the server before editing and restart to apply changes. Existing values are preserved.
+Settings belong under `[WeatherGuard]`. For hand edits, leave the hosted world or stop the dedicated server, edit the [active configuration](../client-setup.md#configuration-locations), then start the world again. Existing values are preserved.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -42,7 +48,7 @@ Eligible equals protected plus waiting within the reported scope. The report inc
 
 ## Diagnostics
 
-WeatherGuard remains active during raids and detected battles: required protection, support and terrain upkeep continue; optional exposure probes can wait. Extra scene creation focuses on protection dependencies and server-owned objects. Core repairs stale scene bindings without deleting saved objects and reports grouped warnings with example identities. See [shared performance observations](../server-setup.md#performance-observations).
+WeatherGuard pauses across the world during detected battles. The host stops extending terrain and protecting pieces, and releases the pieces it controls in batches. Ordinary weather wear can occur during the pause. Protection returns gradually after 30 seconds without battle evidence. Extra scene creation focuses on protection dependencies and server-owned objects. Core repairs stale scene bindings without deleting saved objects and reports grouped warnings with example identities. See [shared performance observations](../server-setup.md#performance-observations).
 
 Outdoor terrain loading excludes dungeon player positions. Native zone creation and lifetime refresh retain their existing cadence. The shared [performance window](../server-setup.md#performance-observations) reports native context cost and retained region counts without enabling Debug; terrain compiler creation waits for its own ready heightmap. See [observation limits](../limitations.md#server-observations-and-logs).
 
@@ -69,3 +75,9 @@ Shared [player performance context](../server-setup.md#performance-observations)
 Optional [arrival diagnostics](../server-setup.md#performance-observations) correlate existing processing with player arrivals. They report passive protection or table-work observations without changing this feature's behavior.
 
 WeatherGuard receives immediate occupied activation ahead of optional startup work. Required protection, native terrain lifetime and support processing retain their existing admission and cadence.
+
+## Automatic host pacing
+
+WeatherGuard adjusts the size of ongoing protection batches and slows optional observations when the host is busy. Already protected pieces retain coverage while batches advance.
+
+The host can also detect a nearby alerted monster from its replicated state when another player owns the creature. This detection runs with PlayerActivity diagnostics off.

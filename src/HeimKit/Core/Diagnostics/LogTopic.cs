@@ -25,5 +25,6 @@ public static class CoreLogTopics
     public static readonly LogTopic Lifecycle = new("lifecycle");
     public static readonly LogTopic Config = new("config");
     public static readonly LogTopic Scope = new("scope");
+    public static readonly LogTopic Control = new("control");
     public static readonly LogTopic Timing = new("timing");
 }

@@ -1,5 +1,9 @@
 # SeaSalvage
 
+In player-hosted worlds, the host and guests both count for clearance. Drops owned by guests wait for native ownership release.
+
+See [optional client setup](../client-setup.md) for the in-game status and admin controls.
+
 Moves eligible inaccessible sunken loose item drops into ordinary floating cargo crates. Tombstones, placed items, creatures, fish, already floating drops and unsupported definitions are excluded.
 
 ![SeaSalvage: validate settled sunken loose drops and preserve their item data in floating cargo](../images/sea-salvage-workflow.jpg)
@@ -12,7 +16,9 @@ New recovery work pauses during native raids or detected fights. Already-consume
 
 ## Configuration
 
-Use `[SeaSalvage]` in `heimkit.cfg`. This feature defaults enabled; set Enabled=false to disable it. Stop the server before editing and restart to apply settings. HeimKit preserves existing values and supplies missing defaults.
+Changing **Salvage delay** from F7 takes effect on the next salvage check, including for drops already settling.
+
+Use `[SeaSalvage]` in `heimkit.cfg`. This feature defaults enabled; set Enabled=false to disable it. For hand edits, leave the hosted world or stop the dedicated server, edit the [active configuration](../client-setup.md#configuration-locations), then start the world again. HeimKit preserves existing values and supplies missing defaults.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -42,3 +48,7 @@ See [shared safety and delivery limitations](../limitations.md#new-world-feature
 - `salvage`: Sunken-item selection and cargo transfer.
 
 Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.
+
+## Host pacing
+
+The host searches nearby cells and checks drops over several updates. Recovery can take longer while the host is busy. It checks the original drops and nearby players again before creating each crate. Ownership cleanup continues during combat.

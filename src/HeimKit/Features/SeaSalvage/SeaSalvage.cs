@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -11,7 +12,7 @@ using System;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 namespace HeimKit.Features.SeaSalvage;
-public sealed class SeaSalvage : IServerModule
+public sealed class SeaSalvage : IServerModule, IModuleSwitches, IModuleNumericSettings, IModuleIdle
 {
     private readonly SeaSalvageSettings _settings;
     private readonly ManualLogSource _logger;
@@ -24,6 +25,27 @@ public sealed class SeaSalvage : IServerModule
     private long _worldUid;
     private readonly string _directory;
     private readonly PlayerProcessingNotices _processing;
+    bool IModuleIdle.Idle => _controller?.Idle != false;
+    void IModuleIdle.HoldNewWork(bool hold)
+    {
+        if (_controller != null) _controller.HoldNewWork = hold;
+    }
+
+    private SwitchBinding[]? _switches;
+    IReadOnlyList<SwitchBinding> IModuleSwitches.Switches => _switches ??= new SwitchBinding[]
+    {
+        new("Enabled", _settings.Enabled),
+        new("Debug logging", _settings.DebugMode, applyLive: true),
+    };
+    SwitchApplyMode IModuleSwitches.ApplyMode => SwitchApplyMode.Reinitialize;
+
+    IReadOnlyList<NumericSettingBinding> IModuleNumericSettings.NumericSettings => new[]
+    {
+        NumericSettingBinding.Create("Salvage delay (seconds)", _settings.DelaySeconds,
+            "Time a drop must remain unchanged before it can be recovered. Applies to drops already settling.",
+            () => "Applies on the next salvage check.")
+    };
+
     public string Name => "SeaSalvage";
     public bool IsActive { get; private set; }
     public SeaSalvage(ConfigFile config, ManualLogSource logger, PlayerServices players)
@@ -44,7 +66,7 @@ public sealed class SeaSalvage : IServerModule
         if (!_settings.Enabled.Value) return;
         if (!_compatibility.Supports(gameVersion)) { Log("DISABLED: unsupported game version " + gameVersion + "; required version " + _compatibility.RequiredVersion, LogLevel.Warning); return; }
         IsActive = true;
-        if (_settings.DebugLogging.Enabled) Log("Waiting for joined players and dedicated-server world", LogLevel.Debug);
+        if (_settings.DebugLogging.Enabled) Log("Waiting for joined players and a hosted world", LogLevel.Debug);
         try { _presenceRegistration = _players.Events.Subscribe(PresenceChanged, Fail, () => _processing.IsEmptyPaused, () => _processing.IsRunning, () => _processing.IsServerReady); }
         catch (Exception error) { Fail(error); }
         if (!IsActive) { var registration = _presenceRegistration; _presenceRegistration = null; registration?.Dispose(); }

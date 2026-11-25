@@ -8,13 +8,20 @@ namespace HeimKit.Core.Scheduling;
 // calls are never preempted. Both elapsed time and unit count bound each admission.
 internal static class WorkSlice
 {
-    internal static bool Advance(IEnumerator<bool> work, double milliseconds = 2, int maximumUnits = 64, Func<long>? clock = null)
+    internal static bool Advance(IEnumerator<bool> work, double milliseconds = 2, int maximumUnits = 64, Func<long>? clock = null, AdaptiveOperation? adaptive = null)
     {
         clock ??= Stopwatch.GetTimestamp;
         long started = clock();
         for (int units = 0; units < maximumUnits; units++)
         {
-            if (!work.MoveNext()) return true;
+            if (adaptive != null && !adaptive.CanTake) break;
+            if (!work.MoveNext())
+            {
+                // Iterator completion can run a final native operation. Ignore cheap empty polls.
+                adaptive?.CountCompletion();
+                return true;
+            }
+            adaptive?.Count();
             if ((clock() - started) * 1000d / Stopwatch.Frequency >= milliseconds) break;
         }
         return false;

@@ -1,4 +1,5 @@
 using System;
+using HeimKit.Core.Players;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Diagnostics;
@@ -26,9 +27,59 @@ internal sealed class ModuleHost : IDisposable
         internal long Suppressed;
     }
     internal ModuleHost(ManualLogSource log, ModuleScheduler? scheduler = null) { _log = log; _scheduler = scheduler ?? ModuleScheduler.Current; }
-    internal void Register(Func<IServerModule> create, string name)
+    private PlayerPresenceEvents? _presence;
+    private float _now;
+    private string _version = "";
+    internal IReadOnlyList<IServerModule> Modules => _modules.AsReadOnly();
+    internal void AttachPresence(PlayerPresenceEvents presence) => _presence = presence;
+
+    internal bool Reapply(string name, Action change, SwitchBinding? binding = null)
     {
-        try { _modules.Add(create()); }
+        foreach (var module in _modules)
+        {
+            if (module.Name != name || module is not IModuleSwitches settings) continue;
+            var enabled = settings.Switches[0].Entry;
+            using var administrative = _presence?.AdministrativeChange();
+            try
+            {
+                bool wasEnabled = enabled.Value, wasActive = module.IsActive;
+                change();
+                if (settings.ApplyMode == SwitchApplyMode.SelfReconciling)
+                {
+                    (module as IAdministrativeReconciliation)?.ScheduleReconciliation();
+                    return true;
+                }
+                if (wasEnabled && enabled.Value && wasActive && module.IsActive &&
+                    binding?.ApplyInPlace?.Invoke() == true)
+                    return ModuleFailureProtection.MayStart(name);
+                if (wasActive || (!wasEnabled && enabled.Value))
+                {
+                    module.Shutdown();
+                    if (ModuleFailureProtection.MayStart(name)) module.Initialize(_version);
+                }
+                return (!enabled.Value || module.IsActive || (!wasActive && wasEnabled)) && ModuleFailureProtection.MayStart(name);
+            }
+            catch (Exception error)
+            {
+                Fail(module, error, "administrative change", _now);
+                return false;
+            }
+            finally
+            {
+                if (settings.ApplyMode == SwitchApplyMode.Reinitialize && enabled.Value && !module.IsActive)
+                    _presence?.MarkActivationFailed();
+            }
+        }
+        return false;
+    }
+
+    internal void Register(Func<IServerModule> create, string name, bool activate = true)
+    {
+        try
+        {
+            var module = create();
+            if (activate) _modules.Add(module);
+        }
         catch (Exception error)
         {
             ModuleFailureProtection.Record(name, error, "configuration construction");
@@ -37,6 +88,7 @@ internal sealed class ModuleHost : IDisposable
     }
     internal void Initialize(string version)
     {
+        _version = version;
         _failures.Clear();
         foreach (var module in _modules)
             try { if (ModuleFailureProtection.MayStart(module.Name)) module.Initialize(version); }
@@ -44,6 +96,7 @@ internal sealed class ModuleHost : IDisposable
     }
     internal void Tick(float now, bool? occupied = null, bool beginFrame = true)
     {
+        _now = now;
         if (beginFrame) _scheduler.BeginFrame(now);
         if (occupied == false) { _started.Clear(); _wasEmpty = true; }
         if (occupied == true && _wasEmpty) { _wasEmpty = false; _lastStartup = now; }

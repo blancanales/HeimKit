@@ -67,6 +67,38 @@ internal sealed class WorldObjectProvider : IDisposable
         if (_cycle.TryGetValue(zone, out var cached)) { records = cached; return true; }
         records = Array.Empty<ZDO>(); return false;
     }
+    // Borrow the native sector on the main thread, including when paused features no longer populate frame caches.
+    // O(1) lookup. Callers must bound iteration and never retain or modify this list.
+    private static class NativeSectors
+    {
+        internal static readonly AccessTools.FieldRef<ZDOMan, List<ZDO>[]> Read =
+            NativeAccess.Field<ZDOMan, List<ZDO>[]>("m_objectsBySector");
+        static NativeSectors() { }
+    }
+    internal static IReadOnlyList<ZDO>? BorrowSector(ZDOMan world, Vector2s sector) =>
+        NativeSectors.Read(world)[ZoneSystem.SectorToIndex(sector).Sector];
+
+    // Share one retrospective pass for two ordinary (non-portal) world prefabs.
+    internal static bool CollectPrefabPair(ZDOMan world, int primary, int secondary, List<ZDO> output,
+        ref int sector, ref int offset)
+    {
+        var sectors = NativeSectors.Read(world);
+        int visited = 0, examined = 0;
+        while (sector < sectors.Length && visited++ < 512 && examined < 256)
+        {
+            var records = sectors[sector];
+            while (records != null && offset < records.Count && examined < 256)
+            {
+                var record = records[offset++]; examined++;
+                int hash = record.GetPrefab();
+                if ((hash == primary || hash == secondary) && record.IsValid()) output.Add(record);
+            }
+            if (records != null && offset < records.Count) break;
+            sector++; offset = 0;
+        }
+        return sector >= sectors.Length;
+    }
+
     internal IReadOnlyList<Vector3> PlayerPositions { get { SamplePlayers(); return Scope.Positions; } }
     internal PlayerWorldScope Scope { get; }
     internal WorldObjectProvider(IPlayerPresence presence,
@@ -134,11 +166,11 @@ internal sealed class WorldObjectProvider : IDisposable
         if (Logger != null) DiagnosticLog.Write(Logger, "HeimKit", "Rebuilding world candidate coverage to return a full selection to indexed scanning.");
     }
     private static bool AcceptAll(ZDO record) => true;
-    internal void Tick(float now)
+    internal void Tick(float now, bool playerHosted = false)
     {
         TerrainContext.ThrowIfFailed();
         SceneInstances.ThrowIfFailed();
-        WorldServices.Refresh(); BeginCycle(WorldServices.World,
+        WorldServices.Refresh(playerHosted); BeginCycle(WorldServices.World,
             WorldServices.World && WorldServices.Activity ? ZNet.instance.GetWorldUID() : 0);
         MaintainSelections(now);
         if (_observe && Ready && _presence.HasJoinedPlayers == true && (_leases.Count > 0 || _scopes.Count > 0)) _sceneLease ??= SceneInstances.Acquire(Logger);
@@ -252,8 +284,16 @@ internal sealed class WorldObjectProvider : IDisposable
             (classic || Within(origin, cell, radius, false));
     }
     // Incremental optional discovery. Retain IDs only; borrowed native records are cleared before yielding.
-    internal IEnumerable<bool> CollectIds(CandidateSubscription selection, Vector3 centre, int radius, bool classic, List<ZDOID> result)
+    internal IEnumerable<bool> CollectIds(CandidateSubscription selection, Vector3 centre, int radius, bool classic, List<ZDOID> result,
+        bool includeDistant = false, int resultLimit = WorldCandidateIndex.Capacity)
     {
+        if (result.Count >= resultLimit) yield break;
+        if (selection.Broad)
+        {
+            foreach (bool unit in CollectBroadIds(selection, centre, new SimulationDistance(radius, 0, classic), result, resultLimit))
+                yield return unit;
+            yield break;
+        }
         var world = ZDOMan.instance; var origin = ZoneSystem.GetZone(centre);
         var records = new List<ZDO>();
         try
@@ -263,17 +303,43 @@ internal sealed class WorldObjectProvider : IDisposable
             {
                 if (!Ready || !_leases.Contains(selection) || _presence.HasJoinedPlayers != true || !ReferenceEquals(world, ZDOMan.instance)) yield break;
                 var cell = new Vector2s(x, z);
-                if (!classic && !Within(origin, cell, radius, false)) continue;
+                bool near = classic || Within(origin, cell, radius, false);
+                if (!near && (!includeDistant || !Within(origin, cell, radius, true))) continue;
                 records.Clear();
-                QueryCandidates(selection, cell, new SimulationDistance(0, 0, true), records, null);
+                selection.Query(cell, new SimulationDistance(0, 0, true), records);
                 foreach (var record in records)
-                    if (record.IsValid() && result.Count < WorldCandidateIndex.Capacity) result.Add(record.m_uid);
+                {
+                    if (!record.IsValid() || (!near && !record.Distant)) continue;
+                    result.Add(record.m_uid);
+                    if (result.Count >= resultLimit) yield break;
+                }
                 records.Clear();
                 yield return true;
             }
         }
         finally { records.Clear(); }
     }
+    private IEnumerable<bool> CollectBroadIds(CandidateSubscription selection, Vector3 centre, SimulationDistance distance, List<ZDOID> result, int resultLimit)
+    {
+        var world = ZDOMan.instance;
+        var cells = new List<(Vector2s Cell, bool Near)>();
+        VisitBroadCells(ZoneSystem.GetZone(centre), distance, null, cells);
+        var records = new List<ZDO>();
+        foreach (var entry in cells)
+        {
+            if (!Ready || !_leases.Contains(selection) || _presence.HasJoinedPlayers != true || !ReferenceEquals(world, ZDOMan.instance)) yield break;
+            NativeCell(entry.Cell, default, records, null);
+            foreach (var record in records)
+            {
+                if (!IncludeBroadRecord(record, entry.Near)) continue;
+                result.Add(record.m_uid);
+                if (result.Count >= resultLimit) yield break;
+            }
+            records.Clear();
+            yield return true;
+        }
+    }
+
     private void Compose(CandidateSubscription? selection, Vector2s sector, SimulationDistance distance, List<ZDO> near, List<ZDO>? distant)
     {
         using var timing = PerformanceStages.Measure("Core", "world_query");
@@ -314,16 +380,21 @@ internal sealed class WorldObjectProvider : IDisposable
         if (_views.TryGetValue(key, out var cached)) { near.AddRange(cached.Near); (distant ?? near).AddRange(cached.Far); return; }
         if (_views.Count >= CellBudget) ClearViews();
         var view = _viewBuffers.Count > 0 ? _viewBuffers.Pop() : new BroadView();
-        _visitedSectors.Clear();
-        AppendBroadCell(sector, view, true);
-        for (int radius = 1; radius <= distance.NearSimulationDistance; radius++)
-            AppendBroadRing(sector, radius, distance.NearSimulationDistance, distance.IsClassic, view, true);
-        int start = distance.IsClassic ? distance.NearSimulationDistance + 1 : 1;
-        for (int radius = start; radius <= distance.TotalSimulationDistance; radius++)
-            AppendBroadRing(sector, radius, distance.TotalSimulationDistance, distance.IsClassic, view, false);
+        VisitBroadCells(sector, distance, view, null);
         _views.Add(key, view); near.AddRange(view.Near); (distant ?? near).AddRange(view.Far);
     }
-    private void AppendBroadRing(Vector2s center, int radius, int limit, bool classic, BroadView view, bool near)
+
+    private void VisitBroadCells(Vector2s sector, SimulationDistance distance, BroadView? view, List<(Vector2s Cell, bool Near)>? plan)
+    {
+        _visitedSectors.Clear();
+        AppendBroadCell(sector, view, true, plan);
+        for (int radius = 1; radius <= distance.NearSimulationDistance; radius++)
+            AppendBroadRing(sector, radius, distance.NearSimulationDistance, distance.IsClassic, view, true, plan);
+        int start = distance.IsClassic ? distance.NearSimulationDistance + 1 : 1;
+        for (int radius = start; radius <= distance.TotalSimulationDistance; radius++)
+            AppendBroadRing(sector, radius, distance.TotalSimulationDistance, distance.IsClassic, view, false, plan);
+    }
+    private void AppendBroadRing(Vector2s center, int radius, int limit, bool classic, BroadView? view, bool near, List<(Vector2s Cell, bool Near)>? plan)
     {
         // Match native FindSectorObjects: alternating bottom/top cells first,
         // then alternating left/right cells, from the centre outward.
@@ -331,32 +402,35 @@ internal sealed class WorldObjectProvider : IDisposable
         {
             var bottom = new Vector2s(x, center.y - radius); var top = new Vector2s(x, center.y + radius);
             bool allowed = classic || Within(center, bottom, limit, !near);
-            if (allowed) AppendBroadCell(bottom, view, near);
+            if (allowed) AppendBroadCell(bottom, view, near, plan);
             // Native distant scanning uses the bottom-cell test for both sides.
-            if (near ? classic || Within(center, top, limit, false) : allowed) AppendBroadCell(top, view, near);
+            if (near ? classic || Within(center, top, limit, false) : allowed) AppendBroadCell(top, view, near, plan);
         }
         for (int z = center.y - radius + 1; z <= center.y + radius - 1; z++)
         {
             var left = new Vector2s(center.x - radius, z); var right = new Vector2s(center.x + radius, z);
             bool allowed = classic || Within(center, left, limit, !near);
-            if (allowed) AppendBroadCell(left, view, near);
-            if (near ? classic || Within(center, right, limit, false) : allowed) AppendBroadCell(right, view, near);
+            if (allowed) AppendBroadCell(left, view, near, plan);
+            if (near ? classic || Within(center, right, limit, false) : allowed) AppendBroadCell(right, view, near, plan);
         }
     }
-    private void AppendBroadCell(Vector2s cell, BroadView view, bool near)
+    private void AppendBroadCell(Vector2s cell, BroadView? view, bool near, List<(Vector2s Cell, bool Near)>? plan)
     {
         // Native discovery deduplicates native sector indices, including the
         // shared out-of-world sector. Use uint keys to avoid struct boxing.
         if (!_visitedSectors.Add(ZoneSystem.SectorToIndex(cell).Sector)) return;
+        if (plan != null) { plan.Add((cell, near)); return; }
         _cell.Clear(); NativeCell(cell, default, _cell, null);
-        var game = Game.instance;
-        var portalHashes = game == null ? null : game.PortalPrefabHash;
         foreach (var record in _cell)
-        {
-            if (!record.IsValid()) continue;
-            if (near) view.Near.Add(record);
-            else if (record.Distant && (portalHashes == null || !portalHashes.Contains(record.GetPrefab()))) view.Far.Add(record);
-        }
+            if (IncludeBroadRecord(record, near)) (near ? view!.Near : view!.Far).Add(record);
+    }
+
+    private static bool IncludeBroadRecord(ZDO record, bool near)
+    {
+        if (!record.IsValid()) return false;
+        if (near) return true;
+        var portals = Game.instance == null ? null : Game.instance.PortalPrefabHash;
+        return record.Distant && (portals == null || !portals.Contains(record.GetPrefab()));
     }
     internal void IncludeLiveInstances(List<ZDO> near, List<ZDO> distant, IReadOnlyList<Vector3> positions, HashSet<ZDOID>? alreadySeen = null)
     {

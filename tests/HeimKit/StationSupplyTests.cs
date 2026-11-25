@@ -175,7 +175,11 @@ internal static class StationSupplyTests
 
         var authority = (ObjectTransferAuthority)RuntimeHelpers.GetUninitializedObject(typeof(ObjectTransferAuthority));
         var reports = new List<string>(); bool retained = true;
-        using (var requests = new ContainerRequests(authority, presence, _ => retained, (_, _, _, status, _) => reports.Add(status)))
+        using (var requests = new ContainerRequests(authority, presence, _ => retained, (_, _, _, status, _, elapsed) =>
+        {
+            if (status == "unavailable") Check(elapsed == 5f, "Queue age lost the first open timestamp.");
+            reports.Add(status);
+        }))
         {
             Check(requests.Capture(peer, lease, packet, 0) && lease.ManualInteractionRequested && requests.Contains(chest.m_uid), "A fenced open was lost instead of signalling manual priority.");
             Check(requests.Capture(peer, lease, packet, 1) && reports.SequenceEqual(new[] { "queued" }), "Repeated clicks queued multiple replays.");
@@ -832,6 +836,7 @@ internal static class StationSupplyTests
         const BindingFlags fields = BindingFlags.NonPublic | BindingFlags.Instance;
         void Set(string name, object value) => typeof(StationSupplyController).GetField(name, fields)!.SetValue(controller, value);
         Set("_settings", settings); Set("_diagnostics", new StationSupplyDiagnostics(log, settings)); Set("_counts", new SupplyCounts()); Set("_active", active);
+        Set("_progress", new HeimKit.Core.Scheduling.AdaptiveOperation(log, settings.DebugLogging, "StationSupply", "transaction_progress"));
         var advance = typeof(StationSupplyController).GetMethod("AdvanceSet", fields)!;
         settings.MaxActiveTransactions.Value = 1;
         advance.Invoke(controller, new object[] { 0f, 0 });

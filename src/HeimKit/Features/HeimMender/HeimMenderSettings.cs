@@ -35,9 +35,9 @@ public sealed class HeimMenderSettings
     {
         ConfigEntry<T> Bind<T>(string key, T value, string description, AcceptableValueBase? range = null)
         { var entry = config.Bind("HeimMender", key, value, new ConfigDescription(description + " Reloads during play.", range)); Entries.Add(entry); return entry; }
-        Enabled = Bind("Enabled", true, "Enable HeimMender.");
+        Enabled = Bind("Enabled", true, "Enable HeimMender. HeimKit Settings applies changes live.");
         DebugMode = Bind("DebugMode", false, "Enable shared-policy feature diagnostics.");
-        AutomaticEnabled = Bind("AutomaticEnabled", true, "Enable gradual automatic repairs.");
+        AutomaticEnabled = Bind("AutomaticEnabled", true, "Enable gradual automatic repairs. HeimKit Settings applies changes live.");
         IntervalSeconds = Bind("IntervalSeconds", 300f, "Seconds between automatic repair cycles when no damaged piece is waiting.", new AcceptableValueRange<float>(10, 86400));
         CatchUpIntervalSeconds = Bind("CatchUpIntervalSeconds", 15f, "Seconds until the next automatic cycle while damaged pieces are still waiting; zero always uses IntervalSeconds.", new AcceptableValueRange<float>(0, 3600));
         RepairChancePercent = Bind("RepairChancePercent", 50f, "Independent chance per damaged candidate per cycle.", new AcceptableValueRange<float>(0, 100));

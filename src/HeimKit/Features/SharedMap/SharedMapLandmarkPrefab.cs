@@ -24,11 +24,27 @@ internal sealed class SharedMapLandmarkPrefab
     internal static readonly (string Prefix, string Label)[] Structures = {
         ("Mistlands_GuardTower", "Dvergr Guard Tower"), ("Mistlands_Lighthouse", "Dvergr Lighthouse"), ("Mistlands_Excavation", "Dvergr Excavation")
     };
+    internal const string FulingVillage = "Fuling Village";
+    private static readonly IReadOnlyDictionary<string, string> OtherStructures = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["GoblinCamp1"] = FulingVillage, ["GoblinCamp2"] = FulingVillage, ["GoblinCamp2_1"] = FulingVillage,
+        ["WoodVillage1"] = "Draugr Village",
+        ["StoneTowerRuins03"] = "Black Forest Tower Ruin", ["StoneTowerRuins07"] = "Black Forest Tower Ruin",
+        ["StoneTowerRuins08"] = "Black Forest Tower Ruin", ["StoneTowerRuins09"] = "Black Forest Tower Ruin",
+        ["StoneTowerRuins10"] = "Black Forest Tower Ruin",
+        ["SwampRuin1"] = "Swamp Ruin", ["SwampRuin2"] = "Swamp Ruin",
+        ["AbandonedLogCabin02"] = "Mountain Cabin", ["AbandonedLogCabin03"] = "Mountain Cabin",
+        ["AbandonedLogCabin04"] = "Mountain Cabin", ["CharredFortress"] = "Charred Fortress",
+        ["NorthVillage"] = "Deep North Village"
+    };
+    private static readonly HashSet<string> OtherStructureLabels = new(OtherStructures.Values, StringComparer.Ordinal);
+    internal static bool AdditionalStructureLabel(string label) => label != FulingVillage && OtherStructureLabels.Contains(label);
+
     internal static string? StructureLabel(string location)
     {
         foreach (var entry in Structures)
             if (location.StartsWith(entry.Prefix, StringComparison.Ordinal)) return entry.Label;
-        return null;
+        return OtherStructures.TryGetValue(location, out var label) ? label : null;
     }
     // The placed location root supplies the only point; no asset inspection is needed.
     internal static SharedMapLandmarkPrefab LocationRoot(string name, string label) =>

@@ -1,5 +1,7 @@
 # StationSupply specification
 
+In player-hosted worlds, transfers wait until the station and chest are both owned by the host process. Native host chest requests and lever use defer automatic feeding, using the same quiet checks as guest requests.
+
 Core cooperative admission pauses new discovery and transaction starts during native raids or detected combat. In-flight source draining, atomic commit/rollback, ordered client refresh, manual access and safe authority release retain their normal paths. Quiet resumption uses ordinary scheduling without replaying missed intervals.
 
 ## Behavior and server-only feasibility
@@ -30,6 +32,8 @@ Before commit, finish both source drains and then cancel the supply transaction 
 
 Core services safe deferred requests on a bounded cadence, waits for a current native owner, sends an ordered snapshot/barrier to a remote owner, rechecks ownership/record/connection/proximity, and routes the original request to that owner once. The normal container handler still checks access and busy state. A local owner also requires a live original view. Skip a deferred open if that same requester already owns an in-use container; stack/take-all operations still require their native handler. Do not change player ownership or inventory, bypass another consumer's fence, or invent a container owner. Retain requests for at most fifteen seconds, including the transaction wait; remove them before dispatch to prevent reentrant duplicates. Disposal discards deferred state and removes its schedules/barriers.
 
+StationSupply Debug samples authenticated chest open observations and local-host opens, including the target, requester, current owner and whether a supply transaction contains the target. Core supplies the elapsed time from first queue admission on its existing deferred-request status callback. Queue events and ordinary observations each admit up to twelve records per minute within the shared feature budget.
+
 Observe supported container interactions through the existing routed-message subscription as well, so a request arriving outside a lease also prevents a new acquisition. Defer that original container for ten seconds after observed manual requests, observed open state or deferred-request completion; retain at most 256 recent objects, with a conservative global grace on overflow/clock rollback. Keep nearest-source assignment and never fall back during this grace. The same rules apply to loading/emptying an enabled Obliterator. Track manual requests, yielded transactions, replays and expired/unsafe/unavailable requests in the existing activity counts independently of Debug admission. Verbose activity reports include manual_queued, manual_yielded, manual_replayed and manual_unavailable; blocked-check reasons retain manual grace and individual unsuccessful replay reasons. Manual signals do not authorize extra world discovery or inventory parsing. Preserve ordinary interaction/privacy checks. Manual-access state and deferred work follow the existing player-presence/controller lifecycle.
 
 ## Obliterator intake
@@ -42,7 +46,7 @@ Observe authenticated native lever request/animation/return messages through the
 
 ## Settings and bounds
 
-Enabled=true; DebugMode=false. ChestRangeMeters=2 (0.5..4); ChestHeightToleranceMeters=1.5 (0.25..3); ScanRangeMeters=64 (16..128); IntervalSeconds=2 (0.5..10); MaxStationsPerPass=4 (1..16); MaxItemsPerVisit=10 (1..64); MaxActiveTransactions=2 (1..4). Set both new bounds to 1 for the previous single-item, single-transaction behavior. Obliterators=false and ObliteratorCategories=All control optional disposal input. Individual switches enable smelters, charcoal kilns, blast furnaces, windmills, spinning wheels, eitr refineries, frigid kilns and shield generators; fermenter filling defaults off. Configuration is bound through the shared loader and requires restart. All numeric settings must be finite. Native capacity, conversions, fuel costs, roof/wind/smoke and output behavior remain unchanged.
+Enabled=true; DebugMode=false. ChestRangeMeters=2 (0.5..4); ChestHeightToleranceMeters=1.5 (0.25..3); ScanRangeMeters=64 (16..128); IntervalSeconds=2 (0.5..10); MaxStationsPerPass=4 (1..16); MaxItemsPerVisit=10 (1..64); MaxActiveTransactions=2 (1..4). Set both new bounds to 1 for the previous single-item, single-transaction behavior. Obliterators=false and ObliteratorCategories=All control optional disposal input. Individual switches enable smelters, charcoal kilns, blast furnaces, windmills, spinning wheels, eitr refineries, frigid kilns and shield generators; fermenter filling defaults off. Hand edits require a restart. HeimKit Settings applies MaxItemsPerVisit the next time a transfer sizes its batch. All numeric settings must be finite. Native capacity, conversions, fuel costs, roof/wind/smoke and output behavior remain unchanged.
 
 Bound work to a rotating player scope, at most 8192 discovered candidates and at most `MaxActiveTransactions` active transactions over disjoint station and chest records. Drain/instance waits expire after ten seconds. Idle passes do not deserialize chest inventories. Never scan the entire persistent world, create a second presence census or keep feature-local prefab metadata caches.
 
@@ -68,7 +72,7 @@ Diagnostic semantic identities use typed native IDs and wait/rejection fields; d
 
 ## Player-service integration
 
-Plugin injects its existing PlayerServices. The module owns one presence subscription and at most one controller per ready world, following the [required hookup](../architecture.md#required-feature-hookup). Tick requires enabled/compatible dedicated-server world services, reliable joined-player positions and no native sleep skip. Empty/unknown presence disposes all controller resources before acknowledging pause; occupied readiness recreates them. No AFK activity lease or independent offline responsibility exists. Ready is reported once independently of player presence. Construction binds settings only; runtime failure uses shared persistent module-failure protection.
+Plugin injects its existing PlayerServices. The module owns one presence subscription and at most one controller per ready world, following the [required hookup](../architecture.md#required-feature-hookup). Tick requires enabled/compatible host world services, reliable joined-player positions and no native sleep skip. Empty/unknown presence disposes all controller resources before acknowledging pause; occupied readiness recreates them. No AFK activity lease or independent offline responsibility exists. Ready is reported once independently of player presence. Construction binds settings only; a runtime failure disables the module for the session on a player host and uses persistent failure protection on a dedicated server.
 
 ## Logging
 
@@ -93,3 +97,7 @@ Fuel and material ports select independently from their true rotated anchors. Wr
 ## HeimKit Core integration
 
 StationSupply consumes Core IncomingPackets through ObjectTransferAuthority and PlayerRoutedMessages for shared peer/header inspection and retained-ID filtering. Source-drain state, ownership fences, acknowledgements and manual-access policy remain unchanged. NativeInventory owns bounded batch parsing and byte-preserving inventory serialization; PlayerWorldScope owns discovery and anchored actor/selection refreshes.
+
+## Adaptive host scheduling
+
+Core paces nearby cell discovery and round-robin candidate evaluation independently. A resumed candidate is resolved by original ID and checked against current player scope, chest selection and ward permissions. Active transaction progress is measured separately and bypasses admission. See [adaptive host throttling](adaptive-host-throttling.md).

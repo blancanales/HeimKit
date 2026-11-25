@@ -39,7 +39,25 @@ internal static class SharedMapLandmarkTests
             SharedMapLandmarkPrefab.StructureLabel("Mistlands_GuardTower3_ruined_new") == "Dvergr Guard Tower" &&
             SharedMapLandmarkPrefab.StructureLabel("Mistlands_Lighthouse1_new") == "Dvergr Lighthouse" &&
             SharedMapLandmarkPrefab.StructureLabel("Mistlands_Excavation2") == "Dvergr Excavation", "An eligible structure variant was missed.");
-        foreach (string name in new[] { "Mistlands_Harbour1", "Mistlands_DvergrTownEntrance1", "Runestone_Mistlands", "mistlands_GuardTower1_new" })
+        foreach (var (prefab, label) in new[]
+        {
+            ("GoblinCamp1", "Fuling Village"), ("GoblinCamp2", "Fuling Village"), ("GoblinCamp2_1", "Fuling Village"),
+            ("WoodVillage1", "Draugr Village"), ("StoneTowerRuins07", "Black Forest Tower Ruin"),
+            ("SwampRuin2", "Swamp Ruin"), ("AbandonedLogCabin03", "Mountain Cabin"),
+            ("CharredFortress", "Charred Fortress"), ("NorthVillage", "Deep North Village")
+        })
+            Check(SharedMapLandmarkPrefab.StructureLabel(prefab) == label, "Missing structure: " + prefab);
+        Check(settings.FulingVillageMarkerSync.Value && settings.OtherStructureMarkerSync.Value, "New structure switches default off.");
+        settings.FulingVillageMarkerSync.Value = false;
+        var filter = settings.StructurePublicationFilter();
+        Check(!filter("Fuling Village") && filter("Draugr Village") && filter("Dvergr Guard Tower"), "Fuling village publication is coupled.");
+        settings.FulingVillageMarkerSync.Value = true;
+        settings.OtherStructureMarkerSync.Value = false;
+        filter = settings.StructurePublicationFilter();
+        Check(filter("Fuling Village") && !filter("Charred Fortress") && !filter("Unknown structure"), "Additional structure publication is coupled or unbounded.");
+        settings.OtherStructureMarkerSync.Value = true;
+
+        foreach (string name in new[] { "GoblinCamp2_custom", "goblincamp2", "GoblinHut01", "Hildir_plainsfortress", "Mistlands_Harbour1", "Mistlands_DvergrTownEntrance1", "Runestone_Mistlands", "mistlands_GuardTower1_new" })
             Check(SharedMapLandmarkPrefab.StructureLabel(name) == null, "An unrelated or wrong-case location was admitted: " + name);
 
         var tower = new MapMarker("Dvergr Guard Tower", 100, 1, 100,
@@ -51,8 +69,13 @@ internal static class SharedMapLandmarkTests
         Check(store.Discover(tower, 100, 100, 50, map, false) && store.Discover(light, 100, 100, 50, map, false) &&
             store.Count == 2 && store.Read(true).Single().Identity == tower.Identity && !store.Retire(tower.Identity) && store.Save(),
             "Structure discovery, filtered publication or persistence failed.");
+        var village = new MapMarker("Fuling Village", 130, 1, 100,
+            SharedMapLandmarkStore.SourceIdentity("GoblinCamp2", 130, 1, 100, "root", false));
+        var upgrade = new SharedMapLandmarkStore(directory, 126, ".structures", 2, settings.StructurePublicationFilter());
+        Check(upgrade.Load() && upgrade.Discover(village, 130, 100, 50, map, false) && upgrade.Save(),
+            "Existing structure store did not accept a Fuling village.");
         var loaded = new SharedMapLandmarkStore(directory, 126, ".structures", 2);
-        Check(loaded.Load() && loaded.Count == 2 && loaded.Read(true).Any(p => p.Identity == light.Identity), "Disabled structure discovery was lost on reload.");
+        Check(loaded.Load() && loaded.Count == 3 && loaded.Read(true).Any(p => p.Identity == light.Identity) && loaded.Read(true).Any(p => p.Identity == village.Identity), "Disabled structure discovery was lost on reload.");
         foreach (bool spawners in new[] { false, true })
         {
             var legacy = new SharedMapLandmarkStore(directory, 126, spawners);

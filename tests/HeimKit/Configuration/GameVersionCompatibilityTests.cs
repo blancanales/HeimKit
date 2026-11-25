@@ -26,12 +26,12 @@ internal static class GameVersionCompatibilityTests
                 Check(config.Policy.AllowUnverifiedVersions == allow, "Boolean version policy default/preservation/validation failed.");
                 Check(config.Policy.Supports(GameVersionCompatibility.AuditedVersion), "Audited version was rejected.");
                 Check(!config.Policy.NeedsStartupBackup(GameVersionCompatibility.AuditedVersion), "Audited startup requested an upgrade backup.");
-                foreach (string version in new[] { "0.0.0", "1.0.20", "1.0.22", "2.10.300", "9.9.9", "1.0.22-public-test", "1.0.22.1", "future-release" })
+                foreach (string version in new[] { "0.0.0", "1.0.21", "1.0.29", "2.10.300", "9.9.9", GameVersionCompatibility.AuditedVersion + ".1-public-test", GameVersionCompatibility.AuditedVersion + ".1", "future-release" })
                 {
                     Check(config.Policy.Supports(version) == allow, "Unverified version policy failed: " + version);
                     Check(config.Policy.NeedsStartupBackup(version) == (allow && (GameVersionCompatibility.CompareToAudited(version) ?? 1) > 0), "Upgrade backup requirement failed: " + version);
                 }
-                foreach (string version in new[] { "", " ", " 1.0.21 ", "1.0.21\nextra", new string('x', 129) })
+                foreach (string version in new[] { "", " ", " " + GameVersionCompatibility.AuditedVersion + " ", GameVersionCompatibility.AuditedVersion + "\nextra", new string('x', 129) })
                     Check(!config.Policy.Supports(version) && !config.Policy.NeedsStartupBackup(version), "Malformed observed version was accepted.");
                 Check(warnings.Count == 1 || value == "false" && warnings.Count == 0,
                     "Policy must emit one shared unverified/invalid warning, independently of the number of modules.");

@@ -1,5 +1,9 @@
 # ForestRenewal
 
+In player-hosted worlds, renewal uses the same placement checks and saves its ledger under that world's HeimKit configuration directory.
+
+See [optional client setup](../client-setup.md) for the in-game status and admin controls.
+
 New background renewal work pauses during native raids and observed combat. Save acknowledgements and already-staged placement completion keep their existing safety path. See [performance observations](../server-setup.md#performance-observations).
 
 Renews supported trees from either a stump left behind or its confirmed-cleared location. It finds existing/new stumps, waits, and has a configurable chance to replace the stump with the corresponding vanilla sapling. Removing a tracked stump keeps the same renewal timer and chance decision. Native biome, sunlight, spacing and growth rules remain.
@@ -12,11 +16,13 @@ With the defaults, each stump gets one 50% chance after five minutes. Old stumps
 
 Just before placing a sapling, renewal checks for player-built pieces within StructureExclusionMeters of their collision footprint (walls, floors, beams and every other piece; height separation does not help) and for any existing sapling or crop within PlantExclusionMeters, whoever planted it. Building or planting during the delay therefore blocks renewal, leaving the plant and any stump intact. Dirt, paved and cultivated ground is also avoided; native paint can identify cleared roads, but unpainted paths cannot be classified. A persisted cooldown of native world hours covers renewals within five horizontal metres.
 
-Pending renewals and consumed decisions are stored beneath the active loader's config directory in `HeimKit/ForestRenewal/world-<world UID>.renewals`. Preserve this file and its backup with the world; see [world backups](../world-backups.md#forestrenewal-data). Corrupt or incomplete ledger recovery stops this feature. Native world time controls pending delays. The at-most-once persistence policy and crash behavior are described in [limitations](../limitations.md#new-world-features).
+Pending renewals and consumed decisions are stored relative to the folder containing the [world or server’s active heimkit.cfg](../client-setup.md#configuration-locations), in `HeimKit/ForestRenewal/world-<world UID>.renewals`. Preserve this file and its backup with the world; see [world backups](../world-backups.md#forestrenewal-data). Corrupt or incomplete ledger recovery stops this feature. Native world time controls pending delays. The at-most-once persistence policy and crash behavior are described in [limitations](../limitations.md#new-world-features).
 
 ## Configuration
 
-Use `[ForestRenewal]` in `heimkit.cfg`. This feature defaults enabled; set Enabled=false to disable it. Stop the server before editing and restart to apply settings. HeimKit preserves existing values and supplies missing defaults.
+Under **F7 → Server Settings**, changing `DelaySeconds` applies to newly scheduled saplings. Existing jobs keep their scheduled time.
+
+Use `[ForestRenewal]` in `heimkit.cfg`. This feature defaults enabled; set Enabled=false to disable it. For hand edits, leave the hosted world or stop the dedicated server, edit the [active configuration](../client-setup.md#configuration-locations), then start the world again. HeimKit preserves existing values and supplies missing defaults.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |

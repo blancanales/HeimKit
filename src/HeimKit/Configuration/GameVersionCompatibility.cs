@@ -9,7 +9,7 @@ namespace HeimKit.Configuration;
 
 public sealed class GameVersionCompatibility
 {
-    public const string AuditedVersion = "1.0.21";
+    public const string AuditedVersion = "1.0.30";
     private const string Section = "Compatibility";
     private const string Key = "AllowUnverifiedVersions";
     private static readonly ConditionalWeakTable<ConfigFile, GameVersionCompatibility> Policies = new();

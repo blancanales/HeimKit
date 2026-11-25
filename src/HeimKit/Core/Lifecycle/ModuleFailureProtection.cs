@@ -94,12 +94,21 @@ internal sealed class ModuleFailureProtection : IDisposable
             if (_persistenceError != null) return false;
             if (!_failures.TryGetValue(module, out var failure)) return true;
             if (_reported.Add(module))
+            {
+                if (_identity == null)
+                {
+                    DiagnosticLog.Write(_logger, module, CoreLogTopics.Lifecycle,
+                        "Disabled after an error in this session. Operation: " + failure.Operation + ".",
+                        level: LogLevel.Warning);
+                    return false;
+                }
                 DiagnosticLog.Write(_logger, module, CoreLogTopics.Lifecycle,
                     "DISABLED by persistent feature protection; overrides Enabled=true without changing configuration. First failure UTC: " +
-                    failure.Utc + "; operation: " + failure.Operation + "; HeimKit " + (_identity?.HeimKitVersion ?? "pending world selection") +
-                    "; Valheim " + (_identity?.ValheimVersion ?? "pending world selection") + ". Record: " + RecordPath +
+                    failure.Utc + "; operation: " + failure.Operation + "; HeimKit " + _identity.HeimKitVersion +
+                    "; Valheim " + _identity.ValheimVersion + ". Record: " + RecordPath +
                     ". Look for the latest HeimKit release documented as compatible with this Valheim version; see docs/server-setup.md#persistent-feature-disables.",
                     level: LogLevel.Warning);
+            }
             return false;
         }
     }

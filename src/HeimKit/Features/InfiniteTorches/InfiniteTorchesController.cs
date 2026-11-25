@@ -30,7 +30,7 @@ internal sealed class InfiniteTorchesController : IDisposable
     private readonly List<ZDOID> _scanIds = new();
     private IEnumerator<bool>? _scan;
     private ZDOMan? _scanWorld;
-    private readonly Dictionary<long, ZNetPeer> _owners = new();
+    private readonly Dictionary<long, (UnityEngine.Vector3 Point, int Radius, bool Classic)> _owners = new();
     private ZNetScene? _scene;
     private string _configuredNames = "";
     private int _configuredFireplaces;
@@ -81,24 +81,21 @@ internal sealed class InfiniteTorchesController : IDisposable
                 if (_diagnostics.SummaryReady(now)) _diagnostics.Report(now, () => "No supported light-source prefabs configured. Check Torches.Prefabs and startup warnings.");
                 return;
             }
-            _owners.Clear();
-            for (int rosterIndex1 = 0; rosterIndex1 < _presence.Peers.Count && _presence.Peers[rosterIndex1] is var peer; rosterIndex1++)
-                if (peer.IsReady() && !peer.m_characterID.IsNone()) _owners[peer.m_uid] = peer;
+            WorldActors.ReadSimulationOwners(_presence, _owners);
 
             _candidates.Clear();
             _seen.Clear();
             if (_owners.Count == 0)
             {
                 CancelScan();
-                if (_diagnostics.SummaryReady(now)) _diagnostics.Report(now, () => "No ready connected players with character IDs.");
+                if (_diagnostics.SummaryReady(now)) _diagnostics.Report(now, () => "No ready players with character IDs.");
                 return;
             }
             if (_scan != null && !ReferenceEquals(_scanWorld, manager)) CancelScan();
             if (_scan == null)
             {
                 _scanIds.Clear(); _scanWorld = manager;
-                var scopes = new List<(UnityEngine.Vector3 Point, int Radius, bool Classic)>();
-                foreach (var peer in _owners.Values) scopes.Add((peer.m_refPos, peer.m_simulationDistance.NearSimulationDistance, peer.m_simulationDistance.IsClassic));
+                var scopes = new List<(UnityEngine.Vector3 Point, int Radius, bool Classic)>(_owners.Values);
                 _scan = Scan(scopes).GetEnumerator();
             }
             operation = "scanning sectors";
@@ -110,8 +107,7 @@ internal sealed class InfiniteTorchesController : IDisposable
             {
                 var zdo = manager.GetZDO(id);
                 if (zdo == null || !zdo.IsValid() || zdo.m_uid != id || !_torches.ContainsKey(zdo.GetPrefab()) || !_seen.Add(id) ||
-                    !_owners.TryGetValue(zdo.GetOwner(), out var owner) || !WorldObjectProvider.Current.WithinNear(owner.m_refPos,
-                        owner.m_simulationDistance.NearSimulationDistance, owner.m_simulationDistance.IsClassic, zdo.GetPosition())) continue;
+                    !_owners.TryGetValue(zdo.GetOwner(), out var owner) || !WorldObjectProvider.Current.WithinNear(owner.Point, owner.Radius, owner.Classic, zdo.GetPosition())) continue;
                 _candidates.Add(zdo);
             }
             _scanIds.Clear();
@@ -139,6 +135,12 @@ internal sealed class InfiniteTorchesController : IDisposable
                 var prefab = _torches[zdo.GetPrefab()];
                 long owner = zdo.GetOwner();
                 if (!_owners.ContainsKey(owner)) { changedOwner++; continue; }
+                if (owner == ZDOMan.GetSessionID())
+                {
+                    // Self-targeted requests execute against the live native instance.
+                    var view = scene.FindInstance(zdo);
+                    if (view == null || !view.IsValid() || !view.IsOwner() || !ReferenceEquals(view.GetZDO(), zdo)) continue;
+                }
                 if (zdo.GetInt(ZDOVars.s_state, 1) != 1) { stateOff++; continue; }
                 float fuel = zdo.GetFloat(ZDOVars.s_fuel, prefab.m_startFuel);
                 if (float.IsNaN(fuel) || float.IsInfinity(fuel)) { invalidFuel++; continue; }
@@ -178,10 +180,10 @@ internal sealed class InfiniteTorchesController : IDisposable
             _diagnostics.Report(now, () => "Waiting for world services. Unavailable: " +
                 $"{(net == null ? "network " : "")}{(scene == null ? "scene " : "")}" +
                 $"{(manager == null ? "world-object data " : "")}{(routed == null ? "RPC routing" : "")}".TrimEnd() + ".");
-        else _diagnostics.Report(now, () => "Not running in a dedicated-server network session.");
+        else _diagnostics.Report(now, () => "Not running in a supported hosted world.");
     }
     private void ReportEmptyScope(float now, int sectorRecords) => _diagnostics.Report(now, () =>
-        $"No eligible client-owned light sources in players' nearby areas; ready_players_now={_owners.Count}; prefab_types_now={_torches.Count}; sector_records_pass={sectorRecords}.");
+        $"No eligible player-owned light sources in players' nearby areas; ready_players_now={_owners.Count}; prefab_types_now={_torches.Count}; sector_records_pass={sectorRecords}.");
     private void ReportScan(float now, int sent, int examined, int sufficientFuel, int stateOff, int invalidFuel, int changedOwner, int pendingSkipped, int trackingFull)
     {
             if (_diagnostics.SummaryReady(now)) _diagnostics.Report(now, () =>

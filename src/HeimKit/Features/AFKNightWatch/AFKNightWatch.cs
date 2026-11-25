@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -13,7 +14,7 @@ using System;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 namespace HeimKit.Features.AFKNightWatch;
-public sealed class AFKNightWatch : IServerModule
+public sealed class AFKNightWatch : IServerModule, IModuleSwitches, IModuleNumericSettings
 {
     private readonly AFKNightWatchSettings _settings;
     private readonly ManualLogSource _logger;
@@ -23,6 +24,32 @@ public sealed class AFKNightWatch : IServerModule
     private IDisposable? _presenceRegistration;
     private bool _occupied;
     private readonly PlayerProcessingNotices _processing;
+    private SwitchBinding[]? _switches;
+    IReadOnlyList<SwitchBinding> IModuleSwitches.Switches => _switches ??= new SwitchBinding[]
+    {
+        new("Enabled", _settings.Enabled),
+        new("Debug logging", _settings.DebugMode, applyLive: true),
+        new("Majority sleep", _settings.MajoritySleepEnabled),
+        new("Exclude AFK players", _settings.ExcludeAFKFromSleep),
+        new("Exceed the sleep threshold", _settings.RequireMoreThanPercent),
+    };
+    SwitchApplyMode IModuleSwitches.ApplyMode => SwitchApplyMode.Reinitialize;
+
+    IReadOnlyList<NumericSettingBinding> IModuleNumericSettings.NumericSettings => new[]
+    {
+        NumericSettingBinding.Create("Required sleeping (%)", _settings.RequiredSleepingPercent,
+            "Majority sleep threshold. At 100%, all counted participants must be in bed. Changing this while Majority Sleep is on resets any pending countdown.",
+            () => _settings.MajoritySleepEnabled.Value ? "Applies on the next sleep vote." : "Used when Majority Sleep is enabled.",
+            () =>
+            {
+                if (_settings.MajoritySleepEnabled.Value)
+                    AFKNightWatchSleepVoteCoordinator.ResetCountdown();
+            }),
+        NumericSettingBinding.Create("Sleep delay (seconds)", _settings.SleepDelaySeconds,
+            "Wait after enough players are in bed. Zero or everyone in bed skips this wait. Changing the delay resets any pending countdown.",
+            () => "Applies on the next sleep vote.", AFKNightWatchSleepVoteCoordinator.ResetCountdown)
+    };
+
     public string Name => "AFKNightWatch";
     public bool IsActive { get; private set; }
     public AFKNightWatch(ConfigFile config, ManualLogSource logger, PlayerServices players) { _logger = logger; _compatibility = GameVersionCompatibility.Resolve(config, logger); _settings = new(config, logger); _players = players; _processing = new(logger, Name, () => _settings.DebugLogging.Enabled); }

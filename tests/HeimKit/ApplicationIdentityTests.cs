@@ -7,6 +7,10 @@ internal static class ApplicationIdentityTests
     {
         var type = typeof(HeimKit.Plugin);
         var assembly = type.Assembly;
+        var processes = type.CustomAttributes.Where(attribute => attribute.AttributeType == typeof(BepInProcess))
+            .Select(attribute => (string?)attribute.ConstructorArguments[0].Value).OrderBy(name => name, StringComparer.Ordinal);
+        if (!processes.SequenceEqual(new[] { "valheim.exe", "valheim_server.exe" }))
+            throw new Exception("The same assembly must load for both Valheim process roles.");
         var registration = type.CustomAttributes.Single(attribute => attribute.AttributeType == typeof(BepInPlugin));
         if (assembly.GetName().Name != "HeimKit" || type.FullName != "HeimKit.Plugin" ||
             (string?)registration.ConstructorArguments[0].Value != "heimkit" ||

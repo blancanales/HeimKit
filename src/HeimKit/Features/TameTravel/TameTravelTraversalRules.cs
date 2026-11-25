@@ -10,6 +10,12 @@ using UnityEngine;
 namespace HeimKit.Features.TameTravel;
 internal static class TameTravelTraversalRules
 {
+    internal static bool DungeonAllows(int animal, int location, bool entering) =>
+        !entering || animal != "Lox".GetStableHashCode() || location != "Mistlands_DvergrBossEntrance1".GetStableHashCode();
+
+    internal static bool NeedsFullDoorClearance(Vector3 size, float playerRadius, float playerHeight) =>
+        size.x > 2 * playerRadius || size.y > playerHeight;
+
     public static string CancellationMessage(string reason) => reason switch
     {
         "destination_distance_exceeded" or "traveller_left_destination" => "Portal attempt ended: stay within 48 metres of the destination exit.",

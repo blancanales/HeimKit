@@ -30,24 +30,41 @@ internal sealed class TameTravelRules
             _animals.Add(name.GetStableHashCode(), p);
         }
     }
-    public bool Actor(ZNetPeer peer, out ZDO actor) => ActorRejection(peer, out actor) == null;
+    public bool Actor(TameTravelActor actor, out ZDO record) => ActorRejection(actor, out record) == null;
+
+    public string? ActorRejection(TameTravelActor actor, out ZDO record, bool allowInterior = false)
+    {
+        if (actor.Remote is ZNetPeer remote) return RemoteActorRejection(remote, out record, allowInterior);
+        record = actor.ResolveLocal()!;
+        if (record == null) return "character_not_ready";
+        if (!NativeCharacterHealth.IsAlive(record) || actor.Local!.IsDead()) return "character_not_alive";
+        if (!PlayerWorldScope.Finite(actor.Local.transform.position)) return "character_position_invalid";
+        if (!allowInterior && Character.InInterior(actor.Local.transform.position)) return "character_interior";
+        string name = actor.Name;
+        if (name.Length == 0 || record.GetString(ZDOVars.s_playerName) != name) return "character_name_mismatch";
+        foreach (var peer in _presence.Peers)
+            if (peer.IsReady() && peer.m_playerName == name) return "player_name_ambiguous";
+        return null;
+    }
     internal bool ConnectedName(string name) => ConnectedName(_presence, name);
     internal static bool ConnectedName(IPlayerPresence presence, string name)
     {
         // A transport peer remains protected while loading, dead or respawning.
         // Unavailable presence is not evidence that an owner logged out.
         if (!presence.ConnectedCount.HasValue) return true;
+        if (LocalName() == name) return true;
         foreach (var peer in presence.Peers)
             if (string.Equals(peer.m_playerName, name, StringComparison.Ordinal)) return true;
         return false;
     }
-    internal bool ConnectedPeer(ZNetPeer peer)
+    internal bool ConnectedActor(TameTravelActor actor)
     {
+        if (actor.IsLocal) return LocalName() != null;
         if (!_presence.ConnectedCount.HasValue) return true;
-        foreach (var current in _presence.Peers) if (ReferenceEquals(current, peer)) return true;
+        foreach (var current in _presence.Peers) if (ReferenceEquals(current, actor.Remote)) return true;
         return false;
     }
-    public string? ActorRejection(ZNetPeer peer, out ZDO actor)
+    private string? RemoteActorRejection(ZNetPeer peer, out ZDO actor, bool allowInterior)
     {
         actor = null!;
         bool present = false; int names = 0;
@@ -64,15 +81,18 @@ internal sealed class TameTravelRules
         if (z.GetOwner() != peer.m_uid) return "character_owner_changed";
         if (!NativeCharacterHealth.IsAlive(z)) return "character_not_alive";
         if (!PlayerWorldScope.Finite(z.GetPosition())) return "character_position_invalid";
-        if (Character.InInterior(z.GetPosition())) return "character_interior";
+        if (!allowInterior && Character.InInterior(z.GetPosition())) return "character_interior";
         if (string.IsNullOrEmpty(peer.m_playerName)) return "player_name_unavailable";
-        if (names != 1) return "player_name_ambiguous";
+        if (names != 1 || LocalName() == peer.m_playerName) return "player_name_ambiguous";
         // Native saved following resolves this character name, not the chat-supplied UserInfo.
         if (z.GetString(ZDOVars.s_playerName) != peer.m_playerName) return "character_name_mismatch";
         actor = z; return null;
     }
+    private static string? LocalName() =>
+        WorldSession.IsPlayerHosted(WorldSession.Identify(ZNet.instance)) ? Game.instance?.GetPlayerProfile()?.GetName() : null;
+
     public bool Animal(ZDO? z) => AnimalRejection(z) == null;
-    public string? AnimalRejection(ZDO? z)
+    public string? AnimalRejection(ZDO? z, bool allowInterior = false)
     {
         if (z == null) return "animal_missing";
         if (!z.IsValid()) return "animal_invalid";
@@ -82,7 +102,7 @@ internal sealed class TameTravelRules
         if (z.GetBool(ZDOVars.s_dead)) return "animal_dead";
         if (z.GetLong(ZDOVars.s_user) != 0) return "animal_ridden";
         if (!PlayerWorldScope.Finite(z.GetPosition())) return "animal_position_invalid";
-        if (Character.InInterior(z.GetPosition())) return "animal_interior";
+        if (!allowInterior && Character.InInterior(z.GetPosition())) return "animal_interior";
         if (!NativeCharacterHealth.IsAlive(z)) return "animal_health_invalid";
         return Scale(z, out _) ? null : "animal_scale_unsupported";
     }
@@ -96,7 +116,8 @@ internal sealed class TameTravelRules
         return PlayerWorldScope.Finite(scale) && scale.x >= 0.25f && scale.x <= 4 && Math.Abs(scale.x - scale.y) < 0.001f && Math.Abs(scale.x - scale.z) < 0.001f;
     }
     // Borrowed until the next Nearby call; consume immediately, do not retain.
-    public static CandidateView? Nearby(Vector3 point) => WorldObjectProvider.Current.For("TameTravel").Nearby(point);
+    public static CandidateView? Nearby(Vector3 point, Func<ZDO, Vector3, bool>? include = null) =>
+        WorldObjectProvider.Current.For("TameTravel").Nearby(point, include);
     public static TeleportWorld? Portal(ZDO? z)
     {
         return PortalRejection(z) == null ? PrefabRegistry.Component<TeleportWorld>(PrefabRegistry.Current.Prefab(z!.GetPrefab())) : null;

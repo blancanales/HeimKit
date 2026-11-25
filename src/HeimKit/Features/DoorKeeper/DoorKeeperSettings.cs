@@ -22,7 +22,7 @@ public sealed class DoorKeeperSettings
     public ConfigEntry<float> IntervalSeconds { get; }
     public DoorKeeperSettings(ConfigFile config, ManualLogSource logger)
     {
-        Enabled = config.Bind("DoorKeeper", "Enabled", true, "Enable DoorKeeper. Restart after edits.");
+        Enabled = config.Bind("DoorKeeper", "Enabled", true, "Enable DoorKeeper. File edits require a restart. HeimKit Settings applies changes live.");
         DebugMode = config.Bind("DoorKeeper", "DebugMode", false, "Enable feature diagnostics through the shared debug policy.");
         CloseDelaySeconds = config.Bind("DoorKeeper", "CloseDelaySeconds", 5f, new ConfigDescription("Continuous observed open time before closing. Restart after edits.", new AcceptableValueRange<float>(1f, 300f)));
         ClearanceMeters = config.Bind("DoorKeeper", "ClearanceMeters", 3f, new ConfigDescription("Minimum occupancy sphere radius; native door geometry plus player allowance can enlarge it. Restart after edits.", new AcceptableValueRange<float>(2f, 10f)));

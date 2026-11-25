@@ -1,5 +1,7 @@
 # DoorKeeper
 
+See [optional client setup](../client-setup.md) for the in-game status and admin controls.
+
 Closes supported player-built doors and gates once they have been open for the configured delay (five seconds by default) and the doorway is clear. It never automatically opens doors. Keyed, world/dungeon, one-way, inverted and unsupported controls are excluded.
 
 ![DoorKeeper: observe an open player-built door, wait for a clear doorway and close after the configured delay](../images/door-keeper-workflow.jpg)
@@ -8,9 +10,13 @@ Supported types are wood door, wood gate, wood fence gate, darkwood gate, iron g
 
 One due, clear door is prepared per pass; unready terrain or surrounding objects postpone closing. Server ownership lasts only for the close attempt. Manual operation keeps native interaction and ward/access checks. A restart begins a fresh delay for doors left open.
 
+DoorKeeper is available when you start a private world or use Valheim's Start Server option. The host can adjust it in F7. It closes host-owned doors after checking clearance for the host and guests.
+
 ## Configuration
 
-Use `[DoorKeeper]` in `heimkit.cfg`. This feature defaults enabled; set Enabled=false to disable it. Stop the server before editing and restart to apply settings. HeimKit preserves existing values and supplies missing defaults.
+**F7 → Server Settings** applies the close delay on the next door check, including for doors already open.
+
+Use `[DoorKeeper]` in `heimkit.cfg`. This feature defaults enabled; set Enabled=false to disable it. For hand edits, leave the hosted world or stop the dedicated server, edit the [active configuration](../client-setup.md#configuration-locations), then start the world again. HeimKit preserves existing values and supplies missing defaults.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |

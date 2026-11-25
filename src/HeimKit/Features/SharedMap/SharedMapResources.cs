@@ -18,6 +18,9 @@ internal sealed class SharedMapResources : IDisposable
 {
     private const int CandidatesPerPlayer = 256;
     private readonly ZDOMan _world;
+    private readonly SharedMapFlametalPillars _pillars;
+    internal long PillarRevision => _pillars.Revision;
+    private long _markerPillarRevision = -1;
     private readonly SharedMapSilverDiscovery _silverDiscovery;
     private readonly List<ZDO> _miningNear = new();
     private readonly SharedMapResourceStore _store;
@@ -46,10 +49,11 @@ internal sealed class SharedMapResources : IDisposable
     {
         _world = world; _store = store; _refresh = refresh; _map = map; _settings = settings;
         _diagnostics = diagnostics; _failed = failed;
+        _pillars = new SharedMapFlametalPillars(world, store, diagnostics);
         _silverDiscovery = new SharedMapSilverDiscovery(world, presence, messages, MiningImpact, failed);
     }
 
-    private int _catalogCursor;
+    private int _catalogCursor, _retroOffset;
     private readonly List<string> _unsupported = new();
     public void Install()
     {
@@ -74,11 +78,14 @@ internal sealed class SharedMapResources : IDisposable
         ("rock3_silver", ResourceKind.Silver, "SilverOre", "rock3_silver_frac"),
         ("rock3_silver_frac", ResourceKind.Silver, "SilverOre", null),
         ("MineRock_Obsidian", ResourceKind.Obsidian, "Obsidian", null),
+        ("LeviathanLava", ResourceKind.FlametalPillar, "FlametalOreNew", null),
         ("MineRock_Meteorite", ResourceKind.Flametal, "FlametalOreNew", null),
         ("giant_ribs", ResourceKind.BlackMarble, "BlackMarble", "giant_ribs_frac"),
         ("giant_ribs_frac", ResourceKind.BlackMarble, "BlackMarble", null),
         ("giant_skull", ResourceKind.BlackMarble, "BlackMarble", "giant_skull_frac"),
         ("giant_skull_frac", ResourceKind.BlackMarble, "BlackMarble", null),
+        ("giant_brain", ResourceKind.SoftTissue, "Softtissue", "giant_brain_frac"),
+        ("giant_brain_frac", ResourceKind.SoftTissue, "Softtissue", null),
         ("YggdrasilRoot", ResourceKind.AncientRoot, "Sap", null)
     };
 
@@ -109,6 +116,12 @@ internal sealed class SharedMapResources : IDisposable
     }
     private void Observe(ZDO zdo, SharedMapResourcePrefab prefab, Vector3 position, bool discoverSilver = false, MiningProgress? handoff = null)
     {
+        if (prefab.Kind == ResourceKind.FlametalPillar)
+        {
+            if (zdo.GetBool(ZDOVars.s_dead)) PillarLeaving(zdo);
+            else if (_pillars.Observe(zdo, position)) _added++;
+            return;
+        }
         int before = _store.Deposits.Count;
         var old = _store.Find(prefab.Kind, position.x, position.y, position.z, out _);
         bool wasDepleted = old?.Depleted == true;
@@ -116,9 +129,18 @@ internal sealed class SharedMapResources : IDisposable
         MiningProgress? progress = SharedMapResourceHealth.TracksProgress(prefab.Kind) ? handoff ?? Progress(zdo, prefab) : null;
         bool? depleted = progress.HasValue ? progress.Value.RemainingSections == 0 : Depleted(zdo, prefab);
         var accepted = _store.Observe(prefab.Kind, position.x, position.y, position.z, depleted, true, progress, discoverSilver, prefab.SapPercentage(zdo));
+        if (accepted != null && !accepted.Skull.HasValue && prefab.SkullBounds(zdo) is SkullBounds skull)
+            _store.RecordSkull(accepted, skull);
         _added += _store.Deposits.Count - before;
         if (accepted != null && wasHidden && accepted.SilverDiscovered) _added++;
         if (accepted != null && !wasDepleted && accepted.Depleted) _retired++;
+    }
+
+    internal bool KnownPillar(ZDOID id) => _pillars.Known(id);
+    internal void PillarLeaving(ZDO record)
+    {
+        if (record.GetPrefab() == SharedMapFlametalPillars.Prefab && record.GetBool(ZDOVars.s_dead) &&
+            _pillars.Retire(record.m_uid, "native_dive")) _retired++;
     }
 
     internal bool Observes(int prefab) => prefab == SharedMapSilverDiscovery.TerrainPrefab ||
@@ -132,6 +154,9 @@ internal sealed class SharedMapResources : IDisposable
         else if (Eligible(zdo, out var prefab, out _) && prefab.Kind == ResourceKind.Silver)
             _silverDiscovery.AcceptedSilver(zdo, before);
     }
+
+    internal void NativeMiningAction(ZDOID target, string method, object[] parameters) =>
+        _silverDiscovery.ObserveLocal(target, method, parameters);
 
     private void MiningImpact(Vector3 point, ZDOID directTarget)
     {
@@ -195,24 +220,45 @@ internal sealed class SharedMapResources : IDisposable
         _playerCursors[player] = (cursor + count) % _candidates.Count;
     }
 
-    public void Tick(float now)
+    public void Tick(float now, AdaptiveOperation? batch = null)
     {
         if (_disposed) return;
         if (_catalogCursor < Catalog.Length)
         {
+            batch?.Count();
             var entry = Catalog[_catalogCursor++];
             var prefab = SharedMapResourcePrefab.Read(entry.Name, entry.Kind, entry.Drop, entry.Successor);
             if (prefab == null) _unsupported.Add(entry.Name);
-            else { _prefabs.Add(prefab.Hash, prefab); _scanPrefabs.Add(prefab); }
-            if (_catalogCursor == Catalog.Length) { _diagnostics.UnsupportedResources(_unsupported); _unsupported.Clear(); }
+            else
+            {
+                _prefabs.Add(prefab.Hash, prefab);
+                if (prefab.Kind != ResourceKind.FlametalPillar) _scanPrefabs.Add(prefab);
+            }
+            if (_catalogCursor == Catalog.Length)
+            {
+                if (_scanPrefabs.Count == 0 && _prefabs.TryGetValue(SharedMapFlametalPillars.Prefab, out var pillar))
+                    _scanPrefabs.Add(pillar);
+                _diagnostics.UnsupportedResources(_unsupported); _unsupported.Clear();
+            }
             return;
         }
-        if (_settings.ResourceDiscoverPreviouslyExplored.Value && _scanPrefabs.Count > 0 && _nextRetro.Ready(now))
+        if (_pillars.Restoring && _prefabs.TryGetValue(SharedMapFlametalPillars.Prefab, out _))
+        {
+            if ((batch == null || batch.Take()) && _pillars.RestoreSlice()) _retired++;
+            return;
+        }
+        if (_silverDiscovery.HasLocalImpacts) batch?.Count();
+        _silverDiscovery.ProcessLocal(now);
+        if (_settings.ResourceDiscoverPreviouslyExplored.Value && _scanPrefabs.Count > 0 && (_retrospective.Count > 0 || _nextRetro.Ready(now)))
         {
             if (_retrospective.Count == 0)
             {
                 _scan.Clear();
-                bool complete = _world.GetAllZDOsWithPrefabIterative(_scanPrefabs[_prefabCursor].Name, _scan, ref _sectorCursor);
+                batch?.Count();
+                var scanning = _scanPrefabs[_prefabCursor];
+                bool complete = _prefabCursor == 0 && _prefabs.TryGetValue(SharedMapFlametalPillars.Prefab, out _)
+                    ? WorldObjectProvider.CollectPrefabPair(_world, scanning.Hash, SharedMapFlametalPillars.Prefab, _scan, ref _sectorCursor, ref _retroOffset)
+                    : _world.GetAllZDOsWithPrefabIterative(scanning.Name, _scan, ref _sectorCursor);
                 if (_scan.Count > SharedMapResourceStore.MaximumDeposits)
                     throw new InvalidOperationException("Resource scan candidate limit exceeded; discoveries were retained.");
                 foreach (var zdo in _scan) _retrospective.Enqueue(zdo.m_uid);
@@ -223,7 +269,7 @@ internal sealed class SharedMapResources : IDisposable
                     { _prefabCursor = 0; _nextRetro.Postpone(now, _settings.TableIntervalSeconds.Value); }
                 }
             }
-            for (int i = 0; i < 256 && _retrospective.Count > 0; i++)
+            for (int i = 0; i < 256 && _retrospective.Count > 0 && (batch?.Take() ?? true); i++)
             {
                 if (i > 0 && !ModuleScheduler.Current.HasBudget) break;
                 var zdo = _world.GetZDO(_retrospective.Dequeue());
@@ -234,11 +280,14 @@ internal sealed class SharedMapResources : IDisposable
 
     public IReadOnlyList<MapMarker> Read()
     {
-        if (_markerRevision != _store.Revision || _distance != _settings.ResourceClusterDistanceMeters.Value ||
+        if (_markerRevision != _store.Revision || _markerPillarRevision != _pillars.Revision || _distance != _settings.ResourceClusterDistanceMeters.Value ||
             _removeDepleted != _settings.ResourceRemoveDepleted.Value)
         {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
             _markers = _refresh.Apply(SharedMapResourceClusters.Group(_store.Deposits,
-                _settings.ResourceClusterDistanceMeters.Value, _settings.ResourceRemoveDepleted.Value));
+                _settings.ResourceClusterDistanceMeters.Value, _settings.ResourceRemoveDepleted.Value, _diagnostics.TissueAssociation, _pillars.Verified));
+            _markerPillarRevision = _pillars.Revision;
+            _diagnostics.ResourceRefresh(started, _store.Deposits.Count, _markers.Count);
             _markerRevision = _store.Revision; _distance = _settings.ResourceClusterDistanceMeters.Value;
             _removeDepleted = _settings.ResourceRemoveDepleted.Value;
         }
@@ -256,7 +305,18 @@ internal sealed class SharedMapResources : IDisposable
         if (_disposed) return;
         try
         {
-            if (!Eligible(zdo, out var prefab, out var p) || prefab.ReplacesWithMining) return;
+            if (zdo.GetPrefab() == SharedMapFlametalPillars.Prefab)
+            {
+                if (_pillars.Retire(zdo.m_uid, "native_destruction")) _retired++;
+                return;
+            }
+            if (!Eligible(zdo, out var prefab, out var p)) return;
+            if (prefab.ReplacesWithMining)
+            {
+                if (prefab.Kind == ResourceKind.SoftTissue)
+                    _diagnostics.TissueFracture(zdo.m_uid, _store.Find(prefab.Kind, p.x, p.y, p.z, out _)?.Identity);
+                return;
+            }
             if (_store.Retire(prefab.Kind, p.x, p.y, p.z)) _retired++;
         }
         catch (Exception error) { _failed(error); }

@@ -9,6 +9,14 @@ namespace HeimKit.Core.Prefabs;
 // Poll and metadata inspection stay on the main thread; never synchronously wait.
 internal sealed class PrefabAssetRequest : IDisposable
 {
+    private static class NameAccessor
+    {
+        internal static readonly HeimKit.Core.Native.NativeAccess.AssetNameGetter Read =
+            HeimKit.Core.Native.NativeAccess.AssetNameGetterForGame();
+    }
+
+    internal static string AssetName(ref SoftReference<GameObject> reference) => NameAccessor.Read(ref reference);
+
     private SoftReference<GameObject> _reference;
     private bool _held;
     private float _started;

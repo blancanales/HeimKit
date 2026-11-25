@@ -72,6 +72,9 @@ internal sealed class ForestRenewalController : IDisposable
         _world.m_onZDODestroyed += Destroyed;
         try { _scope.Index(z => _mappings.ContainsKey(z.GetPrefab())); } catch { Dispose(); throw; }
     }
+    internal bool HoldNewWork { get; set; }
+    internal bool Idle => _placement == null && !_dirty && _write == null;
+
     private void Destroyed(ZDO source)
     {
         if (_disposed || !_module.IsActive || !ReferenceEquals(_world, ZDOMan.instance)) return;
@@ -89,7 +92,7 @@ internal sealed class ForestRenewalController : IDisposable
                 if (existing.State == 3) { existing.State = 0; MarkDirty(); }
                 return;
             }
-            if (Time.unscaledTime - _scopeAt > 2 * _settings.IntervalSeconds.Value) return;
+            if (HoldNewWork || Time.unscaledTime - _scopeAt > 2 * _settings.IntervalSeconds.Value) return;
             var position = source.GetPosition();
             if (!PlayerWorldScope.Finite(position) || Character.InInterior(position) || !NearObservedPlayer(position)) return;
             if (_destroyedIntake < 32 && Register(source, sapling, false)) { _destroyedIntake++; MarkDirty(); }
@@ -105,6 +108,7 @@ internal sealed class ForestRenewalController : IDisposable
     public void Tick(float now)
     {
         PollSave(now);
+        if (HoldNewWork && _placement == null) { Flush(); return; }
         if (!ModuleScheduler.Current.Due(this, "processing", now, _settings.IntervalSeconds.Value, cooperative: _placement == null)) return;
         using var timing = _diagnostics.OptionalEnabled ? _diagnostics.Measure(now, () => _scope.Records.Count) : null;
         _destroyedIntake = 0;
@@ -117,6 +121,7 @@ internal sealed class ForestRenewalController : IDisposable
         int observed = 0;
         foreach (var stump in _scope.Records)
         {
+            if (HoldNewWork) break;
             if (!stump.IsValid() || !_mappings.TryGetValue(stump.GetPrefab(), out int sapling) || _store.Records.ContainsKey(stump.m_uid) ||
                 !_scope.InRange(stump.GetPosition(), _settings.ScanRangeMeters.Value) || Character.InInterior(stump.GetPosition())) continue;
             if (!Register(stump, sapling, true)) break;
@@ -126,7 +131,7 @@ internal sealed class ForestRenewalController : IDisposable
         bool hadPlacement = _placement != null;
         if (hadPlacement) placed += CompletePlacement(now, ticks);
         var due = _due; due.Clear();
-        if (!hadPlacement) foreach (var pending in _pending) if (pending.DueTicks <= ticks) due.Add(pending);
+        if (!HoldNewWork && !hadPlacement) foreach (var pending in _pending) if (pending.DueTicks <= ticks) due.Add(pending);
         int start = due.Count == 0 ? 0 : _pendingCursor % due.Count;
         for (int visited = 0; !hadPlacement && visited < due.Count; visited++)
         {

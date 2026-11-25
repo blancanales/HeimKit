@@ -17,6 +17,12 @@ public static class DiagnosticsSettings
     private static ConfigEntry<bool>? _debugMode;
     internal static bool VerboseEnabled => _debugMode?.Value == true && Verbosity == DebugVerbosity.Verbose;
     public static DebugVerbosity Verbosity => _verbosity?.Value ?? DebugVerbosity.Normal;
+    internal static bool ObjectInteractionsEnabled(ConfigFile config, BepInEx.Logging.ManualLogSource logger)
+    {
+        var entry = config.Bind("Diagnostics", "TraceObjectInteractions", false,
+            "Trace sampled routed container requests and replies independently of feature debugging. Restart after edits.");
+        return DebugLoggingResolver.Resolve(config, "Diagnostics", entry, logger).ConfiguredEnabled;
+    }
     public static ConfigEntry<bool> Bind(ConfigFile config)
     {
         _verbosity = config.Bind("Diagnostics", "DebugVerbosity", DebugVerbosity.Normal,

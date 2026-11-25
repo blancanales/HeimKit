@@ -23,7 +23,7 @@ internal static class ZdoReplication
     {
         // Prevent beforefieldinit from moving initialization outside the caller's try.
         static Accessors() { }
-        internal static readonly Type PeerType = typeof(ZDOMan).GetNestedType("ZDOPeer", BindingFlags.NonPublic)!;
+        internal static readonly Type PeerType = NativeAccess.Target(typeof(ZDOMan), "GetPeer", typeof(long)).ReturnType;
         internal static readonly Func<ZDOMan, long, object> GetPeer = NativeAccess.PeerGetter();
         internal static readonly Func<object, ZNetPeer> Peer = NativeAccess.ObjectField<ZNetPeer>(PeerType, "m_peer");
         internal static readonly Func<object, HashSet<ZDOID>> Invalid = NativeAccess.ObjectField<HashSet<ZDOID>>(PeerType, "m_invalidSector");
@@ -35,7 +35,7 @@ internal static class ZdoReplication
     internal static void CheckCompatibility()
     {
         try { _ = Accessors.GetPeer; _ = Accessors.Info; }
-        catch (Exception error) { throw new InvalidOperationException("Native animal replication peer bookkeeping is unavailable.", error); }
+        catch (Exception error) { throw new InvalidOperationException("Native object replication peer bookkeeping is unavailable.", error); }
     }
 
     internal static void ResetClientCache(ZDOID id, Action<ZPackage> removeRemoteCache, Action sendSnapshot)

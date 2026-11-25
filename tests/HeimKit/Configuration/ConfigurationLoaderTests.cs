@@ -20,10 +20,11 @@ internal static class ConfigurationLoaderTests
     {
         int diagnostics = contents.IndexOf("[Diagnostics]", StringComparison.Ordinal);
         int activity = contents.IndexOf("[PlayerActivity]", StringComparison.Ordinal);
+        int client = contents.IndexOf("[Client]", StringComparison.Ordinal);
         foreach (string feature in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch", "SharedMap", "DoorKeeper", "ForestRenewal", "SeaSalvage", "TameTravel", "HeimMender", "StationSupply" })
         {
             int at = contents.IndexOf("[" + feature + "]", StringComparison.Ordinal);
-            if (diagnostics < 0 || activity < 0 || at < 0 || diagnostics > at || activity > at)
+            if (diagnostics < 0 || activity < 0 || client < 0 || at < 0 || diagnostics > at || activity > at || client > at)
                 throw new Exception("Shared settings must precede every feature section.");
         }
     }
@@ -59,6 +60,7 @@ internal static class ConfigurationLoaderTests
             }
             var complete = ConfigurationLoader.Load(Path.Combine(scratch, "complete"), setupLogger, config =>
             {
+                _ = new ControlSettings(config);
                 _ = new InfiniteTorches(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new WeatherGuard(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new AFKNightWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
@@ -85,6 +87,7 @@ internal static class ConfigurationLoaderTests
             File.WriteAllText(complete.ConfigFilePath, manuallyConfigured);
             ConfigurationLoader.Load(Path.GetDirectoryName(complete.ConfigFilePath)!, setupLogger, config =>
             {
+                _ = new ControlSettings(config);
                 _ = new InfiniteTorches(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new WeatherGuard(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new AFKNightWatch(config, setupLogger, PlayerServicesTests.For(config, setupLogger));

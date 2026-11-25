@@ -13,9 +13,23 @@ internal static class StartupBackupTests
     {
         string root = Path.Combine(Path.GetTempPath(), "heimkit-backup-" + Guid.NewGuid());
         Directory.CreateDirectory(root);
-        try { Archives(root); VersionRecords(root); Gate(root); NativeLayout(); }
+        try { SelectedSaveMetadata(root); Archives(root); VersionRecords(root); Gate(root); NativeLayout(); }
         finally { Directory.Delete(root, true); }
         System.Console.WriteLine("PASS: complete chunked/legacy/state archives, verified bytes, one checkpoint across fifty restarts, persistent version/world identity, interrupted-write recovery, missing/corrupt archive replacement, startup gating and native adapter signatures.");
+    }
+
+    private static void SelectedSaveMetadata(string root)
+    {
+        File.WriteAllText(Path.Combine(root, "_main.0.fwl2"), "other generation");
+        string selected = Path.Combine(root, "_main.3188.fwl2");
+        try
+        {
+            UpgradeStartup.RequireChunkedMetadata(root, 3188);
+            throw new Exception("An unrelated metadata generation satisfied the checkpoint.");
+        }
+        catch (FileNotFoundException error) when (error.FileName == selected) { }
+        File.WriteAllText(selected, "selected generation");
+        UpgradeStartup.RequireChunkedMetadata(root, 3188);
     }
 
     private static void Archives(string root)
@@ -167,7 +181,7 @@ internal static class StartupBackupTests
         Check(load?.ReturnType == typeof(void), "Native pre-load backup hook is unavailable.");
         Check(typeof(global::World).GetMethod("GetSavePaths", Type.EmptyTypes)?.ReturnType == typeof(List<string>) &&
             typeof(global::World).GetMethod("IsChunkedSave", Type.EmptyTypes)?.ReturnType == typeof(bool) &&
-            typeof(global::World).GetMethod("GetSaveFWLPath", Type.EmptyTypes)?.ReturnType == typeof(string) &&
+            typeof(global::World).GetMethod("SaveNumber", Type.EmptyTypes)?.ReturnType == typeof(uint) &&
             typeof(global::World).GetMethod("GetSaveDirectory", new[] { typeof(FileHelpers.FileSource) })?.ReturnType == typeof(string), "Native world save layout access is incompatible.");
     }
 }

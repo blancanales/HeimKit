@@ -1,5 +1,6 @@
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
+using HeimKit.Core.Players;
 using HeimKit.Core.Prefabs;
 using HeimKit.Core.Native;
 using HeimKit.Core.Ownership;
@@ -49,6 +50,8 @@ internal sealed class TameTravelPlacement : IDisposable
     private int _probeDirection;
     private float _probeExtent, _probeHorizontalExtent, _probeHalfLine, _probeRadius;
     public TameTravelPlacement(TameTravelRules rules) { _rules = rules; _groundProbe = ProbeGround; _clearProbe = ProbeClear; }
+    private readonly TameTravelDungeonFit _body = new();
+
     public void WarmAccess(Vector3 traveller, Vector3 exit) => _access.Warm(traveller, exit);
     public bool Find(AnimalTransfer t, Dictionary<ZDOID, AnimalTransfer>.ValueCollection transfers, IReadOnlyList<ZNetPeer> peers, float now, bool evidence, out Vector3 position)
     {
@@ -66,13 +69,31 @@ internal sealed class TameTravelPlacement : IDisposable
             }
         }
     }
+    private static bool OutdoorContextRecord(ZDO record, Vector3 exit)
+    {
+        var registry = PrefabRegistry.Current;
+        int hash = record.GetPrefab();
+        var prefab = registry.Prefab(hash);
+        if (prefab == null) return true;
+        var delta = record.GetPosition() - exit;
+        if (TerrainContext.WithinTerrainArea(delta, TameTravelPlacementRules.ContextRadius) &&
+            TerrainContext.IsTerrainPrefab(prefab)) return true;
+        if (PrefabRegistry.Component<Character>(prefab) == null && !registry.Solid(hash)) return false;
+        // Bound by horizontal reach only: overhead pieces and tall geometry still count.
+        var bounds = registry.Bounds(prefab);
+        if (bounds == null || !TameTravelRules.Scale(record, out var scale)) return true;
+        float reach = TameTravelPlacementRules.ContextRadius +
+            (bounds.Value.center.magnitude + bounds.Value.extents.magnitude) * scale.x;
+        return delta.x * delta.x + delta.z * delta.z <= reach * reach;
+    }
+
     private bool FindPosition(AnimalTransfer t, Dictionary<ZDOID, AnimalTransfer>.ValueCollection transfers, IReadOnlyList<ZNetPeer> peers, float now, bool evidence, out Vector3 position)
     {
         position = default; WaitReason = "no_safe_ground_position"; BlockingObject = null;
         long contextStarted = evidence ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         try
         {
-            var records = TameTravelRules.Nearby(t.Journey.Exit);
+            var records = TameTravelRules.Nearby(t.Journey.Exit) ?? TameTravelRules.Nearby(t.Journey.Exit, OutdoorContextRecord);
             if (records == null) { WaitReason = "destination_scope_over_capacity"; return false; }
             if (!_context.Prepare(t.Journey.Exit, records, now, TameTravelPlacementRules.ContextRadius))
             { WaitReason = _context.WaitReason ?? "destination_terrain_unready"; BlockingObject = _context.WaitObject; return false; }
@@ -114,6 +135,7 @@ internal sealed class TameTravelPlacement : IDisposable
         _probeRotation = t.Journey.DestinationRotation; _probeDirection = capsule.direction;
         for (int index = 0; index < peers.Count && peers[index] is var peer; index++)
             if (peer.IsReady() && ZDOMan.instance.GetZDO(peer.m_characterID) is ZDO player) _players.Add(player.GetPosition());
+        if (WorldActors.TryLocal(out _) && Player.m_localPlayer != null) _players.Add(Player.m_localPlayer.transform.position);
         foreach (var other in transfers) if (!ReferenceEquals(other, t) && other.Moved) _placements.Add(other.Placement);
         // Delegates and obstacle snapshots are shared by every candidate in this search.
         Func<Vector3, Vector3?> groundProbe = _groundProbe;
@@ -122,9 +144,11 @@ internal sealed class TameTravelPlacement : IDisposable
         var traveller = ZDOMan.instance.GetZDO(t.Journey.Character);
         if (traveller == null) { WaitReason = "traveller_unavailable"; return false; }
         // The sweep is centred where the traveller stands; once they move a metre it starts again beside them.
-        var standing = traveller.GetPosition();
+        var standing = t.Journey.Traveller.Position(traveller);
         if (!t.PlacementAnchor.HasValue || (standing - t.PlacementAnchor.Value).sqrMagnitude > 1) { t.PlacementAnchor = standing; t.PlacementCursor = 0; }
         var anchor = t.PlacementAnchor.Value;
+        bool loxAtHousedPortal = t.Record.GetPrefab() == "Lox".GetStableHashCode() &&
+            Roof(t.Journey.DestinationPosition + Vector3.up * .1f, placedPiecesOnly: true) != null;
         int count = TameTravelPlacementRules.CandidateCount(horizontalExtent);
         int start = t.PlacementCursor % count;
         for (int visited = 0; visited < TameTravelPlacementRules.MaximumCandidatesPerPass; visited++)
@@ -150,7 +174,16 @@ internal sealed class TameTravelPlacement : IDisposable
                 // Navigation targets stand on the support surface, not at an offset animal root.
                 var support = point.Value - Vector3.up * (extent - centerOffset.y + .15f);
                 t.PlacementAccessWarmupUntil ??= now + 4;
-                if (_access.Reachable(traveller.GetPosition(), support, out string accessReason))
+                string accessReason = "";
+                if (loxAtHousedPortal)
+                {
+                    if (!_body.Body(t.Record, out var body)) { WaitReason = "lox_body_unavailable"; return false; }
+                    var centre = point.Value + t.Journey.DestinationRotation * body.center;
+                    // Ground support already passed. Check the visible body against the house and other obstacles.
+                    if (Physics.CheckBox(centre, body.extents, t.Journey.DestinationRotation, _obstacles, QueryTriggerInteraction.Ignore))
+                    { if (evidence) Reject(t, "lox_body_obstructed"); continue; }
+                }
+                if (loxAtHousedPortal || _access.Reachable(traveller.GetPosition(), support, out accessReason))
                 { position = point.Value; t.PlacementTraveller = traveller.GetPosition(); WaitReason = "placed"; return true; }
                 if (evidence) Reject(t, accessReason);
                 WaitReason = accessReason;
@@ -251,17 +284,17 @@ internal sealed class TameTravelPlacement : IDisposable
         }
     // A player-built piece anywhere above is a roof. World-generated ruins (no creator) are not, so their
     // arches and walls never hide the open ground beneath them; low ones still fail the body overlap.
-    private string? Roof(Vector3 point)
+    private string? Roof(Vector3 point, bool placedPiecesOnly = false)
     {
         int count = Physics.RaycastNonAlloc(point, Vector3.up, _roofs, 64, _building, QueryTriggerInteraction.Ignore);
-        string? roof = count == _roofs.Length ? "roof_probe_capacity" : null;
+        string? roof = !placedPiecesOnly && count == _roofs.Length ? "roof_probe_capacity" : null;
         for (int i = 0; i < count; i++)
         {
             var collider = _roofs[i].collider; _roofs[i] = default;
             if (roof != null || collider == null) continue;
             var view = collider.GetComponentInParent<ZNetView>();
             var z = view != null ? view.GetZDO() : null;
-            if (z == null || z.GetLong(ZDOVars.s_creator) != 0) roof = view != null ? Utils.GetPrefabName(view.gameObject) : collider.name;
+            if ((z == null && !placedPiecesOnly) || (z != null && z.GetLong(ZDOVars.s_creator) != 0)) roof = view != null ? Utils.GetPrefabName(view.gameObject) : collider.name;
         }
         return roof;
     }
@@ -307,19 +340,22 @@ internal sealed class TameTravelPlacement : IDisposable
 
     public static void Move(AnimalTransfer t, Vector3 position)
     {
-        var z = t.Record;
+        Move(t.Record, position, t.Journey.DestinationRotation, t.Journey.Character, t.Waiting);
+    }
+    internal static void Move(ZDO z, Vector3 position, Quaternion rotation, ZDOID characterId, bool waiting)
+    {
         Vector3 delta = position - z.GetPosition();
         z.Set(ZDOVars.s_spawnPoint, z.GetVec3(ZDOVars.s_spawnPoint, z.GetPosition()) + delta);
         if (z.GetBool(ZDOVars.s_patrol)) z.Set(ZDOVars.s_patrolPoint, z.GetVec3(ZDOVars.s_patrolPoint, z.GetPosition()) + delta);
-        z.SetPosition(position); z.SetRotation(t.Journey.DestinationRotation);
+        z.SetPosition(position); z.SetRotation(rotation);
         z.Set(ZDOVars.s_velHash, Vector3.zero); z.Set(ZDOVars.s_bodyVelHash, Vector3.zero); z.Set(ZDOVars.s_bodyAVelHash, Vector3.zero);
         z.Set("heimkit_tametravel_stamp", ZNet.instance.GetTime().Ticks);
         var view = ZNetScene.instance.FindInstance(z);
         if (view != null)
         {
-            view.transform.SetPositionAndRotation(position, t.Journey.DestinationRotation);
+            view.transform.SetPositionAndRotation(position, rotation);
             var body = view.GetComponent<Rigidbody>();
-            if (body != null) { body.position = position; body.rotation = t.Journey.DestinationRotation; if (!body.isKinematic) { body.linearVelocity = Vector3.zero; body.angularVelocity = Vector3.zero; } }
+            if (body != null) { body.position = position; body.rotation = rotation; if (!body.isKinematic) { body.linearVelocity = Vector3.zero; body.angularVelocity = Vector3.zero; } }
             var character = view.GetComponent<Character>();
             if (character != null)
             {
@@ -333,8 +369,8 @@ internal sealed class TameTravelPlacement : IDisposable
             {
                 Path(ai)?.Clear();
                 SpawnPoint(ai) = z.GetVec3(ZDOVars.s_spawnPoint, position);
-                var player = ZNetScene.instance.FindInstance(t.Journey.Character);
-                if (t.Waiting) { ai.SetFollowTarget(null); ai.SetPatrolPoint(); }
+                var player = ZNetScene.instance.FindInstance(characterId);
+                if (waiting) { ai.SetFollowTarget(null); ai.SetPatrolPoint(); }
                 else if (player != null) ai.SetFollowTarget(player);
             }
         }

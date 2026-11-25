@@ -1,17 +1,19 @@
 # Server setup
 
-Install HeimKit on a Windows Valheim dedicated server. Players use unmodified clients. Each feature's guide is linked under [Default configuration](#default-configuration). Read [safety and limitations](limitations.md) before enabling the mod.
+Install HeimKit on a Windows Valheim dedicated server. Vanilla clients can join. Players can install HeimKit in the [Windows game](client-setup.md) for feature status and administration. The game installation can also run HeimKit features when you host a private or Start Server world. Each feature's guide is linked under [Default configuration](#default-configuration). Read [safety and limitations](limitations.md) before enabling the mod.
 
 ## Supported environment
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit release baseline | 0.2.3 |
-| Valheim Dedicated Server | 1.0.21; built-in audited baseline. Other versions follow [server upgrade policy](#server-upgrades). |
+| HeimKit release baseline | 0.2.4 |
+| Supported Valheim version (built-in audited baseline for HeimKit 0.2.4) | 1.0.30 |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
 | Plugin target framework | netstandard2.1 |
 | Build output | `src/HeimKit/bin/<Debug or Release>/netstandard2.1/HeimKit.dll` |
+
+The release accepts its audited Valheim version with either value of `[Compatibility] AllowUnverifiedVersions` and skips the automatic upgrade backup on that version. See [server upgrades](#server-upgrades).
 
 This section is the sole documentation source for HeimKit's supported game, loader, runtime and framework versions. Other documents link here rather than repeating version values. Update this baseline when code guards and dependencies change.
 
@@ -66,7 +68,7 @@ Startup generates `BepInEx/config/heimkit.cfg` in the active loader location and
 AllowUnverifiedVersions = true
 ```
 
-A permitted server version newer than the tested baseline requires a completed, verified world checkpoint before HeimKit features activate. HeimKit records that checkpoint for the world/save location and HeimKit/Valheim version pair. Later restarts verify and reuse it, rather than make another backup. The record does not mark the game version as tested. See [automatic upgrade backups](world-backups.md#automatic-upgrade-backups) for timing, location, contents and recovery. A backup failure leaves HeimKit inactive for that startup while vanilla server loading continues.
+A permitted server version newer than the build’s audited baseline requires a completed, verified world checkpoint before HeimKit features activate. HeimKit records that checkpoint for the world/save location and HeimKit/Valheim version pair. Later restarts verify and reuse it, rather than make another backup. The record does not mark the game version as tested. See [automatic upgrade backups](world-backups.md#automatic-upgrade-backups) for timing, location, contents and recovery. A backup failure leaves HeimKit inactive for that startup while vanilla server loading continues.
 
 Set the switch to `false` to require the audited baseline instead. Both modes reject missing, blank, control-character-containing or overlong observed version identifiers; permissive mode does not require the current numeric version format. An invalid or unreadable switch uses strict mode. Restart applies policy edits. Existing installations receive [automatic configuration migration](#configuration-migration). See [compatibility limitations](limitations.md#server-observations-and-logs).
 
@@ -88,21 +90,27 @@ For a deliberate retry, stop the server, preserve the failure record, and remove
 
 An unreadable or malformed failure record keeps HeimKit inactive. A failure to save a newly disabled feature emits an immediate error and stops shared processing after feature cleanup. See [log interpretation](limitations.md#server-observations-and-logs).
 
+### Dedicated server access to HeimKit Settings
+
+In the dedicated server’s `BepInEx/config/heimkit.cfg`, `[Client] Enabled` defaults to `true` and allows the server to send feature status to HeimKit clients. When disabled, the server can identify itself to a compatible client and report that client support is off. `AllowAdminChanges` defaults to `true` and allows changes from players on Valheim's server admin list. The server checks the authenticated connection against the native list for each request. Setting `AllowAdminChanges` to `false` makes the menu read-only. Restart the server after editing either setting.
+
 ### Default configuration
 
-Shared sections `[Compatibility]`, `[Diagnostics]` and `[PlayerActivity]` precede feature sections. Startup preserves existing values and adds missing defaults. Use [config/heimkit.cfg](../config/heimkit.cfg) as a reference; keep the active file when upgrading.
+Shared sections `[Compatibility]`, `[Diagnostics]`, `[Client]` and `[PlayerActivity]` precede feature sections. Startup preserves existing values and adds missing defaults. Use [config/heimkit.cfg](../config/heimkit.cfg) as a reference; keep the active file when upgrading.
 
-StationSupply feeds supported stations from one nearby public chest per intake. Use the [illustrated placement guide](features/station-supply.md#placement-examples) to position chests. In `[StationSupply]`, use `Enabled` to control the feature or the individual station switches to choose which stations receive supplies. Fermenter and Obliterator feeding are opt-in. Restart after changing [StationSupply settings](features/station-supply.md#configuration).
+StationSupply feeds supported stations from one nearby public chest per intake. Use the [illustrated placement guide](features/station-supply.md#placement-examples) to position chests. In `[StationSupply]`, use `Enabled` to control the feature or the individual station switches to choose which stations receive supplies. Fermenter and Obliterator feeding are opt-in. Restart after hand-editing [StationSupply settings](features/station-supply.md#configuration).
 
-Feature controls are documented in their guides: [InfiniteTorches](features/infinite-torches.md#configuration), [WeatherGuard](features/weather-guard.md#scope-and-configuration), [AFKNightWatch](features/afk-night-watch.md#configuration), [AFKRaidWatch](features/afk-raid-watch.md#configuration), [SharedMap](features/shared-map.md#configuration), [TameTravel](features/tame-travel.md#configuration), [DoorKeeper](features/door-keeper.md#configuration), [ForestRenewal](features/forest-renewal.md#configuration), [SeaSalvage](features/sea-salvage.md#configuration) and [HeimMender](features/heim-mender.md) (live reload). Stop the server before configuration edits and restart afterward.
+Feature controls are documented in their guides: [InfiniteTorches](features/infinite-torches.md#configuration), [WeatherGuard](features/weather-guard.md#scope-and-configuration), [AFKNightWatch](features/afk-night-watch.md#configuration), [AFKRaidWatch](features/afk-raid-watch.md#configuration), [SharedMap](features/shared-map.md#configuration), [TameTravel](features/tame-travel.md#configuration), [DoorKeeper](features/door-keeper.md#configuration), [ForestRenewal](features/forest-renewal.md#configuration), [SeaSalvage](features/sea-salvage.md#configuration) and [HeimMender](features/heim-mender.md) (live reload). Hand edits require a restart except for HeimMender's live reload. [HeimKit Settings](heimkit-settings.md#change-a-setting) applies changes to exposed settings live.
 
 ### Diagnostics
+
+For intermittent chest access, set `TraceObjectInteractions = true` under `[Diagnostics]` in the host's `heimkit.cfg`, restart the host, and include `Debug` in the BepInEx disk log levels. This switch works independently of global and feature DebugMode. Search the host log for `interaction` to see the object ID, requesting player, destination peer, ownership snapshots, request count and elapsed milliseconds for open, stack and take-all actions. To check whether StationSupply also handled that chest, enable `[StationSupply] DebugMode = true` and match its entries by chest ID and time. See [observation limits](limitations.md#server-observations-and-logs).
 
 `[Diagnostics] DebugVerbosity = Normal` selects the shared evidence tier. `Verbose` adds detailed topic records when the feature's effective DebugMode permits them; it does not enable debugging or bypass hidden suppression, budgets or the empty-server pause. Restart applies changes. HeimKit prefixes every line with local `HH:mm:ss`; startup also includes the full date. Shared player topics are `presence` and `afk`; see the [logging contract](architecture.md#logging).
 
 `[Diagnostics] DebugMode` enables optional diagnostics across features. Each feature and PlayerActivity has its own DebugMode, default false, for selective output. A false feature switch inherits global Debug. Startup adds missing keys even for disabled features.
 
-BepInEx independently filters severity. Add `Debug` to the existing `LogLevels` list under `[Logging.Disk]` for `LogOutput.log` and/or `[Logging.Console]` for console output. Preserve other levels, for example `Fatal, Error, Warning, Message, Info, Debug`, then restart. HeimKit warns when a known listener excludes requested Debug output and identifies the affected setting.
+For host diagnostics, BepInEx independently filters severity. The [F7 client interaction trace](heimkit-settings.md#record-client-interactions) works with the default disk log levels. Add `Debug` to the existing `LogLevels` list under `[Logging.Disk]` for `LogOutput.log` and/or `[Logging.Console]` for console output. Preserve other levels, for example `Fatal, Error, Warning, Message, Info, Debug`, then restart. HeimKit warns when a known listener excludes requested Debug output and identifies the affected setting.
 
 Info covers enablement, readiness, meaningful results and explicit reports. Warnings/errors remain visible with debugging off. A startup Debug declaration identifies the effective global/feature/suppression source. Automatic Debug output pauses after five minutes without connected players and resumes on connection, subject to stream budgets. See [logging](architecture.md#logging) for formats and [log interpretation](limitations.md#server-observations-and-logs).
 
@@ -113,7 +121,7 @@ On first occupied activation, required weather protection runs before optional s
 
 WeatherGuard Debug timing summaries distinguish completed protection cycles, readiness and scene-list reuse, and independently pending optional probes. `last_cycle_wall_s` includes suspended time. Normal protection, observation and context-readiness stages measure active elapsed work.
 
-HeimKit pauses optional background work entirely while a native random-event raid exists or it observes nearby native combat traffic, including boss targets. This uses native server raid state and the existing server message observer, independently of AFKRaidWatch, and requires no client mod, AFK tracking or extra configuration. WeatherGuard protection and required terrain/support upkeep continue, together with inventory transaction completion, manual access and cleanup. SharedMap sampling, discovery and automatic tables, new supplies, gradual repairs, renewal discovery, salvage recovery and new torch-refill scans wait. Quiet resumption uses ordinary scheduling without replaying missed intervals. Performance windows show combat pressure/boss update counts, raid-paused update counts and combat deferrals, plus native scene pass, binding-maintenance and retention maximums. The current server-wide combat policy is unchanged by these performance repairs. Counts describe observed update windows, not fights won or confirmed damage. See [combat and measurement limits](limitations.md#server-observations-and-logs).
+HeimKit pauses optional background work entirely while a native random-event raid exists or it observes nearby native combat traffic, including boss targets. This uses native server raid state and the existing server message observer, independently of AFKRaidWatch, and requires no client mod, AFK tracking or extra configuration. WeatherGuard and SharedMap also pause on host-observed monster targeting and wait for 30 quiet seconds. WeatherGuard yields to native wear. Inventory transaction completion, manual access and cleanup continue. SharedMap sampling, discovery and automatic tables, new supplies, gradual repairs, renewal discovery, salvage recovery and new torch-refill scans wait. Quiet resumption uses ordinary scheduling without replaying missed intervals. Performance windows show combat pressure/boss update counts, raid-paused update counts and combat deferrals, plus native scene pass, binding-maintenance and retention maximums. Counts describe observed update windows, not fights won or confirmed damage. See [combat and measurement limits](limitations.md#server-observations-and-logs).
 
 Set `[Diagnostics] DebugMode = true` and `DebugVerbosity = Verbose` for server-wide performance reports. HeimKit can emit one Debug `Performance window` per minute when a player was joined, an update gap reached 250 ms or the native save guard fell back. Shared Debug admission applies, including combat and idle suppression. The window reports sampled plugin-update interval maximum and intervals of at least 250 ms, measured HeimKit update average/maximum, the slowest measured module, and maxima for joined players, WeatherGuard outdoor regions, shared frame-discovery records and scene instances. Native context calls/maximum, log formatting/listener maximum and the slowest listener's feature/topic, ownership attempts, source requests, paired refresh groups, retry/admission deferrals, managed memory and GC collection deltas separate common work sources. Candidate coverage reports the maximum membership of the largest targeted selection, maximum seeded cells, membership-pressure cell trims and selection fallback transitions. The largest update interval retains the preceding measured HeimKit duration and its heaviest module as associated spike evidence. Process CPU-time delta and working set appear when the runtime supports them. These counters need no additional world discovery. See [measurement limits](limitations.md#server-observations-and-logs).
 
@@ -179,4 +187,4 @@ Each enabled module reports Ready once when native services are available. After
 
 Read the active `BepInEx/LogOutput.log` and confirm the launch route, configuration path, build identity and compatibility notices. Remove credentials/join codes before sharing logs. Feature guides explain processing fields; [limitations](limitations.md) explains visibility and timing.
 
-To disable HeimMender, save Enabled=false in its live section. For other modules, stop the server, set Enabled=false and restart. To remove HeimKit, stop the server and remove its DLL from the active profile/server installation. Torch fuel remains ordinary native data. WeatherGuard releases ownership and adds no persisted protection/creator flag. Preserve SharedMap and ForestRenewal stores for later use or matching recovery.
+To disable a feature during play, use **F7 → Server Settings** with admin access. For a file edit, save `Enabled = false` in HeimMender’s live section, or stop the server before editing another feature’s section and restart afterward. To remove HeimKit, stop the server and remove its DLL from the active profile/server installation. Torch fuel remains ordinary native data. WeatherGuard releases ownership and adds no persisted protection/creator flag. Preserve SharedMap and ForestRenewal stores for later use or matching recovery.

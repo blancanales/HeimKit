@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -14,7 +15,7 @@ using HeimKit.Core.Players;
 
 namespace HeimKit.Features.SharedMap;
 
-public sealed class SharedMap : IServerModule
+public sealed class SharedMap : IServerModule, IModuleSwitches, IModuleNumericSettings, IModuleIdle
 {
     private readonly SharedMapSettings _settings;
     private readonly ManualLogSource _logger;
@@ -24,6 +25,7 @@ public sealed class SharedMap : IServerModule
     private IDisposable? _presenceRegistration;
     private bool _occupied;
     private SharedMapController? _controller;
+    private Exception? _callbackFailure;
     private SharedMapExploration? _exploration;
     private ZDOMan? _world;
     private long _worldUid;
@@ -40,7 +42,54 @@ public sealed class SharedMap : IServerModule
     private SharedMapPinState? _pinState;
     private SharedMapLandmarkStore? _runestones, _spawners, _structures;
 
+    internal bool PlayerHosted => _players.PlayerHosted;
+    internal bool CallbackFailed => _callbackFailure != null;
     internal string StoreDirectory => _storeDirectory;
+    private float _recoverUntil;
+    private bool _holdNewWork;
+    bool IModuleIdle.Idle => _controller?.Idle != false && _bootstrap == null &&
+        _store?.Clean != false && _portalRefresh?.Clean != false && _resources?.Clean != false &&
+        _resourceRefresh?.Clean != false && _dungeons?.Clean != false && _pinState?.Clean != false &&
+        _runestones?.Clean != false && _spawners?.Clean != false && _structures?.Clean != false;
+
+    void IModuleIdle.HoldNewWork(bool hold)
+    {
+        _holdNewWork = hold;
+        if (hold) _holdSaveWarned = false;
+        if (_controller != null) _controller.HoldNewWork = hold;
+    }
+
+    private SwitchBinding[]? _switches;
+    IReadOnlyList<SwitchBinding> IModuleSwitches.Switches => _switches ??= new SwitchBinding[]
+    {
+        new("Enabled", _settings.Enabled),
+        new("Debug logging", _settings.DebugMode, applyLive: true),
+        new("Portal markers", _settings.PortalMarkerSync, applyInPlace: () => ApplySwitchInPlace(refreshPortals: _settings.PortalMarkerSync.Value)),
+        new("Resource markers", _settings.ResourceMarkerSync),
+        new("Discover resources in explored areas", _settings.ResourceDiscoverPreviouslyExplored, applyInPlace: ApplySwitchInPlace),
+        new("Remove depleted resources", _settings.ResourceRemoveDepleted, applyInPlace: ApplySwitchInPlace),
+        new("Dungeon markers", _settings.DungeonMarkerSync),
+        new("Discover dungeons in explored areas", _settings.DungeonDiscoverPreviouslyExplored, applyInPlace: ApplySwitchInPlace),
+        new("Allow player map writes", _settings.AllowPlayerMapWrites, applyInPlace: ApplySwitchInPlace),
+        new("Share pin checkmarks", _settings.SharePinCheckmarks, applyInPlace: ApplySwitchInPlace),
+        new("Dungeon loot progress", _settings.DungeonLootProgress),
+        new("Runestone markers", _settings.RunestoneMarkerSync),
+        new("Spawner markers", _settings.SpawnerMarkerSync),
+        new("Dvergr guard tower markers", _settings.DvergrGuardTowerMarkerSync),
+        new("Dvergr lighthouse markers", _settings.DvergrLighthouseMarkerSync),
+        new("Dvergr excavation markers", _settings.DvergrExcavationMarkerSync),
+        new("Fuling village markers", _settings.FulingVillageMarkerSync),
+        new("Other structure markers", _settings.OtherStructureMarkerSync),
+    };
+    SwitchApplyMode IModuleSwitches.ApplyMode => SwitchApplyMode.Reinitialize;
+
+    IReadOnlyList<NumericSettingBinding> IModuleNumericSettings.NumericSettings => new[]
+    {
+        NumericSettingBinding.Create("Portal grouping distance (metres)", _settings.PortalClusterDistanceMeters,
+            "Nearby portals share a marker. Zero shows individual portal markers. Players may need to read the map table again.",
+            () => "Applies during map table reconciliation.")
+    };
+
     public string Name => "SharedMap";
     public bool IsActive { get; private set; }
 
@@ -50,26 +99,14 @@ public sealed class SharedMap : IServerModule
         _logger = logger;
         _compatibility = GameVersionCompatibility.Resolve(config, logger);
         _players = players;
-        _storeDirectory = Path.Combine(Path.GetDirectoryName(config.ConfigFilePath)!, "HeimKit", "SharedMap");
+        _storeDirectory = players.PlayerHosted
+            ? Path.Combine(Path.GetDirectoryName(config.ConfigFilePath)!, "SharedMap")
+            : Path.Combine(Path.GetDirectoryName(config.ConfigFilePath)!, "HeimKit", "SharedMap");
         _diagnostics = new SharedMapDiagnostics(logger, _settings.DebugLogging);
         _timing = new ProcessingTiming(logger, Name, _settings.DebugLogging);
         _timing.RegisterStages("world_state", "initialization", "save_snapshots", "sampling", "resources", "dungeons", "dungeon_loot", "landmarks", "tables");
         _timingScope = () => _players.Presence.JoinedCount ?? 0;
         _processing = new PlayerProcessingNotices(logger, Name, () => _settings.DebugLogging.Enabled);
-    }
-
-    private Func<string, bool> StructurePublicationFilter()
-    {
-        bool guardTowers = _settings.DvergrGuardTowerMarkerSync.Value;
-        bool lighthouses = _settings.DvergrLighthouseMarkerSync.Value;
-        bool excavations = _settings.DvergrExcavationMarkerSync.Value;
-        return label => label switch
-        {
-            "Dvergr Guard Tower" => guardTowers,
-            "Dvergr Lighthouse" => lighthouses,
-            "Dvergr Excavation" => excavations,
-            _ => false
-        };
     }
 
     public void Initialize(string gameVersion)
@@ -86,9 +123,10 @@ public sealed class SharedMap : IServerModule
         }
 
         IsActive = true;
+        ModuleScheduler.Current.Battle.Register(this);
         try
         {
-            SharedMapPatches.CheckCompatibility();
+            SharedMapPatches.CheckCompatibility(PlayerHosted);
             if (_settings.ResourceMarkerSync.Value) SharedMapResources.CheckCompatibility();
             if (_settings.DungeonMarkerSync.Value) SharedMapDungeons.CheckCompatibility();
             if (_settings.RunestoneMarkerSync.Value || _settings.SpawnerMarkerSync.Value || _settings.StructureMarkersEnabled) SharedMapLandmarks.CheckCompatibility();
@@ -101,11 +139,12 @@ public sealed class SharedMap : IServerModule
     public void Tick(float now)
     {
         if (!IsActive) return;
+        if (_callbackFailure is { } failure) { Fail(failure); return; }
         if (!_settings.Enabled.Value) { Shutdown(); return; }
         using var timing = _settings.DebugLogging.Enabled ? _timing.MeasureValue(now, _timingScope) : default;
         try
         {
-            SaveIfDue(now);
+            SaveForProcessing(now);
             bool ready = PlayerServices.Ready && ZoneSystem.instance != null && ZRoutedRpc.instance != null && ZNetScene.instance != null && Minimap.instance != null;
             if (ready) _processing.ServerReady();
             if (!ready) { StopController(); if (_occupied) _processing.Paused("world or minimap services unavailable"); return; }
@@ -149,21 +188,35 @@ public sealed class SharedMap : IServerModule
                 _runestones = _settings.RunestoneMarkerSync.Value ? new SharedMapLandmarkStore(_storeDirectory, uid, false) : null;
                 _spawners = _settings.SpawnerMarkerSync.Value ? new SharedMapLandmarkStore(_storeDirectory, uid, true) : null;
                 _structures = _settings.StructureMarkersEnabled
-                    ? new SharedMapLandmarkStore(_storeDirectory, uid, ".structures", 2, StructurePublicationFilter()) : null;
+                    ? new SharedMapLandmarkStore(_storeDirectory, uid, ".structures", 2, _settings.StructurePublicationFilter()) : null;
                 _runestones?.Load(); _spawners?.Load(); _structures?.Load();
                 _pinState = new SharedMapPinState(_storeDirectory, uid, _diagnostics.PinStateChanged);
                 _pinState.Load();
                 _exploration = exploration; _store = store;
                 _portalRefresh = portalRefresh;
                 _bootstrap = loaded ? null : new SharedMapBootstrap(ZDOMan.instance, exploration);
+                if (_store != null) _store.Preparation = new(_logger, _settings.DebugLogging, "snapshot_exploration");
+                if (_portalRefresh != null) _portalRefresh.Preparation = new(_logger, _settings.DebugLogging, "snapshot_portals");
+                if (_resources != null) _resources.Preparation = new(_logger, _settings.DebugLogging, "snapshot_resources");
+                if (_resourceRefresh != null) _resourceRefresh.Preparation = new(_logger, _settings.DebugLogging, "snapshot_resource_pins");
+                if (_dungeons != null) _dungeons.Preparation = new(_logger, _settings.DebugLogging, "snapshot_dungeons");
+                if (_pinState != null) _pinState.Preparation = new(_logger, _settings.DebugLogging, "snapshot_pins");
+                if (_runestones != null) _runestones.Preparation = new(_logger, _settings.DebugLogging, "snapshot_runestones");
+                if (_spawners != null) _spawners.Preparation = new(_logger, _settings.DebugLogging, "snapshot_spawners");
+                if (_structures != null) _structures.Preparation = new(_logger, _settings.DebugLogging, "snapshot_structures");
                 _world = ZDOMan.instance; _worldUid = uid;
                 _diagnostics.StoreOpened(loaded, uid, store.FilePath, exploration.ExploredPixels);
                 _diagnostics.PortalStateOpened(loadedPortalState, portalRefresh.FilePath, portalRefresh.Count);
             }
-            if (ModuleScheduler.Current.Combat.Active(now)) return;
+            if (ModuleScheduler.Current.Battle.Active || ModuleScheduler.Current.Combat.Active(now))
+            {
+                _recoverUntil = now + 5f;
+                _controller?.PauseBackground();
+                return;
+            }
             if (_bootstrap != null)
             {
-                if (!_bootstrap.Tick(_settings.MaxTablesPerPass.Value)) return;
+                if (!_bootstrap.Tick(now < _recoverUntil ? 1 : _settings.MaxTablesPerPass.Value)) return;
                 // Commit even an empty import. Until this succeeds, lifecycle flushes must not save partial work.
                 _store!.Save(initialize: true);
                 var completed = _bootstrap;
@@ -174,12 +227,13 @@ public sealed class SharedMap : IServerModule
             if (_controller == null)
             {
                 using var initializeTiming = _timing.MeasureStage("initialization");
-                _controller = new SharedMapController(this, _settings, _players.Presence, _exploration, _portalRefresh!, _logger, _resources, _resourceRefresh, _players.RoutedMessages, _dungeons, _pinState, _runestones, _spawners, _structures, _timing);
+                _controller = new SharedMapController(this, _settings, _players.Presence, _exploration, _portalRefresh!, _logger, _resources, _resourceRefresh, _players.RoutedMessages, _dungeons, _pinState, _runestones, _spawners, _structures, _timing) { HoldNewWork = _holdNewWork };
                 _controller.Install();
             }
             _processing.Ready();
+            if (now < _recoverUntil) ModuleScheduler.Current.ResumeGradually(_controller, _recoverUntil);
             _controller.Tick(now);
-            SaveIfDue(now);
+            SaveForProcessing(now);
         }
         catch (Exception error) { Fail(error); }
     }
@@ -206,6 +260,17 @@ public sealed class SharedMap : IServerModule
         Shutdown();
     }
 
+    private bool ApplySwitchInPlace() => ApplySwitchInPlace(refreshPortals: false);
+
+    private bool ApplySwitchInPlace(bool refreshPortals)
+    {
+        if (!IsActive || _callbackFailure != null) return false;
+        _controller?.SwitchesChanged(refreshPortals);
+        return true;
+    }
+
+    internal void FailAfterCallback(Exception error) => _callbackFailure ??= error;
+
     private void Log(string message, LogLevel level = LogLevel.Info) =>
         DiagnosticLog.Write(_logger, Name, message, level: level);
 
@@ -220,21 +285,34 @@ public sealed class SharedMap : IServerModule
         if (_bootstrap == null && _store?.Save() == true) _diagnostics.Saved(UnityEngine.Time.unscaledTime, _exploration!.ExploredPixels);
     }
 
+    private bool _holdSaveWarned;
+    private void SaveForProcessing(float now)
+    {
+        try { SaveIfDue(now); }
+        catch (Exception error) when (_holdNewWork && (error is IOException || error is UnauthorizedAccessException))
+        {
+            if (_holdSaveWarned) return;
+            _holdSaveWarned = true;
+            DiagnosticLog.Write(_logger, Name, CoreLogTopics.Control, "An admin change is waiting for SharedMap data that could not be saved.", level: LogLevel.Warning);
+        }
+    }
+
     private void SaveIfDue(float now)
     {
+        float interval = _holdNewWork ? 0 : _settings.SaveIntervalSeconds.Value;
         using var snapshotTiming = _timing.MeasureStage("save_snapshots");
-        if (_bootstrap == null && _store?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true) _diagnostics.Saved(now, _exploration!.ExploredPixels);
-        if (_bootstrap == null && _portalRefresh?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true)
+        if (_bootstrap == null && _store?.SaveIfDue(now, interval) == true) _diagnostics.Saved(now, _exploration!.ExploredPixels);
+        if (_bootstrap == null && _portalRefresh?.SaveIfDue(now, interval) == true)
             _diagnostics.PortalStateSaved(now, _portalRefresh.Count);
-        bool resourcesSaved = _resources?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true;
-        bool publicationsSaved = _resourceRefresh?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true;
+        bool resourcesSaved = _resources?.SaveIfDue(now, interval) == true;
+        bool publicationsSaved = _resourceRefresh?.SaveIfDue(now, interval) == true;
         if (resourcesSaved || publicationsSaved) _diagnostics.ResourceStateSaved(now, _resources?.Deposits.Count ?? 0);
-        if (_dungeons?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value) == true)
+        if (_dungeons?.SaveIfDue(now, interval) == true)
             _diagnostics.DungeonStateSaved(now, _dungeons.Count);
-        _pinState?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value);
-        _runestones?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value);
-        _spawners?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value);
-        _structures?.SaveIfDue(now, _settings.SaveIntervalSeconds.Value);
+        _pinState?.SaveIfDue(now, interval);
+        _runestones?.SaveIfDue(now, interval);
+        _spawners?.SaveIfDue(now, interval);
+        _structures?.SaveIfDue(now, interval);
     }
 
     private void FlushPortalState()
@@ -259,7 +337,10 @@ public sealed class SharedMap : IServerModule
 
     public void Shutdown()
     {
+        ModuleScheduler.Current.Battle.Unregister(this);
+        _recoverUntil = 0;
         IsActive = false;
+        _callbackFailure = null;
         _occupied = false;
         _processing.Reset();
         var registration = _presenceRegistration;

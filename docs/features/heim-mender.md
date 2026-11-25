@@ -1,5 +1,9 @@
 # HeimMender
 
+In player-hosted worlds, the host counts for nearby automatic repairs and can be selected as a target for administrative repair. The same native repair, ownership and hostile-clearance checks apply.
+
+See [optional client setup](../client-setup.md) for the in-game status and admin controls.
+
 Automatic background work pauses during native raids or observed combat; confirmation cleanup and explicitly requested administrative repair batches continue. See [performance observations](../server-setup.md#performance-observations).
 
 Gradually repairs damaged player-built static structures and accepts bounded administrative repair requests. It restores existing pieces to native maximum health without consuming materials or changing their creator. Destroyed pieces and world-created ruins are excluded. See [specification](../specs/heim-mender.md) and [shared limitations](../limitations.md).
@@ -8,7 +12,9 @@ Gradually repairs damaged player-built static structures and accepts bounded adm
 
 ## Settings
 
-Settings are in `[HeimMender]` in the loader-provided `heimkit.cfg`. This section reloads during play, including Enabled and DebugMode; other features keep their documented restart requirements. Save a complete edit and allow a few seconds for application. Invalid values retain the previously loaded section and produce a warning. The shared [persistent feature disable](../server-setup.md#persistent-feature-disables) overrides live Enabled changes after a disabling failure.
+Under **F7 → Server Settings**, changing `MaxRepairsPerCycle` caps the next automatic repair cycle. Repairs already queued continue as planned.
+
+Settings are in `[HeimMender]` in the loader-provided `heimkit.cfg`. This section reloads during play, including Enabled and DebugMode; other features follow their documented timing for file edits and F7 changes. Save a complete edit and allow a few seconds for application. Invalid values retain the previously loaded section and produce a warning. On dedicated servers, the shared [persistent feature disable](../server-setup.md#persistent-feature-disables) overrides live Enabled changes after a disabling failure.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -49,3 +55,7 @@ The observation budget retains damaged candidates rather than healthy building p
 - `repair`: Repair selection, requests and confirmations.
 
 Shared lifecycle, configuration, scope and timing topics follow the [logging contract](../architecture.md#logging). Verbose evidence requires effective debugging and the shared DebugVerbosity setting.
+
+## Host pacing
+
+The host spreads damage observation and automatic repair selection over several updates. It rechecks nearby hostiles, player range, ownership and current damage before sending an automatic repair. Authorized administrative requests receive an immediate acceptance or rejection. Accepted searches can progress in small batches during combat. Repair confirmations continue on their usual schedule.

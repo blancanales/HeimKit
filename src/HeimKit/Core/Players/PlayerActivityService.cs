@@ -28,6 +28,8 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
         public void Dispose() { if (_released) return; _released = true; Service.Release(this); }
     }
     private static PlayerActivityService? _current;
+    private Harmony? _localControls;
+    private float _lastLocalInput = float.NegativeInfinity;
     private readonly PlayerActivityTracker _tracker;
     private readonly PlayerActivityOptions _options;
     private IDisposable? _packetObserver;
@@ -101,13 +103,24 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
         {
             if (!install)
             {
-                try { _routedSubscription?.Dispose(); }
-                finally { _routedSubscription = null; if (ReferenceEquals(_current, this)) _current = null; }
+                try { _localControls?.UnpatchSelf(); }
+                finally
+                {
+                    _localControls = null;
+                    try { _routedSubscription?.Dispose(); }
+                    finally { _routedSubscription = null; if (ReferenceEquals(_current, this)) _current = null; }
+                }
                 return;
             }
             if (_current != null && !ReferenceEquals(_current, this)) throw new InvalidOperationException("An activity observer is already registered.");
             _craftingKey = 438569 + ZSyncAnimation.GetHash("crafting"); _current = this;
             _routedSubscription = _routedMessages.Subscribe(Observe, error => { Reset("routed observation unavailable"); Incident(Time.unscaledTime, "routed_observation", error); });
+            if (WorldSession.IsPlayerHosted(WorldSession.Identify(ZNet.instance)))
+            {
+                _localControls = new Harmony("heimkit.activity.local");
+                _localControls.Patch(AccessTools.Method(typeof(Player), nameof(Player.SetControls)),
+                    prefix: new HarmonyMethod(typeof(PlayerActivityService), nameof(LocalControls)));
+            }
             return;
         }
         if (!install) { if (_current != null && !ReferenceEquals(_current, this)) return; try { _packetObserver?.Dispose(); _packetObserver = null; } finally { if (ReferenceEquals(_current, this)) _current = null; } return; }
@@ -116,8 +129,21 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
         _packetObserver = IncomingPackets.RegisterRouted<byte>(Packet, affectsOriginal: false);
         _current = this;
     }
+    private static void LocalControls(Player __instance, Vector3 movedir, bool attack, bool secondaryAttack,
+        bool block, bool jump, bool crouch, bool dodge)
+    {
+        var service = _current;
+        if (service == null || __instance != Player.m_localPlayer ||
+            !(movedir != Vector3.zero || attack || secondaryAttack || block || jump || crouch || dodge)) return;
+        float now = Time.unscaledTime;
+        if (now >= service._lastLocalInput && now - service._lastLocalInput < .5f) return;
+        if (!service.Available || !WorldActors.TryLocal(out var actor)) return;
+        service._lastLocalInput = now;
+        service._tracker.Signal(actor.Owner, now, "local controls");
+    }
     private void Reset(string reason = "activity tracking stopped")
     {
+        _lastLocalInput = float.NegativeInfinity;
         Reliable = false; _actors.Clear(); _actorPool.Clear(); _equipment.Clear(); _connected.Clear(); _expiredPeers.Clear(); _recovered.Clear(); _tracker.Clear(); _containers.Clear(); _views = Array.Empty<PlayerActivityView>(); _last = -1;
         _diagnostics.Reset();
         try { _notices.Reset(reason, _presence.JoinedCount); }
@@ -194,33 +220,36 @@ public sealed class PlayerActivityService : IPlayerActivityObservations, IDispos
     {
         result.Clear();
         if (!Ready) return result;
-        for (int rosterIndex1 = 0; rosterIndex1 < presence.Peers.Count && presence.Peers[rosterIndex1] is var peer; rosterIndex1++)
+        bool hasHost = WorldActors.TryLocal(out var host);
+        var peers = presence.Peers;
+        for (int index = hasHost ? -1 : 0; index < peers.Count; index++)
         {
+            var peer = index < 0 ? null : peers[index];
+            var identity = peer == null ? host : new WorldActor(peer.m_uid, peer.m_characterID);
             if (result.Count >= 4096) { result.Add(new PlayerActivityObservation { Peer = long.MinValue }); break; }
             PlayerActivityObservation? actor = null;
-            if (pool != null) pool.TryGetValue(peer.m_uid, out actor);
-            if (actor == null) { actor = new(); if (pool != null) pool[peer.m_uid] = actor; }
-            actor.Peer = peer.m_uid; actor.Name = peer.m_playerName ?? "";
+            if (pool != null) pool.TryGetValue(identity.Owner, out actor);
+            if (actor == null) { actor = new(); if (pool != null) pool[identity.Owner] = actor; }
+            actor.Peer = identity.Owner; actor.Name = peer?.m_playerName ?? (peer == null ? Player.m_localPlayer.GetPlayerName() : "");
             actor.Known = actor.Alive = actor.InBed = actor.Busy = false; actor.X = actor.Y = actor.Z = actor.Heading = actor.Health = 0;
             actor.Equipment = ""; actor.Emote = 0;
-            if (!peer.IsReady()) { actor.Character = ""; actor.NativeCharacter = ZDOID.None; result.Add(actor); continue; }
-            if (actor.NativeCharacter != peer.m_characterID || actor.Character.Length == 0)
-            { actor.NativeCharacter = peer.m_characterID; actor.Character = peer.m_characterID.ToString(); }
+            if (peer != null && !peer.IsReady()) { actor.Character = ""; actor.NativeCharacter = ZDOID.None; result.Add(actor); continue; }
+            if (actor.NativeCharacter != identity.Character || actor.Character.Length == 0)
+            { actor.NativeCharacter = identity.Character; actor.Character = identity.Character.ToString(); }
             result.Add(actor);
-            if (peer.m_characterID == ZDOID.None) continue;
-            var zdo = ZDOMan.instance.GetZDO(peer.m_characterID);
-            if (zdo == null || !zdo.IsValid() || zdo.GetOwner() != peer.m_uid) continue;
+            var zdo = WorldActors.Resolve(identity);
+            if (zdo == null) continue;
             var position = zdo.GetPosition();
             actor.X = position.x; actor.Y = position.y; actor.Z = position.z;
             actor.Heading = zdo.GetRotation().eulerAngles.y;
             actor.Health = zdo.GetFloat(ZDOVars.s_health, float.NaN);
             actor.Known = PlayerActivityTracker.Finite(actor.Health) && PlayerActivityTracker.Finite(actor.X) && PlayerActivityTracker.Finite(actor.Y) && PlayerActivityTracker.Finite(actor.Z) && PlayerActivityTracker.Finite(actor.Heading);
             actor.Alive = actor.Health > 0 && !zdo.GetBool(ZDOVars.s_dead);
-            actor.InBed = zdo.GetBool(ZDOVars.s_inBed);
+            actor.InBed = peer == null ? Player.m_localPlayer.InBed() : zdo.GetBool(ZDOVars.s_inBed);
             actor.Busy = craftingKey != 0 && zdo.GetInt(craftingKey) != 0;
             if (equipment != null)
             {
-                if (!equipment.TryGetValue(peer.m_uid, out var cached)) equipment[peer.m_uid] = cached = new();
+                if (!equipment.TryGetValue(identity.Owner, out var cached)) equipment[identity.Owner] = cached = new();
                 actor.Equipment = cached.Read(zdo);
             }
             else

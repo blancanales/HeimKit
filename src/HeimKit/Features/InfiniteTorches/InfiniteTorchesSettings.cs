@@ -38,16 +38,16 @@ public sealed class InfiniteTorchesSettings
 
     public InfiniteTorchesSettings(ConfigFile config, ManualLogSource? logger = null)
     {
-        Enabled = config.Bind("Torches", "Enabled", true, "Automatically refill eligible torches, braziers and configured fires for free. Restart after config edits.");
+        Enabled = config.Bind("Torches", "Enabled", true, "Automatically refill eligible torches, braziers and configured fires for free. File edits require a restart. HeimKit Settings applies changes live.");
         IntervalSeconds = config.Bind("Torches", "IntervalSeconds", 5f,
             new ConfigDescription("Seconds between refills. Large bases may take several passes.", new AcceptableValueRange<float>(2f, 60f)));
         MaxMessagesPerPass = config.Bind("Torches", "MaxMessagesPerPass", 32,
             new ConfigDescription("Limits network traffic; processing rotates across candidates.", new AcceptableValueRange<int>(1, 256)));
         IncludeFireplaces = config.Bind("Torches", "IncludeFireplaces", false,
-            "Enable fireplace refilling, controlled individually by Campfires, Hearths and Bonfires. False excludes these fires even if listed in Prefabs. Native smoke, shelter and water behavior remains active. Restart after edits.");
-        Campfires = config.Bind("Torches", "Campfires", true, "Refill campfires when IncludeFireplaces is true. False excludes them even if listed in Prefabs. Restart after edits.");
-        Hearths = config.Bind("Torches", "Hearths", true, "Refill hearths when IncludeFireplaces is true. False excludes them even if listed in Prefabs. Restart after edits.");
-        Bonfires = config.Bind("Torches", "Bonfires", true, "Refill bonfires when IncludeFireplaces is true. False excludes them even if listed in Prefabs. Restart after edits.");
+            "Enable fireplace refilling, controlled individually by Campfires, Hearths and Bonfires. False excludes these fires even if listed in Prefabs. Native smoke, shelter and water behavior remains active. File edits require a restart. HeimKit Settings applies changes live.");
+        Campfires = config.Bind("Torches", "Campfires", true, "Refill campfires when IncludeFireplaces is true. False excludes them even if listed in Prefabs. File edits require a restart. HeimKit Settings applies changes live.");
+        Hearths = config.Bind("Torches", "Hearths", true, "Refill hearths when IncludeFireplaces is true. False excludes them even if listed in Prefabs. File edits require a restart. HeimKit Settings applies changes live.");
+        Bonfires = config.Bind("Torches", "Bonfires", true, "Refill bonfires when IncludeFireplaces is true. False excludes them even if listed in Prefabs. File edits require a restart. HeimKit Settings applies changes live.");
         Prefabs = config.Bind("Torches", "Prefabs",
             "piece_groundtorch_wood,piece_groundtorch,piece_groundtorch_green,piece_groundtorch_blue,piece_walltorch,piece_brazierceiling01,piece_brazierfloor01,piece_brazierfloor02",
             "Exact prefab allowlist. Only refillable non-toggle lights qualify. Wet-flame objects qualify only for the three default braziers and, with IncludeFireplaces and the corresponding type enabled, campfires, hearths and bonfires.");

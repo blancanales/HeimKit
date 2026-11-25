@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
+using HarmonyLib;
 using HeimKit.Core.Diagnostics;
 using HeimKit.Core.Lifecycle;
 using HeimKit.Core.Native;
@@ -37,7 +38,16 @@ internal sealed class StationSupplyController : IDisposable
     private readonly List<SupplyTransaction> _active = new(4);
     private SupplyTransaction? _currentTransaction;
     private int _cursor;
+    private readonly AdaptiveOperation _discovery, _evaluation, _progress;
+    private readonly List<ZDOID> _candidateIds = new();
+    private IEnumerator<bool>? _scan;
+    private Vector3 _scanCenter;
+    private int _remaining, _nextCandidate, _visits;
+    private const int MaximumDiscoveryRecords = 8192;
     private bool _disposed;
+    private readonly bool _playerHosted;
+    private Harmony? _localHooks;
+    private static StationSupplyController? _local;
     private static readonly int Pong = "RPC_Pong".GetStableHashCode();
     private static class FermenterAccess
     {
@@ -45,8 +55,15 @@ internal sealed class StationSupplyController : IDisposable
         internal static readonly HarmonyLib.AccessTools.FieldRef<Fermenter, bool> Roof = NativeAccess.Field<Fermenter, bool>("m_hasRoof");
         internal static readonly HarmonyLib.AccessTools.FieldRef<Fermenter, bool> Exposed = NativeAccess.Field<Fermenter, bool>("m_exposed");
     }
+    internal bool HoldNewWork { get; set; }
+    internal bool Idle => _active.Count == 0 && _authority.Idle;
+
     internal StationSupplyController(StationSupply module, StationSupplySettings settings, ManualLogSource log, PlayerServices players)
     {
+        _discovery = new(log, settings.DebugLogging, "StationSupply", "discovery_cells", 64);
+        _evaluation = new(log, settings.DebugLogging, "StationSupply", "station_candidates", 256);
+        _progress = new(log, settings.DebugLogging, "StationSupply", "transaction_progress");
+        _playerHosted = WorldSession.IsPlayerHosted(WorldSession.Identify(ZNet.instance));
         _settings = settings; _log = log; _players = players;
         _timingScope = () => _stations.Count + _chestRecords.Count + _wards.Count;
         NativeInventory.CheckCompatibility();
@@ -68,13 +85,55 @@ internal sealed class StationSupplyController : IDisposable
             _scope.Index(_prefabs.Accept);
             _authority = authority; _context = context;
             messages = players.RoutedMessages.Subscribe(Observe, module.Fail); _messages = messages;
+            if (_playerHosted) InstallLocalHooks();
             _diagnostics.Configuration(Time.unscaledTime, _prefabs);
         }
         catch
         {
-            ModuleCleanup.Run(log, "StationSupply", () => messages?.Dispose(), () => authority?.Dispose(), () => _scope.Dispose(), () => context?.Dispose());
+            ModuleCleanup.Run(log, "StationSupply", RemoveLocalHooks, () => messages?.Dispose(), () => authority?.Dispose(), () => _scope.Dispose(), () => context?.Dispose());
             throw;
         }
+    }
+    private void InstallLocalHooks()
+    {
+        _localHooks = new Harmony("heimkit.station_supply.local");
+        foreach (string method in new[] { "RPC_RequestOpen", "RPC_RequestStack", "RPC_RequestTakeAll" })
+            _localHooks.Patch(AccessTools.Method(typeof(Container), method),
+                prefix: new HarmonyMethod(typeof(StationSupplyController), nameof(LocalContainerRequest)));
+        if (_obliterator != null)
+            _localHooks.Patch(AccessTools.Method(typeof(Incinerator), "RPC_RequestIncinerate"),
+                prefix: new HarmonyMethod(typeof(StationSupplyController), nameof(LocalLeverRequest)));
+        _local = this;
+    }
+    private void RemoveLocalHooks()
+    {
+        if (ReferenceEquals(_local, this)) _local = null;
+        _localHooks?.UnpatchSelf();
+        _localHooks = null;
+    }
+    private static void LocalContainerRequest(Container __instance, long uid, System.Reflection.MethodBase __originalMethod)
+    {
+        var controller = _local;
+        if (controller == null || uid != ZDOMan.GetSessionID()) return;
+        var view = __instance.GetComponent<ZNetView>();
+        if (view == null || !view.IsValid()) return;
+        var record = view.GetZDO();
+        if (controller._prefabs.Chests.ContainsKey(record.GetPrefab()) ||
+            controller._prefabs.Stations.TryGetValue(record.GetPrefab(), out var definition) &&
+            definition.Intakes[0].Kind == SupplyKind.Obliterator)
+        {
+            controller._manual.Observe(record.m_uid, Time.unscaledTime);
+            if (__originalMethod.Name == "RPC_RequestOpen")
+                controller.ObserveChestOpen(record, uid, Time.unscaledTime);
+        }
+    }
+    private static void LocalLeverRequest(Incinerator __instance, long uid)
+    {
+        var controller = _local;
+        if (controller == null || uid != ZDOMan.GetSessionID()) return;
+        var view = __instance.GetComponent<ZNetView>();
+        if (view != null && view.IsValid())
+            controller._obliterator?.Observe(view.GetZDO().m_uid, "RPC_RequestIncinerate".GetStableHashCode(), Time.unscaledTime);
     }
     public void Tick(float now)
     {
@@ -94,28 +153,73 @@ internal sealed class StationSupplyController : IDisposable
             AdvanceSet(now, 0);
             if (_settings.MaxActiveTransactions.Value == 1) return;
         }
-        if (_active.Count >= _settings.MaxActiveTransactions.Value) return;
-        if (!ModuleScheduler.Current.Due(this, "discovery", now, _settings.IntervalSeconds.Value, cooperative: true)) return;
-        using var discoveryTiming = _diagnostics.OptionalEnabled ? _diagnostics.Measure(now, _timingScope) : default;
-        using (_diagnostics.Stage("world_discovery"))
+        if (HoldNewWork || _active.Count >= _settings.MaxActiveTransactions.Value) return;
+        float range = _settings.ScanRangeMeters.Value;
+        if (_remaining == 0)
         {
-            if (!_scope.Refresh(_settings.ScanRangeMeters.Value, outdoorOnly: true)) { Evidence(now, _scope.UnavailableReason ?? "player_scope_unavailable"); return; }
-            PrepareSelections();
+            if (_scan == null)
+            {
+                if (!ModuleScheduler.Current.Due(this, "discovery", now, _settings.IntervalSeconds.Value, cooperative: true)) return;
+                _candidateIds.Clear();
+                if (!_scope.BeginCandidateScan(range, _candidateIds, out _scan))
+                { Evidence(now, _scope.UnavailableReason ?? "player_scope_unavailable"); return; }
+                _scanCenter = _scope.Center;
+            }
+            if (!_discovery.Due(this, now, 0)) return;
+            using var scanTiming = _discovery.Begin(now);
+            bool complete = WorkSlice.Advance(_scan!, adaptive: scanTiming);
+            if (_candidateIds.Count > MaximumDiscoveryRecords)
+            {
+                _scan!.Dispose(); _scan = null; _candidateIds.Clear();
+                Evidence(now, "record_limit_exceeded"); return;
+            }
+            if (!complete) return;
+            _scan!.Dispose(); _scan = null;
+            _remaining = _candidateIds.Count;
+            _nextCandidate = _remaining == 0 ? 0 : _cursor % _remaining;
+            _visits = 0;
+            if (_remaining == 0) ModuleScheduler.Current.Postpone(this, "discovery", now, _settings.IntervalSeconds.Value);
+            return;
         }
-        Evidence(now, "player_scope_ready");
-        _diagnostics.Scope(now, _stations.Count, _chestRecords.Count, _counts);
-        int count = _stations.Count;
-        int budget = Math.Min(count, _settings.MaxStationsPerPass.Value);
+        if (!_evaluation.Due(this, now, 0)) return;
+        using var discoveryTiming = _diagnostics.OptionalEnabled ? _diagnostics.Measure(now, _timingScope) : default;
         int firstNew = _active.Count;
-        for (int visited = 0; visited < budget && _active.Count < _settings.MaxActiveTransactions.Value; visited++)
+        EvaluateCandidates(now, range);
+        if (_remaining == 0) ModuleScheduler.Current.Postpone(this, "discovery", now, _settings.IntervalSeconds.Value);
+        AdvanceSet(now, firstNew);
+    }
+
+    private void EvaluateCandidates(float now, float range)
+    {
+        using var adaptive = _evaluation.Begin(now);
+        bool selectionsReady = false;
+        while (_remaining > 0 && _active.Count < _settings.MaxActiveTransactions.Value && adaptive.Take())
         {
-            int index = _cursor++ % count; if (_cursor >= 1000000) _cursor = 0;
-            var station = _stations[index];
-            if (!station.IsValid() || !_prefabs.Stations.TryGetValue(station.GetPrefab(), out var definition)) continue;
+            var id = _candidateIds[_nextCandidate];
+            _nextCandidate = (_nextCandidate + 1) % _candidateIds.Count;
+            _cursor = _nextCandidate;
+            _remaining--;
+            var station = ZDOMan.instance.GetZDO(id);
+            if (station == null || !station.IsValid() || station.m_uid != id ||
+                !_prefabs.Stations.TryGetValue(station.GetPrefab(), out var definition) ||
+                (station.GetPosition() - _scanCenter).sqrMagnitude > range * range) continue;
+            if (++_visits >= _settings.MaxStationsPerPass.Value) _remaining = 0;
+            if (!selectionsReady)
+            {
+                using (_diagnostics.Stage("world_discovery"))
+                {
+                    if (!_scope.RefreshAt(_scanCenter, range))
+                    { Evidence(now, _scope.UnavailableReason ?? "player_scope_unavailable"); _remaining = 0; return; }
+                    PrepareSelections();
+                }
+                Evidence(now, "player_scope_ready");
+                _diagnostics.Scope(now, _stations.Count, _chestRecords.Count, _counts);
+                selectionsReady = true;
+            }
             if (!Disjoint(_active, station.m_uid, station.m_uid)) { Evidence(now, "record_in_active_transaction", station); continue; }
             string? exclusion = station.GetLong(ZDOVars.s_creator) == 0 ? "station_not_player_built" :
                 !StationSupplyRules.NativeScale(station) ? "station_non_native_scale" :
-                !_scope.InRange(station.GetPosition(), _settings.ScanRangeMeters.Value) ? "station_outside_player_range" :
+                !_scope.InRange(station.GetPosition(), range) || !_scope.PlayerNear(station.GetPosition(), range) ? "station_outside_player_range" :
                 Character.InInterior(station.GetPosition()) ? "station_in_interior" : !NativeCharacterHealth.IsAlive(station) ? "station_not_alive" : null;
             if (exclusion != null) { Evidence(now, exclusion, station); continue; }
             int start = _intakeOrder.Start(station, definition.Intakes.Length);
@@ -126,6 +230,8 @@ internal sealed class StationSupplyController : IDisposable
                 if (notReady != null) { Evidence(now, notReady, station, port, remaining: remaining); continue; }
                 var chest = Select(station, port, now, out var selection);
                 if (chest == null) { Evidence(now, "no_chest_at_intake", station, port, selection: selection); continue; }
+                if (_playerHosted && (station.GetOwner() != ZDOMan.GetSessionID() || chest.GetOwner() != ZDOMan.GetSessionID()))
+                { Evidence(now, "waiting_for_host_ownership", station, port, chest, selection); continue; }
                 if (!Disjoint(_active, station.m_uid, chest.m_uid)) { Evidence(now, "record_in_active_transaction", station, port, chest, selection); continue; }
                 if (Open(chest)) { _manual.Observe(chest.m_uid, now); Evidence(now, "selected_chest_open", station, port, chest, selection); continue; }
                 if (!_manual.Available(chest.m_uid, now, out float grace))
@@ -173,7 +279,6 @@ internal sealed class StationSupplyController : IDisposable
                 break;
             }
         }
-        AdvanceSet(now, firstNew);
     }
     internal static bool Disjoint(IReadOnlyList<SupplyTransaction> active, ZDOID station, ZDOID chest)
     {
@@ -189,7 +294,11 @@ internal sealed class StationSupplyController : IDisposable
         for (int i = start; i < _active.Count;)
         {
             var t = _active[i]; _currentTransaction = t;
-            Advance(t, now);
+            using (var step = _progress.Begin(now))
+            {
+                step.Count();
+                Advance(t, now);
+            }
             _currentTransaction = null;
             if (i < _active.Count && ReferenceEquals(_active[i], t)) i++;
         }
@@ -477,15 +586,27 @@ internal sealed class StationSupplyController : IDisposable
                  !(_prefabs.Stations.TryGetValue(record.GetPrefab(), out var definition) && definition.Intakes[0].Kind == SupplyKind.Obliterator)) ||
                 !ContainerRequests.Nearby(peer, record) ||
                 !RoutedActivityReader.TryReadParameters(packet, peer.m_uid, out _, out _, out var parameters) || parameters == null || parameters.Size() != sizeof(long)) return;
-            _manual.Observe(target, Time.unscaledTime); return;
+            float now = Time.unscaledTime;
+            _manual.Observe(target, now);
+            if (ContainerRequests.IsOpen(method)) ObserveChestOpen(record, peer.m_uid, now);
+            return;
         }
         if (method != Pong || !target.IsNone()) return;
         if (!RoutedActivityReader.TryReadParameters(packet, peer.m_uid, out _, out _, out var args) || args == null) return;
         float nonce = args.ReadSingle(); if (args.GetPos() == args.Size()) _authority.ObservePong(peer, nonce);
     }
-    private void ManualRequest(ZDOID id, long peer, int method, string status, float now)
+    private void ObserveChestOpen(ZDO record, long peer, float now)
+    {
+        if (!_diagnostics.OptionalEnabled) return;
+        bool active = !Disjoint(_active, record.m_uid, record.m_uid);
+        _diagnostics.ChestOpen(now, record.m_uid, peer, active ? "observed_in_transaction" : "observed_outside_transaction",
+            owner: record.GetOwner());
+    }
+
+    private void ManualRequest(ZDOID id, long peer, int method, string status, float now, float elapsed)
     {
         _manual.Observe(id, now);
+        if (ContainerRequests.IsOpen(method)) _diagnostics.ChestOpen(now, id, peer, status, elapsed: elapsed);
         if (status == "queued") _counts.ManualQueued++;
         else if (status == "replayed") _counts.ManualReplayed++;
         else if (status != "already_open") { _counts.ManualUnavailable++; _counts.Observe("manual_request_" + status); }
@@ -547,7 +668,7 @@ internal sealed class StationSupplyController : IDisposable
             _authority.ForgetBarrier(t.Station.Barrier); _authority.ForgetBarrier(t.Chest.Barrier);
             bool released;
             using (_diagnostics.Stage("ownership"))
-                released = ModuleCleanup.Run(_log, "StationSupply", () => _authority.Release(t.Chest.Id), () => _authority.Release(t.Station.Id));
+                released = ModuleCleanup.Run(_log, "StationSupply", () => _authority.Release(t.Chest.Id, keepServerOwner: _playerHosted), () => _authority.Release(t.Station.Id, keepServerOwner: _playerHosted));
             bool safe = released && SafeManualReplay(t, reason);
             bool requestsFinished = ModuleCleanup.Run(_log, "StationSupply",
                 () => _authority.FinishContainerRequests(t.Chest, safe, now), () => _authority.FinishContainerRequests(t.Station, safe, now));
@@ -568,8 +689,9 @@ internal sealed class StationSupplyController : IDisposable
     public void Dispose()
     {
         if (_disposed) return; _disposed = true;
+        _scan?.Dispose(); _scan = null; _candidateIds.Clear();
         var messages = _messages; _messages = null;
-        bool cleaned = ModuleCleanup.Run(_log, "StationSupply", () => messages?.Dispose(), () => EndAll(Time.unscaledTime, "processing_paused"),
+        bool cleaned = ModuleCleanup.Run(_log, "StationSupply", RemoveLocalHooks, () => messages?.Dispose(), () => EndAll(Time.unscaledTime, "processing_paused"),
             () => _authority.Dispose(), () => _scope.Dispose(), () => _context?.Dispose());
         _diagnostics.FlushTransfers(Time.unscaledTime, force: true);
         _stations.Clear(); _chestRecords.Clear(); _chests.Clear(); _wards.Clear(); _inputHistory.Clear(); _intakeOrder.Clear(); _manual.Clear(); _retry.Clear();

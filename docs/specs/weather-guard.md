@@ -1,11 +1,13 @@
 # WeatherGuard specification
 
+In player-hosted worlds, the host and ready guests define the protection regions. Protection applies to eligible pieces owned by the host process. Pieces owned by guests wait for native ownership to return to the host. Hosted protection scans use a soft 0.5 ms slice per frame. F7 changes to ProtectRain and ProtectUnderwater update an existing controller in place while at least one channel remains enabled. Changes across the all-off boundary reinitialize the feature.
+
 Gameplay and observation limitations: [safety and limitations](../limitations.md).
 Required protection, discovery and terrain/support lifetime maintenance continue during native raids and detected combat; ordinary optional diagnostic collection/probes pause; the bounded shared player-context lane can still collect passive evidence. Scene extension skips objects already in the native inputs before metadata classification. Core captures native active-area geometry settings and zone centres once per retention pass, preserving classic square and modern rounded boundaries across every retained region. Shared normal performance stages separate protection, scene extension and live retention without requiring feature Debug.
 
 ## Purpose and scope
 
-WeatherGuard automatically protects eligible player-built structural pieces from rain and wetness wear on a Windows Valheim dedicated server. Existing creator ownership is preserved. Activation requires no player repair, logout, rejoin or manual refresh. Unclaimed world-generated pieces are not protected or claimed by the current code.
+WeatherGuard automatically protects eligible player-built structural pieces from rain and wetness wear in player-hosted worlds and on dedicated servers. Existing creator ownership is preserved. Activation requires no player repair, logout, rejoin or manual refresh. Unclaimed world-generated pieces are not protected or claimed by the current code.
 
 The module uses BepInEx and Harmony and is designed for unmodified clients. Supported game and loader versions are documented in [server setup](../server-setup.md#supported-environment).
 
@@ -53,7 +55,7 @@ With no ready players while still occupied, a scope refresh releases pieces outs
 
 ## Player-service integration
 
-Follow the [required hookup](../architecture.md#required-feature-hookup). Plugin injects its shared PlayerServices into WeatherGuard; the controller selects ready players from its cached presence snapshot without a second population census. The enabled, compatible module owns one Events subscription and one optional WeatherGuardController. True occupancy permits controller installation only when ZNet is a dedicated server and ZDOMan, ZNetScene, ZoneSystem and ZRoutedRpc are ready. Tick retries delayed readiness and disposes controllers on readiness loss or world replacement. Additional logins do not recreate the controller. False/null disposes the controller and its hooks, releases pieces to vanilla ownership, and retains the subscription for reconnection. Shutdown, rollback or failure disposes both resources; failure disables only WeatherGuard. No AFK activity lease is needed.
+Follow the [required hookup](../architecture.md#required-feature-hookup). Plugin injects its shared PlayerServices into WeatherGuard; the controller selects ready players from its cached presence snapshot without a second population census. The enabled, compatible module owns one Events subscription and one optional WeatherGuardController. True occupancy permits controller installation only when ZNet is the world host and ZDOMan, ZNetScene, ZoneSystem and ZRoutedRpc are ready. Tick retries delayed readiness and disposes controllers on readiness loss or world replacement. Additional logins do not recreate the controller. False/null disposes the controller and its hooks, releases pieces to vanilla ownership, and retains the subscription for reconnection. Shutdown, rollback or failure disposes both resources; failure disables only WeatherGuard. No AFK activity lease is needed.
 
 Coverage requests are an explicit administration/status exception: the independent request-file handler polls even while gameplay is paused or the module is disabled. Reports identify `server_empty`, `player_presence_unavailable`, `waiting_for_world` or `module_inactive` when no controller can report coverage. This operator trigger does not keep protection hooks or scanning active.
 
@@ -199,3 +201,13 @@ One grouped optional Debug timing record per ordinary summary reports completed 
 Arrival diagnostics use the shared [arrival observation contract](../architecture.md#logging) without changing gameplay admission. WeatherGuard publishes passive protection-cycle activity and separates activation, terrain refresh and protection timing; existing protection/terrain work remains active. Named per-player summaries use PlayerActivity Debug. The shared slow-stage breakdown is grouped once per window in global Verbose Debug.
 
 WeatherGuard receives immediate occupied activation ahead of optional startup work. Required protection, native terrain lifetime and support processing retain their existing admission and cadence.
+
+## Adaptive host scheduling
+
+Initial protection uses its existing slice. Subsequent protection cycles advance every update while active and can reduce their unit allowance. Optional probes also use adaptive admission. Required scene retention, terrain refresh and release of out-of-scope authority keep their existing priority. See [adaptive host throttling](adaptive-host-throttling.md).
+
+## Battle pause
+
+While Core reports battle pressure, stop protection cycles, exposure probes, scene extension and weather overrides across the world. Return remaining host-owned pieces in batches of up to 16 with a soft half-millisecond allowance per update. Native wear, damage and structural support follow ordinary game behavior. Resume the first protection cycle one iterator unit per update after the quiet period and ownership cleanup.
+
+WeatherGuard and SharedMap share the host battle detector. A bounded sample of replicated hostile creatures can trigger their pause even when the host has no live instance of the creature. See the [Core battle sampling bounds](../architecture.md) and [observation limits](../limitations.md).

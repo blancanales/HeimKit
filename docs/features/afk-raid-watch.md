@@ -1,5 +1,9 @@
 # AFKRaidWatch
 
+In player-hosted worlds, the host and ready guests contribute to raid eligibility. The host provides local gameplay input to the shared activity observer.
+
+See [optional client setup](../client-setup.md) for the in-game status and admin controls.
+
 Protects inferred-idle-only locations from new automatic random raids. AFKNightWatch controls sleep independently. See [shared activity settings](../server-setup.md#playeractivity), [AFK limitations](../limitations.md#afk-detection-sleep-and-raids), and the [specification](../specs/afk-raid-watch.md).
 
 ![AFKRaidWatch: exclude qualifying idle-only locations from automatic raid selection](../images/afk-raid-watch-workflow.jpg)
@@ -12,7 +16,7 @@ Only ordinary automatic random-event selection is filtered. Existing raids, expl
 
 ## Configuration
 
-`[AFKRaidWatch] Enabled = true` controls protection; `DebugMode = false` controls feature diagnostics through the [shared debug policy](../server-setup.md#configuration). Stop the server before edits and restart afterward.
+`[AFKRaidWatch] Enabled = true` controls protection; `DebugMode = false` controls feature diagnostics through the [shared debug policy](../server-setup.md#configuration). For hand edits, leave the hosted world or stop the dedicated server, edit the [active configuration](../client-setup.md#configuration-locations), then start the world again.
 
 Shared thresholds live under [PlayerActivity](../server-setup.md#playeractivity), with defaults of five minutes idle and one minute join/recovery grace. Health changes do not count as activity. This feature works with sleep rules disabled.
 

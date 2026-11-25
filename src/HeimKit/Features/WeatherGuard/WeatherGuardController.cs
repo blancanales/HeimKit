@@ -22,13 +22,15 @@ internal sealed class WeatherGuardController : IDisposable
 {
     private readonly WeatherGuard _module;
     private readonly IPlayerPresence _presence;
+    private readonly AdaptiveOperation _observations, _maintenance;
     private readonly ManualLogSource _log;
     private readonly WeatherGuardDiagnostics _diagnostics;
     private readonly PlayerContextDiagnostics? _context;
     private readonly DebugLoggingPolicy _contextPolicy;
     private readonly Action<ZDOID, string?> _confirmedPiece;
     internal Action<ZDOID, string?> ConfirmedPiece => _confirmedPiece;
-    private readonly bool _protectRain, _protectUnderwater;
+    private const double HostedSliceMilliseconds = 0.5;
+    private bool _protectRain, _protectUnderwater;
     private readonly HashSet<string> _excludedPrefabs;
     private float _lastScopeScan = -1;
     private bool _scopeLimited;
@@ -49,6 +51,7 @@ internal sealed class WeatherGuardController : IDisposable
     private readonly List<ZDOID> _sceneNearIds = new(), _sceneDistantIds = new();
     private readonly List<Vector2s> _sceneZones = new();
     private readonly bool _reuseSceneLists;
+    private readonly bool _playerHosted;
     private CandidateSubscription? _sceneBuiltFor;
     private long _sceneRevision = -1, _sceneBuilds, _sceneReuses;
     private int _sceneNearDistance, _sceneTotalDistance, _sceneFrame;
@@ -103,14 +106,20 @@ internal sealed class WeatherGuardController : IDisposable
     internal static WeatherGuardController? Active { get; private set; }
     internal long ServerId => ZDOMan.GetSessionID();
     internal int RegionCount => _regions.Count;
-    internal bool Running => Active == this && _module.IsActive && ReferenceEquals(_manager, ZDOMan.instance) &&
+    private bool _battleSuspended, _recovering;
+    internal void ResumeGradually() => _recovering = true;
+    internal bool Running => !_battleSuspended && !ModuleScheduler.Current.Battle.Active && Active == this && _module.IsActive && ReferenceEquals(_manager, ZDOMan.instance) &&
         (_protectRain || _protectUnderwater) && WorldServices.Terrain;
 
     public WeatherGuardController(WeatherGuard module, ManualLogSource log, DebugLoggingPolicy debug, DebugLogLevel level, bool logWorldCreated, bool protectRain, bool protectUnderwater, string excludedPrefabs, IPlayerPresence presence, PlayerContextDiagnostics? context = null, bool reuseSceneLists = true)
     {
+        _observations = new(log, debug, "WeatherGuard", "observations", 32, .5);
         _confirmedPiece = WeatherDamageSuppressed;
         _context = context; _contextPolicy = debug;
         _presence = presence;
+        _playerHosted = WorldSession.IsPlayerHosted(WorldSession.Identify(ZNet.instance));
+        _maintenance = new(log, debug, "WeatherGuard", "protection_maintenance", 64,
+            _playerHosted ? HostedSliceMilliseconds : 2);
         _protectRain = protectRain; _protectUnderwater = protectUnderwater; _reuseSceneLists = reuseSceneLists;
         _excludedPrefabs = WeatherGuardRules.ParseExcludedPrefabs(excludedPrefabs, out int rejected);
         if (rejected > 0) DiagnosticLog.Write(log, "WeatherGuard", $"Ignored {rejected} invalid or over-limit prefab exclusions. Review WeatherGuard.ExcludedPrefabs.", level: LogLevel.Warning);
@@ -127,6 +136,15 @@ internal sealed class WeatherGuardController : IDisposable
         Active = this;
         try { _terrain = new TerrainContext(); _patches.Install(); } catch { Dispose(); throw; }
     }
+    internal bool SetProtection(bool rain, bool underwater)
+    {
+        // Crossing the all-off boundary changes the candidate selection and controller lifetime.
+        if (!(_protectRain || _protectUnderwater) || !(rain || underwater)) return false;
+        _protectRain = rain;
+        _protectUnderwater = underwater;
+        return true;
+    }
+
     internal bool Protects(ZDOID id) => Running && _protected.ContainsKey(id);
     internal void Fail(Exception error) => _module.Fail(error);
     internal void OwnerBlocked(ZDO zdo, long requested)
@@ -420,9 +438,42 @@ internal sealed class WeatherGuardController : IDisposable
         }
     }
 
+    private void SuspendForBattle()
+    {
+        if (!_battleSuspended)
+        {
+            _battleSuspended = true;
+            _processing?.Dispose(); _processing = null;
+            _probes?.Dispose(); _probes = null;
+            _terrain?.Clear(); _context?.Weather.Clear();
+            _readiness?.Dispose(); _readiness = null;
+            _sceneSelection?.Dispose(); _sceneSelection = null;
+            _positions.Clear(); _regions.Clear(); _sceneStale = true;
+            _release.Clear(); _release.AddRange(_protected.Keys);
+            _diagnostics.PollPreventionRollup();
+        }
+        // Hooks already yield to vanilla. Release only records still held by this host.
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        for (int i = 0; i < 16 && _release.Count > 0; i++)
+        {
+            int last = _release.Count - 1;
+            var id = _release[last]; _release.RemoveAt(last);
+            if (_protected.TryGetValue(id, out var record) && record.IsValid() &&
+                record.m_uid == id && record.GetOwner() == ServerId) Release(id);
+            else _protected.Remove(id);
+            if ((System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000d / System.Diagnostics.Stopwatch.Frequency >= .5) break;
+        }
+    }
+
     private IEnumerator<bool>? _processing;
     public void Tick(float now)
     {
+        if (ModuleScheduler.Current.Battle.Active || (_battleSuspended && _release.Count > 0))
+        { SuspendForBattle(); return; }
+        if (_battleSuspended)
+        {
+            _battleSuspended = false; _recovering = true;
+        }
         TerrainContext.ThrowIfFailed();
         _diagnostics.PollPreventionRollup();
         using (PerformanceStages.Measure("WeatherGuard", "selection_setup")) { RefreshContextMask(); EnsureSelections(); }
@@ -434,15 +485,20 @@ internal sealed class WeatherGuardController : IDisposable
             try
             {
                 _cycleSlices++;
-                if (WorkSlice.Advance(_processing)) { _processing.Dispose(); _processing = null; }
+                // Resume one iterator unit per update through the first post-battle cycle.
+                using var maintenance = _candidateScanStarted ? _maintenance.Begin(now) : null;
+                bool complete = WorkSlice.Advance(_processing, _playerHosted ? HostedSliceMilliseconds : 2,
+                    maximumUnits: _recovering ? 1 : 64, adaptive: maintenance);
+                if (complete) { _processing.Dispose(); _processing = null; _recovering = false; }
             }
             catch { _processing?.Dispose(); _processing = null; throw; }
         }
         // Optional geometry/history must never delay a completed protection cycle.
-        if (_probes != null && ModuleScheduler.Current.Due(this, "observations", now, .03f, cooperative: true))
+        if (_probes != null && _observations.Due(this, now, .03f))
         {
             using var timing = PerformanceStages.Measure("WeatherGuard", "observation_slice");
-            try { if (WorkSlice.Advance(_probes, .5, 32)) { _probes.Dispose(); _probes = null; } }
+            using var adaptive = _observations.Begin(now);
+            try { if (WorkSlice.Advance(_probes, .5, 32, adaptive: adaptive)) { _probes.Dispose(); _probes = null; } }
             catch { _probes?.Dispose(); _probes = null; throw; }
         }
         if (!_contextPolicy.Suppressed) PerformanceStages.ArrivalProgress("WeatherGuard.protection", now, _processing == null ? 0 : 1, _processing != null);
@@ -479,16 +535,20 @@ internal sealed class WeatherGuardController : IDisposable
         _near.Clear(); _distant.Clear(); _nearIds.Clear(); _distantIds.Clear(); _regions.Clear(); _positions.Clear(); _readiness?.Reset(); _terrainChecks.Clear(); _sceneStale = true;
         bool limited = false;
         _peers = _readyPeers = _characterWaits = 0; _exclusions.Clear(); _releaseReasons.Clear();
-        using (PerformanceStages.Measure("WeatherGuard", "region_scope"))
         {
-            for (int rosterIndex1 = 0; rosterIndex1 < _presence.Peers.Count && _presence.Peers[rosterIndex1] is var peer; rosterIndex1++)
+            bool hasHost = WorldActors.TryLocal(out var host);
+            var peers = _presence.Peers;
+            for (int index = hasHost ? -1 : 0; index < peers.Count; index++)
             {
+                if (_recovering && index > (hasHost ? -1 : 0)) yield return true;
+                if (index >= peers.Count) break;
+                using var regionTiming = PerformanceStages.Measure("WeatherGuard", "region_scope");
+                var peer = index < 0 ? null : peers[index];
                 _peers++;
-                if (!peer.IsReady()) continue;
+                if (peer != null && !peer.IsReady()) continue;
                 _readyPeers++;
-                if (peer.m_characterID.IsNone()) { _characterWaits++; continue; }
-                var character = manager.GetZDO(peer.m_characterID);
-                if (character == null || !character.IsValid() || character.GetOwner() != peer.m_uid) { _characterWaits++; continue; }
+                var character = WorldActors.Resolve(peer == null ? host : new WorldActor(peer.m_uid, peer.m_characterID));
+                if (character == null) { _characterWaits++; continue; }
                 var position = character.GetPosition();
                 if (!PlayerWorldScope.Finite(position) || Character.InInterior(position)) continue;
                 if (_diagnostics.StepsEnabled) Count(_playerBiomes, Biome(position));
@@ -527,6 +587,7 @@ internal sealed class WeatherGuardController : IDisposable
             { _release.Add(pair.Key); Count(_releaseReasons, reason); Count(_releaseTotals, reason); }
             else if (zdo!.GetOwner() != ServerId)
             {
+                if (_playerHosted) { _release.Add(pair.Key); continue; }
                 _ownerLosses++;
                 if (_diagnostics.OptionalEnabled) RecordOwner(now, zdo);
                 ObjectAuthority.Assign(zdo, ServerId); manager.ForceSendZDO(zdo.m_uid);
@@ -573,6 +634,7 @@ internal sealed class WeatherGuardController : IDisposable
             _eligiblePieces.Add(zdo);
             if (_protected.ContainsKey(zdo.m_uid)) continue;
             if (_protected.Count >= WeatherGuardRules.MaximumProtected) { limited = true; continue; }
+            if (_playerHosted && zdo.GetOwner() != ServerId) continue;
             bool instanceReady = scene.FindInstance(zdo) != null;
             bool terrainReady = TerrainReady(zdo, zones);
             bool objectsReady = terrainReady && ContextReady(zdo, scene, zones);
@@ -863,7 +925,7 @@ internal sealed class WeatherGuardController : IDisposable
         _protected.Remove(id);
         if (zdo.IsValid() && zdo.m_uid == id && ReferenceEquals(_manager.GetZDO(id), zdo))
         {
-            if (zdo.GetOwner() == ServerId) ObjectAuthority.Assign(zdo, 0L);
+            if (!_playerHosted && zdo.GetOwner() == ServerId) ObjectAuthority.Assign(zdo, 0L);
             _manager.ForceSendZDO(id);
         }
         _released++;
@@ -897,7 +959,7 @@ internal sealed class WeatherGuardController : IDisposable
                     {
                         if (!zdo.IsValid() || zdo.m_uid != pair.Key || !ReferenceEquals(_manager, ZDOMan.instance) ||
                             !ReferenceEquals(_manager.GetZDO(pair.Key), zdo) || zdo.GetOwner() != ServerId) continue;
-                        ObjectAuthority.Assign(zdo, 0L);
+                        if (!_playerHosted) ObjectAuthority.Assign(zdo, 0L);
                         _manager.ForceSendZDO(zdo.m_uid);
                     }
                     catch (Exception error) { succeeded = false; firstError ??= error; failures++; }

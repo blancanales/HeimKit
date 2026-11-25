@@ -12,6 +12,13 @@ using System.Linq;
 namespace HeimKit.Features.TameTravel;
 internal sealed class TameTravelDiagnostics : FeatureDiagnostics
 {
+    internal static void SummonMove(TameTravelSettings settings, ManualLogSource log, ZDOID character, ZDOID animal, UnityEngine.Vector3 point)
+    {
+        if (settings.DebugLogging.Enabled)
+            DiagnosticLog.Write(log, "TameTravel", TameTravelLogTopics.Travel,
+                $"Summon relocated character={character} animal={animal} position={point}", level: LogLevel.Debug);
+    }
+
     private readonly ManualLogSource _log;
     private readonly ProcessingTiming _timing;
     public System.IDisposable Measure(float now, System.Func<int> scope) => _timing.Measure(now, scope);
@@ -20,7 +27,7 @@ internal sealed class TameTravelDiagnostics : FeatureDiagnostics
     private readonly DiagnosticBudget _commands = new();
     private readonly DiagnosticBudget _selection = new();
     private readonly DiagnosticBudget _traversal = new();
-    private readonly System.Collections.Generic.Dictionary<ZNetPeer, float> _sourcePollTimes = new();
+    private readonly System.Collections.Generic.Dictionary<long, float> _sourcePollTimes = new();
     private readonly System.Collections.Generic.Dictionary<(long Peer, string Stage, ZDOID Source, ZDOID Animal), (string Reason, float Time)> _gates = new();
     public bool SelectionEnabled => DiagnosticsEnabled;
     private readonly System.Collections.Generic.Dictionary<long, string?> _actorReasons = new();
@@ -41,19 +48,19 @@ internal sealed class TameTravelDiagnostics : FeatureDiagnostics
     }
     // Placement waits have their own allowance so a slow search cannot hide entry and arrival evidence.
     private bool TravelSample(string stream = "traversal") => DiagnosticsEnabled && _traversal.Reserve(_clock(), stream, 6);
-    public bool TraversalReady(ZNetPeer peer, string stage, string reason, ZDOID? source = null, ZDOID? animal = null, bool transition = false)
+    public bool TraversalReady(TameTravelActor peer, string stage, string reason, ZDOID? source = null, ZDOID? animal = null, bool transition = false)
     {
         if (!DiagnosticsEnabled) return false;
         bool routine = (stage is "source_entry" or "source_observation") &&
             (reason is "outside_trigger" or "no_portal_nearby" or "awaiting_owner_position" or "source_sample_gap" or "cooldown");
-        var key = (peer.m_uid, stage, source ?? ZDOID.None, animal ?? ZDOID.None);
+        var key = (peer.Owner, stage, source ?? ZDOID.None, animal ?? ZDOID.None);
         float now = _clock();
-        if (routine && _sourcePollTimes.TryGetValue(peer, out float last) && now >= last && now - last < 60) return false;
+        if (routine && _sourcePollTimes.TryGetValue(peer.Owner, out float last) && now >= last && now - last < 60) return false;
         if (!transition && _gates.TryGetValue(key, out var previous) && previous.Reason == reason && now >= previous.Time && now - previous.Time < 300) return false;
         if (routine)
         {
-            if (_sourcePollTimes.Count >= 64 && !_sourcePollTimes.ContainsKey(peer)) _sourcePollTimes.Clear();
-            _sourcePollTimes[peer] = now;
+            if (_sourcePollTimes.Count >= 64 && !_sourcePollTimes.ContainsKey(peer.Owner)) _sourcePollTimes.Clear();
+            _sourcePollTimes[peer.Owner] = now;
             if (!_traversal.Reserve(now, "source_poll", 2)) return false;
         }
         else if (!TravelSample(stage == "placement" ? "placement_waits" : "traversal")) return false;
@@ -64,17 +71,17 @@ internal sealed class TameTravelDiagnostics : FeatureDiagnostics
         }
         return true;
     }
-    public void Traversal(ZNetPeer peer, string stage, string reason, ZDOID? source = null, ZDOID? animal = null,
+    public void Traversal(TameTravelActor peer, string stage, string reason, ZDOID? source = null, ZDOID? animal = null,
         (string, object?)[]? fields = null, bool transition = false, bool ready = false, (string, object?)[]? verboseFields = null)
     {
         if (!ready && !TraversalReady(peer, stage, reason, source, animal, transition)) return;
-        string message = reason == "no_portal_nearby" ? $"No portal near {peer.m_playerName}; travel not started." :
-            $"Portal travel for {peer.m_playerName}: {Reason(reason)}.";
+        string message = reason == "no_portal_nearby" ? $"No portal near {peer.Name}; travel not started." :
+            $"Portal travel for {peer.Name}: {Reason(reason)}.";
         DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Travel, message,
             new (string, object?)[] { ("pos", Evidence(fields, "pos")), ("followers", Evidence(fields, "followers")),
-                ("stage", stage), ("peer", peer.m_uid), ("source", source), ("animal", animal), ("omitted", _traversal.TakeOmitted()) }, LogLevel.Debug);
+                ("stage", stage), ("peer", peer.Owner), ("source", source), ("animal", animal), ("omitted", _traversal.TakeOmitted()) }, LogLevel.Debug);
         if (VerboseEnabled && (verboseFields != null || fields != null))
-            DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Travel, $"Travel evidence for {peer.m_playerName}.", verboseFields ?? fields, LogLevel.Debug, verbose: true);
+            DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Travel, $"Travel evidence for {peer.Name}.", verboseFields ?? fields, LogLevel.Debug, verbose: true);
     }
     private static object? Evidence((string Key, object? Value)[]? fields, string key)
     { if (fields != null) foreach (var field in fields) if (field.Key == key) return field.Value; return null; }
@@ -85,7 +92,7 @@ internal sealed class TameTravelDiagnostics : FeatureDiagnostics
         null or "" or "unknown" => "outcome unavailable",
         _ => reason.Replace('_', ' ')
     };
-    public void PortalPair(ZNetPeer peer, ZDO source, ZDO? destination, string reason)
+    public void PortalPair(TameTravelActor peer, ZDO source, ZDO? destination, string reason)
     {
         if (!TraversalReady(peer, "portal_pair", reason, source.m_uid)) return;
         (string, object?)[]? evidence = null;
@@ -100,12 +107,12 @@ internal sealed class TameTravelDiagnostics : FeatureDiagnostics
         }
         Traversal(peer, "portal_pair", reason, source.m_uid, ready: true, verboseFields: evidence);
     }
-    public void Command(ZNetPeer peer, string stage, string? command, string? reason = null, int? counter = null, ZDOID? animal = null)
+    public void Command(TameTravelActor peer, string stage, string? command, string? reason = null, int? counter = null, ZDOID? animal = null)
     {
         if (!DiagnosticsEnabled || !_commands.Reserve(_clock(), "commands", 32)) return;
-        string message = CommandMessage(peer.m_playerName, stage, command, reason);
+        string message = CommandMessage(peer.Name, stage, command, reason);
         DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Command, message,
-            new (string, object?)[] { ("peer", peer.m_uid), ("character", peer.m_characterID), ("stage", stage), ("command", command),
+            new (string, object?)[] { ("peer", peer.Owner), ("character", peer.Character), ("stage", stage), ("command", command),
                 ("reason", reason), ("emote_counter", counter), ("animal", animal) }, LogLevel.Debug);
     }
     internal static string CommandMessage(string player, string stage, string? command, string? reason)
@@ -116,25 +123,25 @@ internal sealed class TameTravelDiagnostics : FeatureDiagnostics
         if (reason != null) return $"Ignored {player}'s command — {Reason(reason)}.";
         return $"Received {player}'s {(string.IsNullOrEmpty(command) ? "animal" : command)} command.";
     }
-    public void ActorGate(ZNetPeer peer, string? reason)
+    public void ActorGate(TameTravelActor peer, string? reason)
     {
         if (!DiagnosticsEnabled) return;
-        if (_actorReasons.TryGetValue(peer.m_uid, out var previous) && previous == reason) return;
-        if (_actorReasons.Count >= 64 && !_actorReasons.ContainsKey(peer.m_uid)) return;
-        _actorReasons[peer.m_uid] = reason; Command(peer, "actor_gate", null, reason ?? "ready");
+        if (_actorReasons.TryGetValue(peer.Owner, out var previous) && previous == reason) return;
+        if (_actorReasons.Count >= 64 && !_actorReasons.ContainsKey(peer.Owner)) return;
+        _actorReasons[peer.Owner] = reason; Command(peer, "actor_gate", null, reason ?? "ready");
     }
-    public void Selection(ZNetPeer peer, TameOrder order, int records, int supported, int eligible)
+    public void Selection(TameTravelActor peer, TameOrder order, int records, int supported, int eligible)
     {
         if (!DiagnosticsEnabled || !_selection.Reserve(_clock(), "selection", 8)) return;
-        DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Command, $"Found {eligible} eligible animals for {peer.m_playerName}'s {order} command this pass.",
-            new (string, object?)[] { ("peer", peer.m_uid), ("command", order), ("records", records), ("supported", supported), ("eligible", eligible) }, LogLevel.Debug);
+        DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Command, $"Found {eligible} eligible animals for {peer.Name}'s {order} command this pass.",
+            new (string, object?)[] { ("peer", peer.Owner), ("command", order), ("records", records), ("supported", supported), ("eligible", eligible) }, LogLevel.Debug);
     }
-    public void Candidate(ZNetPeer peer, TameOrder order, ZDO animal, float distance, float range, string reason)
+    public void Candidate(TameTravelActor peer, TameOrder order, ZDO animal, float distance, float range, string reason)
     {
         if (!DiagnosticsEnabled || !_selection.Reserve(_clock(), "selection", 8)) return;
         bool saved = animal.GetFloat(ZDOVars.s_health, out float health);
-        DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Command, $"Animal {animal.m_uid} for {peer.m_playerName}: {Reason(reason)}.",
-            new (string, object?)[] { ("peer", peer.m_uid), ("command", order), ("animal", animal.m_uid), ("prefab", animal.GetPrefab()),
+        DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Command, $"Animal {animal.m_uid} for {peer.Name}: {Reason(reason)}.",
+            new (string, object?)[] { ("peer", peer.Owner), ("command", order), ("animal", animal.m_uid), ("prefab", animal.GetPrefab()),
                 ("distance_m", distance), ("range_m", range), ("health", saved ? health : (float?)null), ("owner", animal.GetOwner()) }, LogLevel.Debug);
         if (VerboseEnabled) DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Command, $"Selection evidence for animal {animal.m_uid}.",
             new LogField[] { DiagnosticLog.FieldAlways("health_saved", saved), DiagnosticLog.FieldAlways("tamed", animal.GetBool(ZDOVars.s_tamed)),
@@ -202,7 +209,7 @@ internal sealed class TameTravelDiagnostics : FeatureDiagnostics
         if (!TravelSample()) return;
         bool valid = t.Record != null && t.Record.IsValid() && t.Record.m_uid == t.Id;
         DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Follow, $"Follow spacing for {t.Journey.Name}'s animal {t.Id} ended: {Reason(reason)}.",
-            new (string, object?)[] { ("animal", t.Id), ("reason", reason), ("phase", t.Phase), ("peer", t.Journey.Peer.m_uid),
+            new (string, object?)[] { ("animal", t.Id), ("reason", reason), ("phase", t.Phase), ("peer", t.Journey.Traveller.Owner),
                 ("owner", valid ? t.Record!.GetOwner() : (long?)null), ("omitted", _traversal.TakeOmitted()) }, LogLevel.Debug);
     }
     public long BeginFollowing() => DiagnosticsEnabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
