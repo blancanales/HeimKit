@@ -24,7 +24,24 @@ internal static class MetadataAndMapPerformanceTests
         Check(!registry.Catalog<int>("dungeon").TryReuse(123, out _), "Scene/plugin reset retained stale metadata.");
         System.Console.WriteLine("PASS: recreated metadata consumers reuse classification without selection leakage, while owner/type boundaries and scene resets invalidate stale entries.");
     }
+    public class AvailableAssets : System.Reflection.DispatchProxy
+    {
+        protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args) =>
+            method?.Name == nameof(IAssetLoader.IsAvailable) ? true : throw new InvalidOperationException(method?.Name);
+    }
+
     private static void AssetReferences()
+    {
+        // SoftReference.Equals checks availability even when all load operations are injected.
+        var slot = typeof(SoftReferenceableAssets.Runtime).GetField("s_assetLoader",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        var previous = slot.GetValue(null);
+        slot.SetValue(null, System.Reflection.DispatchProxy.Create<IAssetLoader, AvailableAssets>());
+        try { CheckAssetRequests(); }
+        finally { slot.SetValue(null, previous); }
+    }
+
+    private static void CheckAssetRequests()
     {
         var a = new SoftReference<GameObject>(new AssetID(0, 0, 0, 1));
         var b = new SoftReference<GameObject>(new AssetID(0, 0, 0, 2));

@@ -18,4 +18,7 @@
     <Reference Include="UnityEngine"><HintPath>$(GameManaged)\UnityEngine.dll</HintPath></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(GameManaged)\UnityEngine.CoreModule.dll</HintPath></Reference>
   </ItemGroup>
+  <Target Name="PrepareHeadlessGameAssembly" AfterTargets="Build">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)/Prepare-TestGameAssembly.ps1&quot; -GameManaged &quot;$(GameManaged)&quot; -BepInExCore &quot;$(BepInExCore)&quot; -TestOutput &quot;$(TargetDir).&quot;" />
+  </Target>
 </Project>

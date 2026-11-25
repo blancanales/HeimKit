@@ -42,6 +42,7 @@ internal static class SharedMapWritePolicyTests
             var adminType = assembly.GetType("HeimKit.Features.SharedMap.SharedMapPinAdministration", true)!;
             var admin = Activator.CreateInstance(adminType, new object?[] { null, 64, directory, 123L, logger, (Func<int>)(() => 1), (Action<ZDO>)(_ => { }) })!;
             void Field(string name, object value) => controllerType.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(controller, value);
+            Field("_module", new SharedMap(config, logger, PlayerServicesTests.For(config, logger)));
             Field("_settings", settings); Field("_exploration", map); Field("_diagnostics", diagnostics); Field("_pinAdministration", admin);
             Field("_pinState", new SharedMapPinState(directory, 123));
             var normalize = controllerType.GetMethod("Normalize", BindingFlags.Instance | BindingFlags.NonPublic)!;
