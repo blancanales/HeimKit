@@ -1,8 +1,18 @@
 # TameTravel
 
-Lets explicitly following or portal-waiting tamed **wolves, boars, lox, asksvin, hens and moose** accompany a player through linked player-built wood or stone portals outside dungeons. The animal keeps its identity, name, health, tame state, saddle and other saved data. Riding, young/summoned creatures, dungeon transport and general distance catch-up are excluded.
+In a private or Start Server world, the host manages TameTravel under **F7 → Server Settings**. The same commands work for the host and vanilla guests. See [optional client setup](../client-setup.md) for in-game administration.
+
+Lets explicitly following or portal-waiting tamed **wolves, boars, lox, asksvin, hens and moose** accompany a player through linked player-built wood or stone portals outside dungeons. The animal keeps its identity, name, health, tame state, saddle and other saved data. Dismount before travel. With a regular portal inside a house, a Lox can arrive on clear ground outside even when the house door is too narrow or closed. At a dungeon door, an animal following you can enter or leave if its body clears both approaches and it has a safe place to stand. A hen, boar or wolf can use a smaller opening than a Lox. A Lox stays outside the Queen’s Citadel. Even at a Troll Cave, a Lox needs enough width, headroom and floor space on both sides. Animals ordered to stay or wait do not accompany you through a dungeon door.
 
 ![TameTravel: explicitly authorize following, enter a linked outdoor portal and reunite after validated placement](../images/tame-travel-workflow.jpg)
+
+## Dead Raiser skeletons
+
+Raise skeletons with the Dead Raiser while TameTravel and its **Dead Raiser summon travel** switch are on. The world host supplies the feature in private worlds, Start Server worlds and on dedicated servers. Guests can use a vanilla client. Your nearby skeletons can accompany you on successive trips through linked wood or stone portals and through dungeon entrances in either direction. The staff starts them following. Each trip uses their current follow state automatically. A skeleton that is staying behind or following someone else stays at the source.
+
+Skeleton travel applies to every dungeon with a native doorway between the outside world and its interior, including the Queen’s Infested Citadel. The game’s normal entry and exit requirements still apply. At a busy base, the host looks for your summons at the portal and checks the terrain and obstacles around the landing area. After you arrive, the original followers move into clear floor space nearby. They retain their health, level and native summon limit.
+
+As a guest, step away from the exit normally after the loading screen. The server uses your movement and the destination floor to confirm arrival. Two players can use the same entrance with their own followers. Administrators can turn off **Dead Raiser summon travel** under **F7 → Server Settings → TameTravel**, or set `SummonTravel = false` in the host configuration. The commands below apply to ordinary tames. See [summon and multiplayer limitations](../limitations.md#tametravel).
 
 ## Commands
 
@@ -21,7 +31,7 @@ Unknown slash commands are handled locally by unmodified clients, so `/follow`, 
 
 ## Logout and restart
 
-Following permission ends when its player disconnects, and HeimKit stops associated animals rather than leaving saved following behind. Startup clears interrupted HeimKit sessions as the world loads. The first upgrade also clears old saved following on supported non-wolf animals; unmarked wolves retain vanilla following and can be stopped with a fresh `/nonono`.
+Following permission ends when its player disconnects, and HeimKit stops associated animals rather than leaving saved following behind. Dedicated-server startup clears interrupted HeimKit sessions as the world loads. It also clears old saved following on supported non-wolf animals; unmarked wolves retain vanilla following and can be stopped with a fresh `/nonono`.
 
 Stay confirmation waits for saved following, the server AI target and a refresh of clients' cached animal instances. The original world animal and its saved data are retained. Wait for confirmation before issuing another follow command. See [delivery limitations](../limitations.md#tametravel).
 
@@ -35,7 +45,7 @@ The server controls at most eight followers globally by default. `/nonono` stops
 
 Use `/comehere` once beside the animal, then enter the portal yourself. No `/wave` is needed. The follower must remain within twenty metres of you and the source portal when entry is detected; it need not enter the trigger, climb the stairs or fit inside the building. HeimKit begins its source ownership handoff at detected entry to hold it for travel, then resumes following after confirmed arrival. `/wave` is an optional alternative when you want one portal trip followed by staying at the destination. Source portals inside ordinary above-ground buildings are allowed; dungeon portals are excluded.
 
-After arrival, you can walk clear of the portal and outside the building while remaining within forty-eight metres of the destination exit. HeimKit searches in arcs around where you stand, facing the portal's direction: your right side first, then across in front of you to your left side. Each arc is a quarter metre further out, and the arcs gradually widen to cover the ground behind you, reaching a full circle at twelve metres. If you move more than a metre while it searches, it starts again beside you. Beyond twelve metres it widens around the exit and your position. It accepts dry terrain and low, solid structural paving, including static world-generated ruin floors, with clearance based on the animal's actual size plus 0.75 metres from buildings and objects. A spot that clips a wall or object is nudged clear by the measured overlap and checked again. A player-sized access route must connect you to the landing area, allowing doorway exits and short detours around furniture while rejecting walls and distant detours. Animals can land on any side of the portal; the portal counts as an obstacle. Landing positions stay within forty-eight horizontal metres of the exit and within twenty-four vertical metres. Placement resumes across passes for up to thirty seconds, within the overall journey deadline. The full animal needs support, body room and a clear walkout with no player-built piece overhead; world-generated ruin arches and walls above a spot do not count as a roof. Wood and stone portals can be paired; pairs closer than twenty metres are excluded. Matching blank tags are supported when vanilla has linked the pair. A witnessed entry can wait up to six seconds for native link updates; destination arrival and safe-placement requirements still apply. See [placement limitations](../limitations.md#tametravel).
+After arrival, you can walk clear of the portal and outside the building while remaining within forty-eight metres of the destination exit. HeimKit searches in arcs around where you stand, facing the portal's direction: your right side first, then across in front of you to your left side. Each arc is a quarter metre further out, and the arcs gradually widen to cover the ground behind you, reaching a full circle at twelve metres. If you move more than a metre while it searches, it starts again beside you. Beyond twelve metres it widens around the exit and your position. It accepts dry terrain and low, solid structural paving, including static world-generated ruin floors, with clearance based on the animal's actual size plus 0.75 metres from buildings and objects. A spot that clips a wall or object is nudged clear by the measured overlap and checked again. Except for a Lox arriving outside a portal house, a player-sized access route must connect you to the landing area, allowing doorway exits and short detours around furniture while rejecting walls and distant detours. Animals can land on any side of the portal; the portal counts as an obstacle. Landing positions stay within forty-eight horizontal metres of the exit and within twenty-four vertical metres. Placement resumes across passes for up to thirty seconds, within the overall journey deadline. The full animal needs support, body room and a clear walkout with no player-built piece overhead; world-generated ruin arches and walls above a spot do not count as a roof. Wood and stone portals can be paired; pairs closer than twenty metres are excluded. Matching blank tags are supported when vanilla has linked the pair. A witnessed entry can wait up to six seconds for native link updates; destination arrival and safe-placement requirements still apply. See [placement limitations](../limitations.md#tametravel).
 
 A private message identifies a detected portal attempt. Another message confirms arrival or distinguishes recorded relocation from unconfirmed destination ownership. If an attempt ends before an animal moves, the message reports the outcome. An unchanged follow association remains active for another portal attempt; consumed optional waits require a fresh command. After a completed or cancelled attempt, leave the relevant portal trigger before entering it again. Fresh inside-trigger observations are accepted even when the player is already within the trigger area; the animal must still satisfy the same source-range and ownership checks.
 
@@ -45,11 +55,14 @@ Follow permission spans successive portal trips in the current player session an
 
 ## Configuration
 
-Use `[TameTravel]` in `heimkit.cfg`. Defaults enabled. Existing settings are preserved and missing defaults added. Restart applies configuration changes.
+Changing **Maximum tames per portal trip** from F7 takes effect at the next portal entry. Animals already reserved for a trip keep their places.
+
+Use `[TameTravel]` in `heimkit.cfg`. Defaults enabled. Existing settings are preserved and missing defaults added. For hand edits, leave the hosted world or stop the dedicated server, edit the [active configuration](../client-setup.md#configuration-locations), then start the world again.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | Enabled | true | Enable TameTravel independently. |
+| SummonTravel | true | Bring the summoner’s following Dead Raiser skeletons through supported gateways. |
 | DebugMode | false | Optional feature diagnostics through the shared debug policy. |
 | CommandRangeMeters | 8 | Follow/wait selection distance. Stay reaches your associated animals within 32 metres. |
 | FollowSpacingEnabled | true | Apply spacing using bounded server-owned following. |
@@ -64,6 +77,8 @@ Use `[TameTravel]` in `heimkit.cfg`. Defaults enabled. Existing settings are pre
 Ranges and behavior are in the [specification](../specs/tame-travel.md); see [shared limitations](../limitations.md#tametravel).
 
 ## Diagnostics
+
+The optional [client TameTravel trace](../heimkit-settings.md#record-tametravel-on-a-client) records the player and animal IDs on the observing PC. For each ordinary outdoor tame moved, host Debug records the animal ID, character ID, follow or wait order, source and destination. Host Debug includes the original skeleton ID and landing position for each relocation. For an interrupted transfer it reports the skeleton ID, transfer phase and last unmet condition. Once the server confirms arrival, you can walk around within 48 metres of the exit while it prepares a safe landing.
 
 Normal output distinguishes recorded relocation from confirmed destination ownership. Normal output also reports named follow-spacing activation/release and failures. Debug separately records fresh emote application, recognized command receipt and concrete actor/selection/rate-limit rejection reasons, as well as bounded follow stop/resume, trigger, reservation and transaction evidence. Follow movement timing measures the changed follow path separately from controller timing; other native AI and physics remain outside those measurements. Reservation endings include an exact stop reason, phase age, barrier result and a snapshot of animal state before ownership release.
 

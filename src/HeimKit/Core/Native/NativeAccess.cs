@@ -83,6 +83,16 @@ internal static class NativeAccess
         }
         return (Func<object, V>)cached;
     }
+    internal delegate string AssetNameGetter(ref SoftReferenceableAssets.SoftReference<UnityEngine.GameObject> reference);
+
+    internal static AssetNameGetter AssetNameGetterForGame()
+    {
+        var owner = typeof(SoftReferenceableAssets.SoftReference<UnityEngine.GameObject>);
+        var getter = owner.GetProperty("name")?.GetMethod ?? owner.GetProperty("Name")?.GetMethod
+            ?? throw new MissingMemberException(owner.FullName, "name/Name");
+        return (AssetNameGetter)getter.CreateDelegate(typeof(AssetNameGetter));
+    }
+
     internal static Func<ZDOMan, long, object> PeerGetter()
     {
         var world = Expression.Parameter(typeof(ZDOMan)); var id = Expression.Parameter(typeof(long));

@@ -125,13 +125,17 @@ public sealed class SharedMapLandmarkStore
     }
     private SnapshotFile? _snapshotFile;
     private SnapshotFile Persistence => _snapshotFile ??= new SnapshotFile(FilePath);
+    internal bool Clean => _revision == _savedRevision && _snapshotFile?.Pending != true;
+    internal SnapshotPreparation? Preparation { get; set; }
     public bool SaveIfDue(float now, float interval)
     {
         bool saved = Persistence.Poll();
         if (saved) _savedRevision = Persistence.CompletedGeneration;
-        if (Persistence.Pending || !_nextSave.Ready(now)) return saved;
+        if (Persistence.Pending) return saved;
+        bool due = Preparation?.Ready(_nextSave, now, interval, _revision != _savedRevision) ?? (interval <= 0 || _nextSave.Ready(now));
+        if (!due) return saved;
         _nextSave.Postpone(now, interval);
-        if (_revision != _savedRevision) Persistence.Queue(Snapshot(), _revision);
+        if (_revision != _savedRevision) SnapshotPreparation.Queue(Preparation, now, Persistence, Snapshot, _revision);
         return saved;
     }
     public bool Save()

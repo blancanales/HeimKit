@@ -49,7 +49,7 @@ internal static class TameTravelRecoveryTests
         var replacement = (ZNetPeer)RuntimeHelpers.GetUninitializedObject(typeof(ZNetPeer));
         peer.m_uid = replacement.m_uid = 91;
         var character = new ZDOID(91, 1); var animal = new ZDOID(91, 2);
-        var binding = new HeimKit.Features.TameTravel.Models.FollowBinding { Peer = peer, Character = character, Animal = animal,
+        var binding = new HeimKit.Features.TameTravel.Models.FollowBinding { Traveller = peer, Character = character, Animal = animal,
             Name = "Traveller", Order = HeimKit.Features.TameTravel.Models.TameOrder.Follow };
         commands.Bindings.Add(animal, binding);
         Check(commands.FollowingAuthorized(animal, peer, character, "Traveller") &&
@@ -112,7 +112,7 @@ internal static class TameTravelRecoveryTests
     private static void ReplicationOrdering()
     {
         ZdoReplication.CheckCompatibility();
-        var type = typeof(ZDOMan).GetNestedType("ZDOPeer", BindingFlags.NonPublic)!;
+        var type = typeof(ZDOMan).GetNestedType("ZDOPeer", BindingFlags.Public | BindingFlags.NonPublic)!;
         var native = RuntimeHelpers.GetUninitializedObject(type);
         var id = new ZDOID(51, 1); var other = new ZDOID(51, 2);
         var invalid = new HashSet<ZDOID> { id, other };

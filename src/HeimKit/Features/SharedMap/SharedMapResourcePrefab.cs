@@ -19,6 +19,8 @@ internal sealed class SharedMapResourcePrefab
     public ResourceKind Kind { get; }
     public int Hash { get; }
     public bool ReplacesWithMining { get; }
+    private Bounds? _skullBounds;
+    private Vector3 _defaultScale;
     private readonly int _sections;
     private readonly int[] _healthKeys;
     private readonly bool _mineRock, _mineRock5;
@@ -36,8 +38,17 @@ internal sealed class SharedMapResourcePrefab
     {
         var prefab = PrefabRegistry.Current.Prefab(name);
         if (prefab == null || PrefabRegistry.Component<Piece>(prefab) != null || PrefabRegistry.Component<ItemDrop>(prefab) != null ||
-            PrefabRegistry.Component<Character>(prefab) != null || PrefabRegistry.Component<Leviathan>(prefab) != null ||
+            PrefabRegistry.Component<Character>(prefab) != null ||
             PrefabRegistry.Component<ZNetView>(prefab)?.m_persistent != true) return null;
+        var leviathan = PrefabRegistry.Component<Leviathan>(prefab);
+        if (kind == ResourceKind.FlametalPillar)
+        {
+            var ore = PrefabRegistry.Component<MineRock>(prefab);
+            if (name != "LeviathanLava" || leviathan == null || ore == null || leviathan.m_mineRock != ore ||
+                !ore.m_dropItems.m_drops.Any(d => d.m_item != null && d.m_item.name == drop)) return null;
+            return new SharedMapResourcePrefab(name, kind, false, 0, false, false, float.NaN);
+        }
+        if (leviathan != null) return null;
         if (kind == ResourceKind.AncientRoot)
         {
             var root = PrefabRegistry.Component<ResourceRoot>(prefab);
@@ -68,7 +79,33 @@ internal sealed class SharedMapResourcePrefab
         float health = mine != null ? mine.m_health : mine5 != null ? mine5.m_health : destructible != null ? destructible.m_health : float.NaN;
         if (sections < 1 || sections > 8192 || !SharedMapExploration.Finite(health) || health <= 0 ||
             mine == null && mine5 == null && destructible == null) return null;
-        return new SharedMapResourcePrefab(name, kind, replacement, sections, mine != null, mine5 != null, health);
+        var metadata = new SharedMapResourcePrefab(name, kind, replacement, sections, mine != null, mine5 != null, health);
+        if (name == "giant_skull" || name == "giant_skull_frac")
+        {
+            metadata._skullBounds = PrefabCollisionBounds.Read(prefab);
+            metadata._defaultScale = prefab.transform.localScale;
+        }
+        return metadata;
+    }
+
+    public SkullBounds? SkullBounds(ZDO zdo)
+    {
+        if (!_skullBounds.HasValue) return null;
+        var scale = zdo.GetVec3(ZDOVars.s_scaleHash, Vector3.zero);
+        if (scale == Vector3.zero)
+        {
+            float scalar = zdo.GetFloat(ZDOVars.s_scaleScalarHash, float.NaN);
+            scale = float.IsNaN(scalar) ? _defaultScale : Vector3.one * scalar;
+        }
+        var rotation = zdo.GetRotation();
+        var origin = zdo.GetPosition();
+        var bounds = new Bounds(origin, Vector3.zero);
+        for (int i = 0; i < 8; i++)
+            bounds.Encapsulate(origin + rotation * Vector3.Scale(PrefabCollisionBounds.Corner(_skullBounds.Value, i), scale));
+        var min = bounds.min;
+        var max = bounds.max;
+        var result = new SkullBounds(min.x, min.y, min.z, max.x, max.y, max.z);
+        return result.Valid ? result : (SkullBounds?)null;
     }
 
     public MiningProgress InitialProgress => new MiningProgress(_sections, _sections);

@@ -18,7 +18,11 @@ internal sealed class CombatActivity : IDisposable
     private readonly Dictionary<(ZNetPeer Peer, ZDOID Actor, ZDOID Target), byte> _pending = new();
     private IDisposable? _lease;
     private ZDOMan? _world;
-    private bool _failed;
+    private bool _failed, _targetSamplingFailed;
+    private readonly ReplicatedBattleTargets _replicated = new();
+    private bool _replicatedFailed;
+    private int _aiCursor;
+    private float _nextTargetSample, _lastTick;
     private static readonly int Damage = "RPC_Damage".GetStableHashCode();
     private readonly PlayerContextDiagnostics? _context;
     internal CombatActivity(IPlayerPresence presence, PlayerRoutedMessages messages, ManualLogSource log, PlayerContextDiagnostics? context = null)
@@ -40,7 +44,8 @@ internal sealed class CombatActivity : IDisposable
         ModuleScheduler.Current.Combat.Active(now); // expire/clear rolled-back damage evidence before sampling a raid
         var events = RandEventSystem.instance;
         ModuleScheduler.Current.Combat.SetRaid(events != null && events.GetCurrentRandomEvent() != null);
-        if (_failed) return;
+        bool damage = false;
+        if (!_failed)
         try
         {
             _lease ??= _messages.Subscribe(Observe, Failed);
@@ -59,18 +64,114 @@ internal sealed class CombatActivity : IDisposable
                 if (character != null)
                 {
                     ModuleScheduler.Current.Combat.Observe(now, character.m_boss);
+                    damage = true;
                     _context?.Damage(now, signal.Peer, target, character is Player, character.m_boss, actor.GetPosition());
                 }
             }
         }
         catch (Exception error) { Failed(error); }
         finally { _pending.Clear(); }
+
+        var battle = ModuleScheduler.Current.Battle;
+        bool previous = battle.Active;
+        int inspected = 0, matched = 0;
+        string? reason = null;
+        string? details = null;
+        if (battle.Requested && (now >= _nextTargetSample || now < _lastTick))
+        {
+            _nextTargetSample = now + .5f;
+            try { if (!_targetSamplingFailed) reason = SampleTargets(out inspected, out matched); }
+            catch (Exception error)
+            {
+                _targetSamplingFailed = true;
+                DiagnosticLog.Write(_log, "HeimKit", "Battle target sampling unavailable: " + error.GetType().Name, level: LogLevel.Warning);
+            }
+            if (reason == null && !damage && !ModuleScheduler.Current.Combat.Raid && !_replicatedFailed)
+            {
+                try
+                {
+                    if (_replicated.Sample(_presence, _world!, out var evidence))
+                    {
+                        reason = "replicated_hostile_near_player";
+                        matched = 1;
+                        if (!previous) details = evidence.Describe();
+                    }
+                }
+                catch (Exception error)
+                {
+                    _replicatedFailed = true;
+                    DiagnosticLog.Write(_log, "HeimKit", "Replicated battle sampling unavailable: " + error.GetType().Name, level: LogLevel.Warning);
+                }
+            }
+        }
+        _lastTick = now;
+        if (ModuleScheduler.Current.Combat.Raid) reason = "native_raid";
+        else if (reason == null && damage) reason = "observed_character_damage";
+        battle.Update(now, reason, matched);
+        if (previous != battle.Active)
+        {
+            if (battle.Active)
+                DiagnosticLog.Write(_log, "HeimKit", $"Battle pause started. reason={reason} sampled_live_ai={inspected} matching_ai={matched} quiet_seconds=30{details}.");
+            else LogEnd(now, battle.Requested ? "quiet" : "features_disabled");
+        }
+    }
+
+    // GetAllInstances returns the live native list. A remote AI replicates HaveTarget,
+    // but its target identity may exist only on its owner. Label that proximity inference separately.
+    private string? SampleTargets(out int inspected, out int matched)
+    {
+        inspected = matched = 0;
+        var ai = BaseAI.GetAllInstances();
+        var players = Player.GetAllPlayers();
+        int count = Math.Min(32, ai.Count);
+        if (count == 0 || players.Count == 0) return null;
+        bool exact = false;
+        for (int i = 0; i < count; i++)
+        {
+            if (_aiCursor >= ai.Count) _aiCursor = 0;
+            var monster = ai[_aiCursor++] as MonsterAI;
+            inspected++;
+            if (!monster) continue;
+            var view = monster!.GetComponent<ZNetView>();
+            if (!view || !view!.IsValid() || !monster.HaveTarget()) continue;
+            var body = monster.GetComponent<Character>();
+            if (!body || body!.IsDead() || body.IsTamed()) continue;
+            var target = monster.GetTargetCreature();
+            if (target && !(target is Player)) continue;
+            for (int j = 0; j < players.Count && j < 64; j++)
+            {
+                var player = players[j];
+                if (!player || player!.IsDead() || (target && target != player)) continue;
+                var delta = player.transform.position - body.transform.position;
+                float range = target ? 128 : 32;
+                if (!(delta.sqrMagnitude <= range * range) || !monster.IsEnemy(player)) continue;
+                matched++;
+                if (target) exact = true;
+                break;
+            }
+        }
+        return exact ? "monster_targeting_player" : matched > 0 ? "engaged_monster_near_player" : null;
+    }
+
+    private void LogEnd(float now, string reason)
+    {
+        var battle = ModuleScheduler.Current.Battle;
+        DiagnosticLog.Write(_log, "HeimKit", $"Battle pause ended. reason={reason} last_evidence={battle.Reason} duration_s={Math.Max(0, now - battle.Started):F1} peak_matching_ai_sample={battle.PeakSample}.");
+
     }
     private void Failed(Exception error)
     {
         bool raid = ModuleScheduler.Current.Combat.Raid;
-        Dispose(); _failed = true; ModuleScheduler.Current.Combat.SetRaid(raid);
+        _lease?.Dispose(); _lease = null; _pending.Clear(); _failed = true; ModuleScheduler.Current.Combat.SetRaid(raid);
         DiagnosticLog.Write(_log, "HeimKit", "Damage-based battle observation is unavailable; native raid pauses remain active. Cause: " + error.GetType().Name + ".", LogLevel.Warning);
     }
-    public void Dispose() { var lease = _lease; _lease = null; lease?.Dispose(); _pending.Clear(); ModuleScheduler.Current.Combat.Clear(); }
+    public void Dispose()
+    {
+        var scheduler = ModuleScheduler.Current;
+        if (scheduler.Battle.Active) LogEnd(_lastTick, "session_ended");
+        scheduler.Battle.Reset();
+        var lease = _lease; _lease = null; lease?.Dispose(); _pending.Clear(); scheduler.Combat.Clear();
+        _replicated.Reset(); _replicatedFailed = false;
+        _nextTargetSample = 0; _aiCursor = 0; _targetSamplingFailed = false;
+    }
 }

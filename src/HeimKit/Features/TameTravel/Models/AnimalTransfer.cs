@@ -10,7 +10,7 @@ namespace HeimKit.Features.TameTravel.Models;
 internal sealed class AnimalTransfer : OwnershipLease
 {
     public PortalJourney Journey = null!;
-    public override ZNetPeer DestinationPeer => Journey.Peer;
+    public override ZNetPeer DestinationPeer => Journey.Traveller.Remote ?? throw new System.InvalidOperationException("Local arrival has no destination peer.");
     // 0 drains source; 1 waits for placement; 2 drains destination; 3 awaits new-owner state; 4 confirmed.
     public float Started, PhaseTime;
     public int PlacementCursor;
@@ -28,6 +28,7 @@ internal sealed class AnimalTransfer : OwnershipLease
     public readonly System.Collections.Generic.Dictionary<string, int> PlacementSurfaceBlocks = new();
     public readonly System.Collections.Generic.Dictionary<string, int> PlacementOverlapHits = new();
     public Vector3? PlacementTraveller;
+    public string SummonWait = "source_ownership";
     public bool Waiting;
     public bool PlacementStarted;
     public bool FollowContinues;

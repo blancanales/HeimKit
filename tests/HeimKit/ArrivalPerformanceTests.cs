@@ -47,7 +47,15 @@ internal static class ArrivalPerformanceTests
             scheduler.Combat.Clear(); host.Tick(.16f, false); host.Tick(.20f, true);
             Check(protection.Calls == 6 && a.Calls == 4 && b.Calls == 3, "Empty-to-occupied startup was not reset independently of ordinary empty ticks.");
         }
-        var budget = new ModuleScheduler(() => clock);
+        var budget = new ModuleScheduler(() => clock) { FrameBudgetMilliseconds = 1.5 };
+        budget.BeginFrame();
+        clock += Stopwatch.Frequency / 500;
+        Check(!budget.HasBudget, "Hosted budget admitted work after its frame allowance.");
+        budget.Clear();
+        budget.BeginFrame();
+        clock += Stopwatch.Frequency / 500;
+        Check(budget.FrameBudgetMilliseconds == ModuleScheduler.DedicatedFrameBudgetMilliseconds && budget.HasBudget,
+            "Scheduler clear did not restore the dedicated frame allowance.");
         using (var host = new ModuleHost(log, budget))
         {
             var cold = new Module("ArrivalColdBudget"); host.Register(() => cold, cold.Name);
@@ -82,6 +90,15 @@ internal static class ArrivalPerformanceTests
         }
         Check(ids.Count == expected.Count && ids.ToHashSet().SetEquals(expected), "Incremental discovery lost or duplicated stable source identities across frame-cache resets.");
         Check(provider.WithinNear(Vector3.zero, 2, true, new Vector3(64, 0, 0)) && !provider.WithinNear(Vector3.zero, 2, true, new Vector3(640, 0, 0)), "Final current-player scope validation admitted old distant discovery.");
+        var broad = provider.For("HeimMender");
+        var ordered = new List<ZDO>();
+        broad.Query(ZoneSystem.GetZone(Vector3.zero), new SimulationDistance(2, 0, true), ordered);
+        ids.Clear();
+        foreach (bool unit in provider.CollectIds(broad, Vector3.zero, 2, true, ids)) provider.BeginCycle(true);
+        Check(ids.SequenceEqual(ordered.Select(record => record.m_uid)), "Sliced admin scope changed native traversal order.");
+        ids.Clear();
+        foreach (bool unit in provider.CollectIds(broad, Vector3.zero, 2, true, ids, resultLimit: 3)) { }
+        Check(ids.Count == 3, "Oversized admin scope lost its overflow sentinel.");
         ids.Clear(); provider.BeginCycle(true);
         using (var cancelled = provider.CollectIds(selection, Vector3.zero, 2, true, ids).GetEnumerator())
         { cancelled.MoveNext(); }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -11,7 +12,7 @@ using System;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 namespace HeimKit.Features.DoorKeeper;
-public sealed class DoorKeeper : IServerModule
+public sealed class DoorKeeper : IServerModule, IModuleSwitches, IModuleNumericSettings
 {
     private readonly DoorKeeperSettings _settings;
     private readonly ManualLogSource _logger;
@@ -24,6 +25,21 @@ public sealed class DoorKeeper : IServerModule
     private long _worldUid;
     private readonly string _directory;
     private readonly PlayerProcessingNotices _processing;
+    private SwitchBinding[]? _switches;
+    IReadOnlyList<SwitchBinding> IModuleSwitches.Switches => _switches ??= new SwitchBinding[]
+    {
+        new("Enabled", _settings.Enabled),
+        new("Debug logging", _settings.DebugMode, applyLive: true),
+    };
+    SwitchApplyMode IModuleSwitches.ApplyMode => SwitchApplyMode.Reinitialize;
+
+    IReadOnlyList<NumericSettingBinding> IModuleNumericSettings.NumericSettings => new[]
+    {
+        NumericSettingBinding.Create("Close delay (seconds)", _settings.CloseDelaySeconds,
+            "Applies to doors already open. A door still needs a clear doorway before it can close.",
+            () => "Applies on the next door check.")
+    };
+
     public string Name => "DoorKeeper";
     public bool IsActive { get; private set; }
     public DoorKeeper(ConfigFile config, ManualLogSource logger, PlayerServices players)
@@ -44,7 +60,7 @@ public sealed class DoorKeeper : IServerModule
         if (!_settings.Enabled.Value) return;
         if (!_compatibility.Supports(gameVersion)) { Log("DISABLED: unsupported game version " + gameVersion + "; required version " + _compatibility.RequiredVersion, LogLevel.Warning); return; }
         IsActive = true;
-        if (_settings.DebugLogging.Enabled) Log("Waiting for joined players and dedicated-server world", LogLevel.Debug);
+        if (_settings.DebugLogging.Enabled) Log("Waiting for a joined player and hosted world", LogLevel.Debug);
         try { _presenceRegistration = _players.Events.Subscribe(PresenceChanged, Fail, () => _processing.IsEmptyPaused, () => _processing.IsRunning, () => _processing.IsServerReady); }
         catch (Exception error) { Fail(error); }
         if (!IsActive) { var registration = _presenceRegistration; _presenceRegistration = null; registration?.Dispose(); }

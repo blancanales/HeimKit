@@ -12,7 +12,7 @@ namespace HeimKit.Features.TameTravel.Models;
 
 internal sealed class PortalJourney
 {
-    public ZNetPeer Peer = null!;
+    public TameTravelActor Traveller;
     public ZDOID Character;
     public string Name = "";
     public ZDOID Source, Destination;

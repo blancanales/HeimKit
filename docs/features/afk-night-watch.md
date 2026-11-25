@@ -1,5 +1,9 @@
 # AFKNightWatch
 
+In player-hosted worlds, the host and ready guests contribute to the same sleep vote. The host provides native bed state and local gameplay input to the shared activity observer.
+
+See [optional client setup](../client-setup.md) for the in-game status and admin controls.
+
 Coordinates majority sleep and excludes inferred-idle players from sleep voting. AFKRaidWatch controls raids independently. See [shared activity settings](../server-setup.md#playeractivity), [AFK limitations](../limitations.md#afk-detection-sleep-and-raids), and the [specification](../specs/afk-night-watch.md).
 
 ![AFKNightWatch: count eligible sleepers and apply the configured majority and grace period](../images/afk-night-watch-workflow.jpg)
@@ -12,7 +16,7 @@ Majority and AFK exclusion are independent. Disabling majority requires unanimit
 
 ## Configuration
 
-Settings belong under `[AFKNightWatch]`; stop the server before edits and restart afterward.
+Settings belong under `[AFKNightWatch]`. For hand edits, leave the hosted world or stop the dedicated server, edit the [active configuration](../client-setup.md#configuration-locations), then start the world again. **F7 → Server Settings** applies the sleep percentage and delay live. Changing the delay resets any pending sleep countdown, as does changing the percentage while Majority Sleep is enabled.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |

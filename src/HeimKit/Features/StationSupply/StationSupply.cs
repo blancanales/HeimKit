@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -11,7 +12,7 @@ using System;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 namespace HeimKit.Features.StationSupply;
-public sealed class StationSupply : IServerModule
+public sealed class StationSupply : IServerModule, IModuleSwitches, IModuleNumericSettings, IModuleIdle
 {
     private readonly StationSupplySettings _settings;
     private readonly ManualLogSource _logger;
@@ -23,6 +24,37 @@ public sealed class StationSupply : IServerModule
     private ZDOMan? _world;
     private long _worldUid;
     private readonly PlayerProcessingNotices _processing;
+    bool IModuleIdle.Idle => _controller?.Idle != false;
+    void IModuleIdle.HoldNewWork(bool hold)
+    {
+        if (_controller != null) _controller.HoldNewWork = hold;
+    }
+
+    private SwitchBinding[]? _switches;
+    IReadOnlyList<SwitchBinding> IModuleSwitches.Switches => _switches ??= new SwitchBinding[]
+    {
+        new("Enabled", _settings.Enabled),
+        new("Debug logging", _settings.DebugMode, applyLive: true),
+        new("Smelters", _settings.Smelters),
+        new("Charcoal kilns", _settings.CharcoalKilns),
+        new("Blast furnaces", _settings.BlastFurnaces),
+        new("Windmills", _settings.Windmills),
+        new("Spinning wheels", _settings.SpinningWheels),
+        new("Eitr refineries", _settings.EitrRefineries),
+        new("Frigid Kilns", _settings.FrigidKilns),
+        new("Shield generators", _settings.ShieldGenerators),
+        new("Fermenters", _settings.Fermenters),
+        new("Obliterators", _settings.Obliterators),
+    };
+    SwitchApplyMode IModuleSwitches.ApplyMode => SwitchApplyMode.Reinitialize;
+
+    IReadOnlyList<NumericSettingBinding> IModuleNumericSettings.NumericSettings => new[]
+    {
+        NumericSettingBinding.Create("Items per visit", _settings.MaxItemsPerVisit,
+            "Maximum items per intake visit, limited by station capacity. Fermenters take one item.",
+            () => "Applies when the next batch is sized.")
+    };
+
     public string Name => "StationSupply";
     public bool IsActive { get; private set; }
     public StationSupply(ConfigFile config, ManualLogSource logger, PlayerServices players)

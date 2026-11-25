@@ -1,8 +1,12 @@
 # SharedMap
 
-SharedMap saves community exploration and discoveries, then shares them through vanilla cartography tables. Install HeimKit on the dedicated server; players use unmodified clients and choose **Read Map** to receive updates. Collection works before any table exists.
+In a private or Start Server world, manage SharedMap under **F7 → Server Settings**. The host contributes new outdoor exploration before placing a table. The host and vanilla guests use **Read Map** to add the table’s community exploration and pins to their maps while keeping their personal pins.
 
-SharedMap and its portal, resource, dungeon, runestone, recurring-spawner and Dvergr structure marker settings default enabled. See [safety and limitations](../limitations.md#sharedmap) for discovery, client-update and upload limitations, and [server setup](../server-setup.md) for installation and shared settings.
+See [optional client setup](../client-setup.md) for the in-game status and admin controls.
+
+SharedMap saves community exploration and discoveries, then shares them through vanilla cartography tables. On a dedicated server, install HeimKit on the server. Players choose **Read Map** in the vanilla cartography table to receive updates. Collection works before any table exists.
+
+SharedMap and its portal, resource, dungeon, runestone, recurring-spawner and structure marker settings default enabled. See [safety and limitations](../limitations.md#sharedmap) for discovery, client-update and upload limitations, and [server setup](../server-setup.md) for installation and shared settings.
 
 ![SharedMap: explore, save and Read Map, with Portal Marker, Resource Marker, Dungeon Marker, Runestone Marker and Spawner Marker options](../images/shared-map-workflow.jpg)
 
@@ -28,9 +32,11 @@ While enabled, automatic portal management reserves every portal-icon pin in tab
 
 ## Resource Marker
 
-Records outdoor Copper, Tin, Silver, Obsidian, static Flametal deposits, Black Marble skull/rib remains and discovered Ancient Roots with labeled dot markers. Scraps, dungeon resources, creatures, dropped items, ordinary stone and player-built objects are excluded.
+Records outdoor Copper, Tin, Silver, Obsidian, static Flametal deposits, sinking Flametal pillars, Black Marble skull/rib remains and discovered Ancient Roots with labeled dot markers. Scraps, dungeon resources, creatures, dropped items, ordinary stone and player-built objects are excluded.
 
-Black Marble remains use labels such as `Black Marble 65%`. Both intact remains and their fractured mining forms qualify. Existing resource grouping, retrospective discovery, depletion removal and nearby-landmark hiding apply. See [discovery and client-update limits](../limitations.md#sharedmap).
+Each discovered Ashlands pillar gets its own `Flametal Pillar` dot. When the host observes the dive or the pillar disappears from the world object store, SharedMap retires the dot even when depleted resources are kept. Use Read Map after the table updates. See [client map updates](../limitations.md#client-map-updates).
+
+Black Marble remains use labels such as `Black Marble 65%`. An observed Soft Tissue deposit adds `(ST)` to the same pin, for example `Black Marble 65% (ST)`. The pin points to the tissue, and the percentage describes the marble. When only tissue remains, or the deposit has no uniquely matching skull, its label is `(ST)`. Mining out the tissue removes the suffix on the next table update. Both intact remains and their fractured mining forms qualify. Existing resource grouping, retrospective discovery, depletion removal and nearby-landmark hiding apply. See [discovery and client-update limits](../limitations.md#sharedmap).
 
 Ancient Roots receive individual labels such as `Ancient Root 65%`, showing the last observed native sap reserve. Nearby roots remain separate. No extractor is needed for discovery, and this percentage does not describe an extractor's stored sap. Temporarily empty roots remain visible at `0%` and update when native regeneration is observed. Unknown reserve shows `?%`. Roots use ordinary near-player discovery, with optional previously-explored discovery under ResourceDiscoverPreviouslyExplored, and the existing nearby-landmark display rule. See [root observation limits](../limitations.md#sharedmap).
 
@@ -38,7 +44,7 @@ Silver requires a direct pickaxe hit or a qualifying pickaxe impact near the nea
 
 ResourceClusterDistanceMeters groups the same resource type around fixed discovery anchors; zero shows each deposit. Tin groups show remaining discovered nodes, such as `Tin (3)`. Copper, Silver and Black Marble show remaining-section percentages, such as `Copper 65%`; `?%` means progress is unknown. Confirmed depleted nodes disappear when ResourceRemoveDepleted is true; false retains historical nodes.
 
-ResourceMarkerHideDistanceMeters defaults to 10 metres. A generated resource marker or group at or within that horizontal distance of a published portal, dungeon, runestone, physical-spawner or Dvergr structure marker is hidden to reduce clutter. Resource discoveries, grouping and depletion tracking are retained; another resource marker does not hide it. The comparison uses final published map positions after marker exclusions and offsets. Resources can reappear when the nearby landmark marker is removed or its source is disabled. Set the distance to 0 to disable this display rule. Personal pins are preserved. See [client map updates](../limitations.md#client-map-updates) for existing personal-map copies.
+ResourceMarkerHideDistanceMeters defaults to 10 metres. A generated resource marker or group at or within that horizontal distance of a published portal, dungeon, runestone, physical-spawner or structure marker is hidden to reduce clutter. Resource discoveries, grouping and depletion tracking are retained; another resource marker does not hide it. The comparison uses final published map positions after marker exclusions and offsets. Resources can reappear when the nearby landmark marker is removed or its source is disabled. Set the distance to 0 to disable this display rule. Personal pins are preserved. See [client map updates](../limitations.md#client-map-updates) for existing personal-map copies.
 
 ResourceDiscoverPreviouslyExplored also discovers eligible deposits in saved community-explored terrain without a revisit. Silver keeps its mining requirement. Turning the setting off retains accepted discoveries. Player-created dot pins keep their original records.
 
@@ -75,7 +81,7 @@ DungeonMarkerSync = true
 DungeonLootProgress = true
 ```
 
-Set `DungeonLootProgress = false` to show plain dungeon names without percentages. Leave `DungeonMarkerSync = true` to keep the entrance markers. Existing discoveries, visits and saved progress are retained. Stop the server before editing the active `heimkit.cfg`, then restart to apply the setting.
+Set `DungeonLootProgress = false` to show plain dungeon names without percentages. Leave `DungeonMarkerSync = true` to keep the entrance markers. Existing discoveries, visits and saved progress are retained. For file edits, use the [configuration instructions below](#configuration).
 
 | Dungeon | Tracked permanent pickup |
 | --- | --- |
@@ -99,11 +105,13 @@ This source defaults enabled and shares separate vanilla dot markers for placed 
 
 Eligible placed stones inside saved community exploration are also discovered automatically. Disabling RunestoneMarkerSync retains discoveries and removes its generated table publications during reconciliation.
 
-## Dvergr Structure Marker
+## Structure markers
 
 Share placed Dvergr Guard Tower, Dvergr Lighthouse and Dvergr Excavation locations as vanilla house pins, including ruined variants. The server discovers locations within native exploration range or in saved community-explored terrain. Choose **Read Map** at a cartography table to receive the markers.
 
-The three Dvergr settings control publication independently. While any switch is enabled, SharedMap records discoveries for all three kinds. Disabling a kind and restarting removes its generated pins from shared table data at the next reconciliation and keeps its discovery history. See [client map updates](../limitations.md#client-map-updates) for personal copies and icon filters.
+Fuling villages in the Plains have their own switch. The additional structure switch covers Draugr villages in the Meadows, Black Forest tower ruins, Swamp ruins, Mountain cabins, Ashlands Charred Fortresses and Deep North villages. The three Dvergr switches still work independently.
+
+While any structure switch is enabled, SharedMap records all supported kinds. Disabling publication in HeimKit Settings or editing the file and restarting removes the affected shared pins at the next reconciliation. Discovery history stays in the same world file. See [client map updates](../limitations.md#client-map-updates) for personal copies and icon filters.
 
 ## Spawner Marker
 
@@ -123,7 +131,7 @@ SharedMap changes only table map data. It preserves table ownership, creators, h
 
 ## Removing an unwanted shared pin
 
-Beside `HeimKit/SharedMap/world-<world UID>.map` in the active configuration directory, create a UTF-8 file named `world-<world UID>.pin-admin.request`. Use the same world prefix as the map file. Put one command in it:
+Beside the current world’s `.map` file in its [SharedMap storage directory](#storage-and-recovery), create a UTF-8 file named `world-<world UID>.pin-admin.request`. Use the same world prefix as the map file. Put one command in it:
 
 | Command | Action |
 | --- | --- |
@@ -137,11 +145,11 @@ Requests run with joined players and ready world services; no restart or DebugMo
 
 ### Worked example: remove a pin named Vile
 
-This procedure requires access to the dedicated server's files. Use the request file while SharedMap is enabled, the server is running and at least one player has joined the world. No server restart or DebugMode change is needed.
+Use the host’s files while SharedMap is enabled and at least one player is in the world.
 
-1. Locate the active `heimkit.cfg` using the configuration path logged at startup. For manager installations, use the active server profile; see [active configuration locations](../server-setup.md#shared-configuration-and-maintenance).
-2. From that configuration directory, open `HeimKit/SharedMap`. Identify the current world's `.map` file. For example, if it is `world-0000000000000123.map`, the request filename must be `world-0000000000000123.pin-admin.request`. Use your actual world's prefix throughout.
-3. Open the server's BepInEx console or active `BepInEx/LogOutput.log` so you can read SharedMap's administration messages.
+1. Locate the active `heimkit.cfg` using the configuration path logged at startup. For manager installations, use the profile that hosts the world. See [configuration locations](../client-setup.md#configuration-locations).
+2. From the folder containing that `heimkit.cfg`, open `SharedMap` for a player-hosted world or `HeimKit/SharedMap` for a dedicated server. Identify the current world's `.map` file. For example, if it is `world-0000000000000123.map`, the request filename must be `world-0000000000000123.pin-admin.request`. Use your actual world's prefix throughout.
+3. Open the host’s BepInEx console or active `BepInEx/LogOutput.log` so you can read SharedMap's administration messages.
 4. In the same directory as the `.map` file, create the request file with a text editor. Save as UTF-8, select **All files** in the save dialog and use the exact `.pin-admin.request` filename. Enable File Explorer's **File name extensions** display to check that `.txt` was not appended.
 5. Put only this line in the request file, then save and close it:
 
@@ -167,7 +175,11 @@ To undo the exclusion, recreate the same request file with `allow <pin ID>`, sub
 
 ## Configuration
 
-Settings belong under `[SharedMap]`. Stop the server before editing; restart to apply changes. Existing values are preserved and missing defaults are generated automatically. Updating does not turn an existing `RunestoneMarkerSync = false` or `SpawnerMarkerSync = false` into true; change those two values explicitly if you want to enable them in an existing configuration.
+From F7, portal markers, resource and dungeon discovery in explored areas, depleted resource removal, player map writes and shared pin checkmarks apply when current work finishes. SharedMap keeps its world data loaded.
+
+Changing **Portal grouping distance** from F7 updates the server's map markers during reconciliation. Players may need to read the map table again.
+
+Settings belong under `[SharedMap]`. For hand edits, leave the hosted world or stop the dedicated server, edit the [active configuration](../client-setup.md#configuration-locations), then start the world again. Existing values are preserved and missing defaults are generated automatically. Updating does not turn an existing `RunestoneMarkerSync = false` or `SpawnerMarkerSync = false` into true; change those two values explicitly if you want to enable them in an existing configuration.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -189,6 +201,8 @@ Settings belong under `[SharedMap]`. Stop the server before editing; restart to 
 | DvergrGuardTowerMarkerSync | true | Share discovered Dvergr guard towers, including ruins. |
 | DvergrLighthouseMarkerSync | true | Share discovered Dvergr lighthouses, including ruins. |
 | DvergrExcavationMarkerSync | true | Share discovered Dvergr excavations, including ruins. |
+| FulingVillageMarkerSync | true | Share discovered Fuling villages. |
+| OtherStructureMarkerSync | true | Share the additional structures listed in the structure marker section. |
 | AllowPlayerMapWrites | true | Accept player terrain/pin uploads; false retains server map data. |
 | TableIntervalSeconds | 10 | Nearby reconciliation interval; 2–120 seconds. |
 | MaxTablesPerPass | 1 | Table payloads per import/reconciliation/admin pass; 1–8. |
@@ -198,7 +212,7 @@ Settings belong under `[SharedMap]`. Stop the server before editing; restart to 
 
 ## Storage and recovery
 
-Files live in `HeimKit/SharedMap` beneath the active BepInEx configuration directory. Each uses `world-<world UID in hexadecimal>` as its prefix.
+Dedicated-server files live in `BepInEx/config/HeimKit/SharedMap`. Player-hosted files live in `BepInEx/config/HeimKit/Worlds/<world-id>/SharedMap`. The same world uses the same HeimKit directory in private and Start Server modes, with cloud or local Valheim saves. Each file uses `world-<world UID in hexadecimal>` as its prefix.
 
 | Extension | Saved state |
 | --- | --- |
@@ -209,7 +223,7 @@ Files live in `HeimKit/SharedMap` beneath the active BepInEx configuration direc
 | `.entrances` | Dungeon gateway identities, exterior coordinates, labels, visits and pickup progress. |
 | `.runestones` | Placed lore-stone discoveries and actual source points. |
 | `.spawners` | Recurring-source discoveries and terminal-destruction tombstones. |
-| `.structures` | Placed Dvergr structure discoveries. |
+| `.structures` | Placed structure discoveries. |
 | `.pin-state` | Shared checkmarks, source identities and marker refresh positions. |
 | `.pin-removals` | Selected pin exclusions. |
 
@@ -229,7 +243,7 @@ Discovery/publication details are capped at six per stream per minute; the [spec
 - `portals`: Portal marker publication.
 - `resources`: Outdoor resource discovery and retirement.
 - `dungeons`: Entrance discovery and pickup progress.
-- `landmarks`: Runestone, recurring-spawner and Dvergr structure observations.
+- `landmarks`: Runestone, recurring-spawner and structure observations.
 - `tables`: Cartography table and pin reconciliation.
 - `save`: Persistent state loading and saving.
 
@@ -238,3 +252,11 @@ Shared lifecycle, configuration, scope and timing topics follow the [logging con
 Optional [arrival diagnostics](../server-setup.md#performance-observations) correlate existing processing with player arrivals. They report passive protection or table-work observations without changing this feature's behavior.
 
 During the first two seconds of a nearby observed arrival, optional pin-change comparisons are skipped before decoding/comparison; arrival summaries count the skipped attempts. Other locations retain their diagnostics once the destination is known. Table validation, exploration, normalization, publication, uploads and standard result logs continue unchanged. Skipped Debug comparisons are not queued or replayed. See the shared [arrival observation contract](../architecture.md#logging).
+
+## Automatic host pacing
+
+The host can spread player sampling, marker discovery and periodic table preparation across updates. Dirty map stores can prepare snapshots on separate updates before their ordinary deadline.
+
+During a detected battle, the host pauses background exploration sampling, marker discovery and automatic table updates across the world. Players can still use tables and the host still saves pending changes on deadline. Background updates resume gradually after 30 seconds without battle evidence.
+
+The host can also detect a nearby alerted monster from its replicated state when another player owns the creature. This detection runs with PlayerActivity diagnostics off.

@@ -1,0 +1,32 @@
+# Adaptive throttling of server-side background work
+
+## Behavior and installation
+
+The world host automatically reduces optional work when an individual operation becomes expensive or multiple operations exhaust the shared update budget. Vanilla guests and HeimKit clients receive the same gameplay behavior. Only the host needs HeimKit. A remote client has no timing or authorization role. During pressure, stations may discover new supply later and optional map markers may appear later. TameTravel keeps its ordinary scheduling throughout player movement and combat.
+
+## Scheduling and measurement
+
+Extend Core ModuleScheduler and WorkSlice. Keep fixed operation identities and a bounded history per host world. Measure elapsed monotonic time and units completed at safe boundaries independently of Debug. Separate discovery, preparation and commit. Exclude empty polls from active-work averages and distinguish workloads with materially different costs. Preserve existing tighter per-stage limits and the overall soft budgets of 4 ms on dedicated hosts and 1.5 ms in player-hosted worlds.
+
+Compare a completed slice with the expected cost for the current unit count from its preceding exponentially weighted per-unit mean (weight 1/8, warm after eight productive samples). Treat a slice above three times baseline and above 1 ms as a spike. Exceeding the applicable slice or total update budget also limits subsequent admissions, including during warm-up and sustained overload. Start with one unit for an unknown operation. On a spike halve that operation's unit allowance down to one, yield the remainder, and defer its next optional admission by at least one update. When even one unit is expensive, increase its retry spacing geometrically up to one second and identify the indivisible step. Hold the pre-spike baseline during backoff. After eight consecutive within-budget productive admissions, increase allowance gradually and shorten retry spacing. Reset history on world unload and module disable. Never accumulate missed runs for replay.
+
+Charge elapsed host-update time once against the shared budget, including elapsed required work. Use elapsed time, remaining budget and recent unit cost before admitting another optional unit. Rotate eligible jobs fairly. During observed combat retain the existing hard stop on cooperative starts. Outside combat any fairness probe admits at most one bounded unit, with no burst of overdue work. Detection of an expensive native call can affect subsequent work only.
+
+## Initial operations and boundaries
+
+- StationSupply. Separate station and chest discovery and candidate evaluation from live inventory transactions. Slice discovery at stable candidate boundaries. Revalidate range, identity, ownership and inventory before committing. Keep active transfer progress, cancellation, timeouts and release of chest access on schedule. Attribute an expensive transaction step separately so a slow transfer does not inflate the discovery baseline.
+- SharedMap. Slice optional marker discovery and table preparation. Measure dirty snapshot stores separately from idle save checks, including payload size. Spread independent dirty-store preparations over updates and retain the existing durability deadline and final flush. Commit only a valid captured generation. If one serialization or write dominates, report its individual duration and size. Spacing saves alone cannot bound that operation.
+- WeatherGuard. A detected battle suspends protection and terrain refresh until 30 seconds after the last signal. Outside that pause, apply adaptive admission to optional probes and adaptive batch sizes to ongoing protection. Required native scene extension runs at its existing cadence. Preserve immediate occupied-world activation, current protection, creator identity, terrain-lifetime refresh and timely authority release. Measure required protection separately. A protection pass may do smaller batches only where coverage remains continuous. Preserve native combat damage and structural support behavior.
+- SeaSalvage. Pace nearby cell discovery, drop evaluation and admission of individual crates. Revalidate the original sources before an atomic transfer. Service consumed-source cleanup every update.
+- HeimMender. Pace damage discovery, observation and selection, then recheck current conditions before issuing automatic repairs. Confirm issued requests at ordinary cadence. Administrative requests start immediately and scan incrementally with bounded progress during combat.
+- TameTravel. Exclude travel detection, follower validation, transfer, arrival and recovery from adaptive delays. Register other modules only after measurements identify a significant operation with a safe yield point.
+
+## Diagnostics, lifecycle and security
+
+Reuse Core timing and feature Debug controls. Per operation, combine repeated transitions in a bounded minute summary with prior baseline, maximum duration, unit count and relevant bytes, effective slice size, deferrals by reason and oldest pending age. Distinguish time in optional work, required work and an indivisible call. Keep gameplay decisions independent of log settings. Use existing immediate failure and lifecycle reporting. Idle hosts follow the existing presence rules. Cancel pending cursors on world change and revalidate live objects before resuming. Add no world scan, prefab dependency, RPC or client control. Ordinary players and administrators cannot submit timing samples or request work through the throttle.
+
+## Acceptance criteria
+
+A large isolated spike reduces subsequent work for the measured operation. Many ordinary operations together respect the shared admission budget. Cheap operations with large percentage changes below the absolute floor continue normally within budget. Sustained expensive single units back off and remain identifiable. Normal workloads recover gradually without oscillating or starving other eligible jobs. An empty or replaced world retains no pending work. Travel progresses at normal cadence under throttle. Active station transactions finish or cancel cleanly, map saves meet durability requirements, and weather protection remains effective across batch boundaries in every hosting mode.
+
+WeatherGuard and SharedMap share the host battle detector. A bounded sample of replicated hostile creatures can trigger their pause even when the host has no live instance of the creature. See the [Core battle sampling bounds](../architecture.md) and [observation limits](../limitations.md).

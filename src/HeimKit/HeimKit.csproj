@@ -7,12 +7,18 @@
     <RootNamespace>HeimKit</RootNamespace>
     <Product>HeimKit</Product>
     <Title>HeimKit</Title>
-    <Version>0.2.3</Version>
+    <Version>0.2.4</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <GameManaged>$(ServerPath)\valheim_server_Data\Managed</GameManaged>
     <BepInExCore Condition="'$(BepInExCore)' == ''">$(ServerPath)\BepInEx\core</BepInExCore>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Client/Artwork/ControlPanel.png" LogicalName="HeimKit.Client.ControlPanel.png" />
+    <EmbeddedResource Include="Client/Artwork/MenuBanner.png" LogicalName="HeimKit.Client.MenuBanner.png" />
+    <EmbeddedResource Include="Client/Artwork/MenuScope.png" LogicalName="HeimKit.Client.MenuScope.png" />
+    <EmbeddedResource Include="Client/Artwork/MenuFeature.png" LogicalName="HeimKit.Client.MenuFeature.png" />
+    <EmbeddedResource Include="Client/Artwork/MenuClose.png" LogicalName="HeimKit.Client.MenuClose.png" />
+    <EmbeddedResource Include="Client/Artwork/MenuApply.png" LogicalName="HeimKit.Client.MenuApply.png" />
     <InternalsVisibleTo Include="HeimKit.Tests" />
     <None Include="..\..\config\heimkit.cfg" Link="heimkit.cfg" CopyToOutputDirectory="PreserveNewest" />
     <Reference Include="BepInEx"><HintPath>$(BepInExCore)\BepInEx.dll</HintPath><Private>false</Private></Reference>
@@ -23,6 +29,12 @@
     <Reference Include="Splatform"><HintPath>$(GameManaged)\Splatform.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>$(GameManaged)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(GameManaged)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(GameManaged)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(GameManaged)\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(GameManaged)\UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(GameManaged)\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(GameManaged)\UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.TextMeshPro"><HintPath>$(GameManaged)\Unity.TextMeshPro.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(GameManaged)\UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
   <Target Name="CheckReferences" BeforeTargets="ResolveReferences">

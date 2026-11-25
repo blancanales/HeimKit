@@ -14,7 +14,7 @@ internal sealed class ContainerRequests : IDisposable
     private readonly ObjectTransferAuthority _authority;
     private readonly IPlayerPresence _presence;
     private readonly Func<ZDOID, bool> _retained;
-    private readonly Action<ZDOID, long, int, string, float>? _reported;
+    private readonly Action<ZDOID, long, int, string, float, float>? _reported;
     private readonly ZDOMan _world = ZDOMan.instance;
     private readonly Dictionary<ZDOID, Request> _pending = new();
     private readonly List<Request> _work = new();
@@ -31,9 +31,11 @@ internal sealed class ContainerRequests : IDisposable
         internal bool Released;
     }
     internal ContainerRequests(ObjectTransferAuthority authority, IPlayerPresence presence, Func<ZDOID, bool> retained,
-        Action<ZDOID, long, int, string, float>? reported)
+        Action<ZDOID, long, int, string, float, float>? reported)
     { _authority = authority; _presence = presence; _retained = retained; _reported = reported; }
+    internal bool Idle => _pending.Count == 0;
     internal bool Contains(ZDOID id) => _pending.ContainsKey(id);
+    internal static bool IsOpen(int method) => method == Open;
     internal static bool IsRequest(int method) => method == Open || method == Stack || method == Take;
     internal static bool Shape(ZRoutedRpc.RoutedRPCData data, ZNetPeer peer, OwnershipLease lease) =>
         lease.StaticControl && lease.ManualContainerAccess && IsRequest(data.m_methodHash) && data.m_senderPeerID == peer.m_uid &&
@@ -128,7 +130,7 @@ internal sealed class ContainerRequests : IDisposable
         string response = request.Data.m_methodHash == Open ? "RPC_OpenResponse" : request.Data.m_methodHash == Stack ? "RPC_StackResponse" : "RPC_TakeAllResponse";
         ZRoutedRpc.instance.InvokeRoutedRPC(request.Peer.m_uid, request.Lease.Id, response, false);
     }
-    private void Report(Request request, string status, float now) => _reported?.Invoke(request.Lease.Id, request.Peer.m_uid, request.Data.m_methodHash, status, now);
+    private void Report(Request request, string status, float now) => _reported?.Invoke(request.Lease.Id, request.Peer.m_uid, request.Data.m_methodHash, status, now, Math.Max(0f, now - request.Started));
     public void Dispose()
     {
         ModuleScheduler.Current.Forget(this);

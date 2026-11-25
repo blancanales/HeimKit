@@ -13,7 +13,7 @@ For gameplay or networking changes, inspect the actual methods and ownership pat
 Version and documentation preparation is a required part of building, including local builds supplied for gameplay use. Complete it before invoking the build command.
 
 1. Determine whether code has changed since the last identified build. Give changed development code a prerelease identifier describing the work and an increasing build counter; a development DLL does not advance the published plain release version. Choose a plain release version only when preparing an intended release. Rebuilding identical code retains its existing identifier; changed code must not be supplied under that previous identity. Debug and Release configurations may share an identifier when built from identical source, with configuration identified separately.
-2. Synchronize `<Version>` in `src/HeimKit/HeimKit.csproj`, the BepInPlugin version and startup message in `src/HeimKit/Plugin.cs`, and the appropriate HeimKit development or release row in [Supported environment](server-setup.md#supported-environment). Preserve the published release baseline when building development DLLs. These identify the same build; use numeric assembly metadata where required and retain the full development identity in informational metadata. Leave the game compatibility guard unchanged unless a compatibility change is explicitly within scope.
+2. Synchronize `<Version>` in `src/HeimKit/HeimKit.csproj`, the BepInPlugin version and startup message in `src/HeimKit/Plugin.cs`, and the appropriate HeimKit development or release row in [Supported environment](server-setup.md#supported-environment). Preserve the published release baseline when building development DLLs. These identify the same build; use numeric assembly metadata where required and retain the full development identity in informational metadata. For a release, align the game compatibility guard with the latest validated Valheim release and the supported environment table. Development builds retain that baseline until a newer Valheim release has been validated.
 3. Update the affected feature specifications and user guides for the behavior and configuration included in that version. Update the architecture, contributor procedures and reference config when their contracts or defaults change. Update README benefits/scope when needed, using links for detailed facts and version values. Documentation must describe the code about to be built, rather than an earlier build.
 4. Build only after the version and applicable documentation are synchronized. When delivering the artifact, state its exact HeimKit version and location in the active chat so the user can distinguish it from previous builds. Build/test results and live-testing instructions stay in chat; do not create release journals, validation records or task checklists in the documentation.
 
@@ -25,7 +25,7 @@ For every Thunderstore release, update the root `CHANGELOG.md` before packaging.
 
 ## Set up a feature
 
-Add a feature only when requested. Establish its intended behavior and dedicated-server-only feasibility before writing gameplay code. Inspect the actual game APIs and ownership behavior; identify blockers for unmodified clients. Keep the feature specification current as implementation proceeds, without a task diary or completion checklist.
+Add a feature only when requested. Establish the intended player experience and which parts require HeimKit on the world host, the player's client, or both before writing gameplay code. Inspect the actual game APIs and ownership behavior; identify blockers for unmodified clients. Keep the feature specification current as implementation proceeds, without a task diary or completion checklist.
 
 1. Create `src/HeimKit/Features/<FeatureName>/`. Use the chosen feature name, without development labels or the word Feature in class names.
 2. Create `<FeatureName>Settings.cs` first. Bind the feature's section, Enabled switch, defaults, descriptions and validation ranges. Use DiagnosticsSettings for global DebugMode. Bind a visible DebugMode setting defaulting false in the feature section, including disabled features, and pass both switches to DebugLoggingResolver for the hidden suppression override. Settings classes define values; they do not load or save separate files.
@@ -73,7 +73,9 @@ Keep the README focused on the user's decision to use HeimKit. Put detailed conf
 
 | Content | Destination |
 | --- | --- |
-| Supported game/loader/runtime versions, installation, shared configuration, general troubleshooting and removal | `docs/server-setup.md` |
+| Supported game/loader/runtime versions, server installation, shared configuration, general troubleshooting and removal | `docs/server-setup.md` |
+| Windows game installation, player-hosted worlds and configuration locations | `docs/client-setup.md` |
+| F7 menu access, feature status and in-game settings | `docs/heimkit-settings.md` |
 | World-save backup and recovery instructions for File Explorer and in-game save management | `docs/world-backups.md` |
 | Build commands, development environment and external BepInEx/Valheim/Harmony/Thunderstore references | `docs/development.md` |
 | Feature usage, settings, administration and diagnostic fields | `docs/features/<feature-name>.md` |

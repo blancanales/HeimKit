@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -11,7 +12,7 @@ using BepInEx.Logging;
 using HeimKit.Configuration;
 using HeimKit.Core.Players;
 namespace HeimKit.Features.HeimMender;
-public sealed class HeimMender : IServerModule
+public sealed class HeimMender : IServerModule, IModuleSwitches, IModuleNumericSettings, IAdministrativeReconciliation
 {
     private readonly ConfigFile _config;
     private readonly HeimMenderSettings _settings;
@@ -27,6 +28,23 @@ public sealed class HeimMender : IServerModule
     private int _requestId;
     private ZDOMan? _world;
     private long _worldUid;
+    private SwitchBinding[]? _switches;
+    IReadOnlyList<SwitchBinding> IModuleSwitches.Switches => _switches ??= new SwitchBinding[]
+    {
+        new("Enabled", _settings.Enabled),
+        new("Debug logging", _settings.DebugMode, applyLive: true),
+        new("Automatic repairs", _settings.AutomaticEnabled),
+    };
+    SwitchApplyMode IModuleSwitches.ApplyMode => SwitchApplyMode.SelfReconciling;
+    void IAdministrativeReconciliation.ScheduleReconciliation() => _administrativeReconcile = true;
+
+    IReadOnlyList<NumericSettingBinding> IModuleNumericSettings.NumericSettings => new[]
+    {
+        NumericSettingBinding.Create("Automatic repairs per cycle", _settings.MaxRepairsPerCycle,
+            "Maximum repair requests per automatic cycle. Repairs already queued keep their place.",
+            () => _settings.AutomaticEnabled.Value ? "Applies on the next automatic repair cycle." : "Used when automatic repairs are enabled.")
+    };
+
     public string Name => "HeimMender";
     public bool IsActive { get; private set; }
     public HeimMender(ConfigFile config, ManualLogSource logger, PlayerServices players)
@@ -46,6 +64,7 @@ public sealed class HeimMender : IServerModule
         _configuration = new(_config, _settings, _logger);
         ApplyEnabled();
     }
+    private bool _administrativeReconcile;
     private void ApplyEnabled()
     {
         bool enabled = _settings.Enabled.Value && _compatible && !_failed && ModuleFailureProtection.MayStart(Name);
@@ -65,7 +84,14 @@ public sealed class HeimMender : IServerModule
     public void Tick(float now)
     {
         _configuration?.Tick(now);
-        ApplyEnabled();
+        if (_administrativeReconcile)
+        {
+            _administrativeReconcile = false;
+            using var change = _players.Events.AdministrativeChange();
+            ApplyEnabled();
+            if (_settings.Enabled.Value && !IsActive) _players.Events.MarkActivationFailed();
+        }
+        else ApplyEnabled();
         try
         {
             bool ready = WorldServices.Activity && WorldServices.Terrain;
@@ -122,7 +148,7 @@ public sealed class HeimMender : IServerModule
     private void Log(string message, LogLevel level = LogLevel.Info) => DiagnosticLog.Write(_logger, Name, message, level: level);
     public void Shutdown()
     {
-        IsActive = false; _compatible = false; _occupied = false; _processing.Reset();
+        IsActive = false; _compatible = false; _occupied = false; _administrativeReconcile = false; _processing.Reset();
         var registration = _presenceRegistration; _presenceRegistration = null;
         ModuleCleanup.Run(_logger, Name, () => registration?.Dispose(), StopController, () => _configuration?.Dispose(), () => _administration?.Dispose());
         _configuration = null; _administration = null; _world = null;

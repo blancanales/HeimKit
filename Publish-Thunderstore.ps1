@@ -14,7 +14,7 @@ param(
     [string]$PackageName = 'HeimKit',
     [string]$WebsiteUrl = 'https://github.com/blancanales/HeimKit',
     [string]$ReadmeBaseUrl = 'https://github.com/blancanales/HeimKit/blob/main',
-    [string]$Description = 'Server-only: Infinite Torches (InfiniteTorches), braziers, Shared Map (SharedMap), exploration, ore/dungeon/runestone/spawner pins, weather, AFK sleep/raids, tame portals, auto doors, tree renewal, sunken loot, repairs, StationSupply chest feeding.',
+    [string]$Description = 'Gameplay for Windows player-hosted worlds and dedicated servers, with HeimKit Settings (F7). Infinite torches, SharedMap, weather protection, AFK sleep and raids, tame portals, auto doors, tree renewal, sunken cargo, repairs and StationSupply.',
     [string[]]$AdditionalDependencies = @(),
     [switch]$Force
 )

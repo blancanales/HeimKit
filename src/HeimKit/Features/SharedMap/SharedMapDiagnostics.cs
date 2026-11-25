@@ -39,7 +39,7 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
     public void LandmarkResults(int runestones, int spawners, int retired, int structures)
     {
         if (runestones + spawners > 0) DiagnosticLog.Write(_logger, "SharedMap", $"Discovered {runestones} runestones and {spawners} recurring spawner sources.");
-        if (structures > 0) DiagnosticLog.Write(_logger, "SharedMap", $"Discovered {structures} Dvergr structures.");
+        if (structures > 0) DiagnosticLog.Write(_logger, "SharedMap", $"Discovered {structures} structures.");
         if (retired > 0) DiagnosticLog.Write(_logger, "SharedMap", $"Recorded confirmed destruction of {retired} discovered spawner sources.");
     }
     public void DungeonPinCleanup(int sources, int pins)
@@ -57,7 +57,8 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
         if (spawnersEnabled && spawners == 0) DiagnosticLog.Write(_logger, "SharedMap", "Spawner markers are enabled, but no compatible physical spawner types were registered; new spawner discovery is unavailable. Enable SharedMap.DebugMode for catalog rejection details.", level: LogLevel.Warning);
         if (!DiagnosticsEnabled) return;
         if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Landmarks, "Completed the landmark prefab audit.", new (string, object?)[] { ("runestone_families", runestones), ("spawner_families", spawners),
-            ("structure_locations", structures), ("dvergr_guard_tower_marker_sync", settings.DvergrGuardTowerMarkerSync.Value),
+            ("structure_locations", structures), ("fuling_village_marker_sync", settings.FulingVillageMarkerSync.Value),
+            ("other_structure_marker_sync", settings.OtherStructureMarkerSync.Value), ("dvergr_guard_tower_marker_sync", settings.DvergrGuardTowerMarkerSync.Value),
             ("dvergr_lighthouse_marker_sync", settings.DvergrLighthouseMarkerSync.Value),
             ("dvergr_excavation_marker_sync", settings.DvergrExcavationMarkerSync.Value), ("runestone_marker_sync", runestonesEnabled), ("spawner_marker_sync", spawnersEnabled), ("spawner_candidates", spawnerCandidates), ("spawner_rejections", spawnerRejections), ("interior_sources", "omitted_without_verified_layout_and_gateway"), ("pin_type", 3) }, LogLevel.Debug);
     }
@@ -229,6 +230,36 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
     {
         if (!DiagnosticsEnabled || !_budget.Reserve(now, "resource_catalog", 1, false)) return;
         if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", CoreLogTopics.Scope, "Observed resource discovery and publication scope this pass.", new (string, object?)[] { ("discovery_records", deposits), ("resource_markers_last_preparation", markers), ("discover_previously_explored", retrospective), ("pin_type", (int)Minimap.PinType.Icon3), ("client_read_confirmed", false) }, LogLevel.Debug);
+    }
+
+    public void TissueAssociation(int tissue, int? skull, string reason)
+    {
+        if (!DiagnosticsEnabled || !_budget.Reserve(UnityEngine.Time.unscaledTime, "tissue_association", 6)) return;
+        DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Resources, "Checked Soft Tissue placement.",
+            new (string, object?)[] { ("deposit_id", tissue), ("skull_id", skull), ("reason", reason) }, LogLevel.Debug);
+    }
+
+    public void PillarChange(HeimKit.Features.SharedMap.Models.ResourceDeposit deposit, ZDOID id, string reason)
+    {
+        if (!DiagnosticsEnabled || !_budget.Reserve(UnityEngine.Time.unscaledTime, "pillar_change", 6)) return;
+        DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Resources, "Updated Flametal pillar marker.",
+            new (string, object?)[] { ("deposit_id", deposit.Identity), ("native_id", id), ("reason", reason),
+                ("x_m", deposit.X), ("y_m", deposit.Y), ("z_m", deposit.Z) }, LogLevel.Debug);
+    }
+
+    public void TissueFracture(ZDOID record, int? discovery)
+    {
+        if (!DiagnosticsEnabled || !_budget.Reserve(UnityEngine.Time.unscaledTime, "tissue_fracture", 6)) return;
+        DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Resources, "Observed intact tissue removal before mining handoff.",
+            new (string, object?)[] { ("native_id", record), ("deposit_id", discovery) }, LogLevel.Debug);
+    }
+
+    public void ResourceRefresh(long started, int deposits, int markers)
+    {
+        if (!DiagnosticsEnabled || !_budget.Reserve(UnityEngine.Time.unscaledTime, "resource_refresh", 1)) return;
+        double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000d / System.Diagnostics.Stopwatch.Frequency;
+        DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Resources, "Prepared resource markers.",
+            new (string, object?)[] { ("elapsed_ms", ms), ("discovery_records", deposits), ("markers", markers) }, LogLevel.Debug);
     }
 
     public void ResourcePublished(MapMarker? previous, MapMarker actual, MapMarker published, int slot)

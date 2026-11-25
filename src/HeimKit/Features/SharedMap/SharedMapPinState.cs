@@ -173,13 +173,17 @@ public sealed class SharedMapPinState
     }
     private SnapshotFile? _snapshotFile;
     private SnapshotFile Persistence => _snapshotFile ??= new SnapshotFile(FilePath);
+    internal bool Clean => Revision == _savedRevision && _snapshotFile?.Pending != true;
+    internal SnapshotPreparation? Preparation { get; set; }
     public bool SaveIfDue(float now, float interval)
     {
         bool saved = Persistence.Poll();
         if (saved) _savedRevision = Persistence.CompletedGeneration;
-        if (Persistence.Pending || !_nextSave.Ready(now)) return saved;
+        if (Persistence.Pending) return saved;
+        bool due = Preparation?.Ready(_nextSave, now, interval, Revision != _savedRevision) ?? (interval <= 0 || _nextSave.Ready(now));
+        if (!due) return saved;
         _nextSave.Postpone(now, interval);
-        if (Revision != _savedRevision) Persistence.Queue(Snapshot(), Revision);
+        if (Revision != _savedRevision) SnapshotPreparation.Queue(Preparation, now, Persistence, Snapshot, Revision);
         return saved;
     }
     public bool Save()

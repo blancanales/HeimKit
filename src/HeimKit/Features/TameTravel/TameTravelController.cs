@@ -25,6 +25,8 @@ internal sealed class TameTravelController : IDisposable
         SayMethod = "Say".GetStableHashCode(), ChatMethod = "ChatMessage".GetStableHashCode();
     private readonly Harmony _hooks = new("heimkit.tametravel.traversal");
     private IDisposable? _packets;
+    private TameTravelLocalActions? _localActions;
+    internal TameTravelGuestSummons? GuestSummons { get; private set; }
     private readonly TameTravelSettings _settings;
     private readonly ManualLogSource _log;
     private readonly PlayerServices _players;
@@ -70,18 +72,39 @@ internal sealed class TameTravelController : IDisposable
             _hooks.Patch(AccessTools.Method(typeof(Player), "TeleportTo"), prefix: new HarmonyMethod(typeof(TameTravelController), nameof(CompetingTeleport)));
             _hooks.Patch(AccessTools.Method(typeof(Chat), "TeleportPlayer"), prefix: new HarmonyMethod(typeof(TameTravelController), nameof(AdministrativeTeleport)));
             _packets = IncomingPackets.RegisterData<(ZNetPeer? Peer, ZDO? Actor, uint Revision, int Emote)>(BeginData, AfterPlayerData, failed: _fail);
+            GuestSummons = new(settings, _rules, _authority, _commands, _following, log, module.Fail);
+            if (players.PlayerHosted) _localActions = new TameTravelLocalActions(this, settings, module.Fail);
             _messages = players.RoutedMessages.Subscribe(Observe, module.Fail);
         }
         catch
         {
             if (ReferenceEquals(_current, this)) _current = null;
-            ModuleCleanup.Run(log, "TameTravel", () => _packets?.Dispose(), () => _hooks.UnpatchSelf(), () => _following.Dispose(), () => _placement.Dispose(), () => _authority.Dispose());
+            ModuleCleanup.Run(log, "TameTravel", () => _packets?.Dispose(), () => _hooks.UnpatchSelf(), () => _localActions?.Dispose(), () => GuestSummons?.Dispose(), () => _following.Dispose(), () => _placement.Dispose(), () => _authority.Dispose());
             throw;
         }
     }
+    internal bool Idle => GuestSummons?.Idle != false && _localActions?.Summons.Pending != true && _reserved.Count == 0 && _transfers.Count == 0 && _authority.Idle;
+    internal bool AcceptSummons => !_holdNewWork;
+    internal bool SummonerReady(TameTravelActor host) => host.IsLocal &&
+        _rules.ActorRejection(host, out _, allowInterior: true) == null;
+    internal void RecordSummonMove(ZDOID character, ZDOID animal, Vector3 point) =>
+        TameTravelDiagnostics.SummonMove(_settings, _log, character, animal, point);
+    internal void SummonsArrived(int count, Player player)
+    {
+        if (count > 0) DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Travel, $"{player.GetPlayerName()} arrived with {count} Dead Raiser summon(s).", level: LogLevel.Info);
+    }
+    private bool _holdNewWork;
+    internal void HoldNewWork(bool hold)
+    {
+        _holdNewWork = hold;
+        _following.HoldNewWork = hold;
+    }
+
     public void Tick(float now)
     {
         if (!ModuleScheduler.Current.Due(this, "processing", now, 0.25f)) return;
+        _localActions?.Summons.Expire();
+        GuestSummons?.Tick(now, !_holdNewWork);
         using var timing = _diagnostics.OptionalEnabled ? _diagnostics.Measure(now, () => _samples.Count + _following.Count) : null;
         _expiredMessages.Clear();
         foreach (var pair in _messagesSeen) if (now - pair.Value > 30) _expiredMessages.Add(pair.Key);
@@ -91,20 +114,30 @@ internal sealed class TameTravelController : IDisposable
         if (peers.Count > 64) { ClearJourneys(); return; }
         _sampleSnapshot.Clear(); foreach (var pair in _samples) _sampleSnapshot.Add(pair);
         foreach (var pair in _sampleSnapshot)
-            if (!ContainsPeer(peers, pair.Value.Peer) || pair.Value.Character != pair.Value.Peer.m_characterID || !_rules.Actor(pair.Value.Peer, out _))
+            if ((!pair.Value.Traveller.IsLocal && !ContainsPeer(peers, pair.Value.Traveller.Remote!)) || pair.Value.Character != pair.Value.Traveller.Character || _rules.ActorRejection(pair.Value.Traveller, out _, allowInterior: true) != null)
             { Cancel(pair.Value, now); _samples.Remove(pair.Key); }
         _stops.Tick(now);
         _commands.Tick(now);
+        if (TameTravelActor.TryLocal(Player.m_localPlayer, out var host) &&
+            _samples.TryGetValue(host.Owner, out var localSample) && localSample.Journey != null)
+            UpdateJourney(localSample, host.Local!.transform.position, now, now, fresh: false);
         int count = Math.Min(8, peers.Count);
         for (int i = 0; i < count; i++)
         {
             var peer = peers[(_cursor + i) % peers.Count];
-            string? actorReason = _rules.ActorRejection(peer, out var actor);
+            string? actorReason = _rules.ActorRejection(peer, out var actor, allowInterior: true);
             _diagnostics.ActorGate(peer, actorReason);
             if (actorReason != null) continue;
             if (!_samples.TryGetValue(peer.m_uid, out var sample))
-            { _samples.Add(peer.m_uid, new PlayerSample { Peer = peer, Character = peer.m_characterID, Position = actor.GetPosition(), Time = now, Emote = actor.GetInt(ZDOVars.s_emoteID) }); continue; }
-            if (!ReferenceEquals(sample.Peer, peer) || sample.Character != peer.m_characterID) continue;
+            { _samples.Add(peer.m_uid, new PlayerSample { Traveller = peer, Character = peer.m_characterID, Position = actor.GetPosition(), Time = now, Emote = actor.GetInt(ZDOVars.s_emoteID) }); continue; }
+            if (!sample.Traveller.Matches(peer) || sample.Character != peer.m_characterID) continue;
+            if (Character.InInterior(actor.GetPosition()))
+            {
+                if (sample.Journey != null) Cancel(sample, now);
+                sample.PendingPortal = null;
+                sample.Position = actor.GetPosition(); sample.Time = now;
+                continue;
+            }
             bool reset = sample.Positions.Overflowed;
             if (reset)
             {
@@ -113,7 +146,7 @@ internal sealed class TameTravelController : IDisposable
             }
             var bindings = _bindingSnapshot; bindings.Clear();
             foreach (var binding in _commands.Bindings.Values)
-                if (!binding.Pending && ReferenceEquals(binding.Peer, peer) && binding.Character == sample.Character) bindings.Add(binding);
+                if (!binding.Pending && binding.Traveller.Matches(peer) && binding.Character == sample.Character) bindings.Add(binding);
             if (bindings.Count > 0 && sample.Journey == null && sample.Positions.Count == 0)
                 { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(peer, "source_observation", "awaiting_owner_position")) _diagnostics.Traversal(peer, "source_observation", "awaiting_owner_position", fields: new (string, object?)[] { ("followers", bindings.Count) }, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("last_observation_age_s", now - sample.Time) } : null); } }
             List<ZDO>? records = null; bool queried = false;
@@ -125,7 +158,7 @@ internal sealed class TameTravelController : IDisposable
                     if (now - observation.Time > 2) Cancel(sample, now, "stale_position_observation", observation.Position);
                     else UpdateJourney(sample, observation.Position, observation.Time, now, fresh: true);
                 }
-                else if (bindings.Count > 0)
+                else if (!_holdNewWork && bindings.Count > 0)
                 {
                     if (sample.PendingPortal != null && ResolvePortal(sample, observation, now, bindings))
                     { sample.Position = observation.Position; sample.Time = observation.Time; continue; }
@@ -144,7 +177,7 @@ internal sealed class TameTravelController : IDisposable
             // stationary/loading owner has no newer payload. Arrival itself needs
             // an accepted owner position, not this polling snapshot.
             if (bindings.Count == 0) sample.PendingPortal = null;
-            else if (sample.PendingPortal != null)
+            else if (!_holdNewWork && sample.PendingPortal != null)
                 ResolvePortal(sample, new PositionObservation(sample.Position, sample.Time, 0), now, bindings);
             if (sample.Journey != null) UpdateJourney(sample, actor.GetPosition(), now, now, fresh: false);
         }
@@ -166,26 +199,33 @@ internal sealed class TameTravelController : IDisposable
                 continue;
             }
             if (_transfers.Count >= 64) break;
-            if (!_rules.Actor(journey.Peer, out var traveller) || journey.Arrived >= 0 && TameTravelTraversalRules.DestinationRejection(
-                (traveller.GetPosition() - journey.Exit).sqrMagnitude, now - journey.Entered, _settings.TravelWindowSeconds.Value) != null) continue;
+            if (!_rules.Actor(journey.Traveller, out var traveller) || journey.Arrived >= 0 && TameTravelTraversalRules.DestinationRejection(
+                (journey.Traveller.Position(traveller) - journey.Exit).sqrMagnitude, now - journey.Entered, _settings.TravelWindowSeconds.Value) != null) continue;
             var id = journey.Followers.Dequeue(); var animal = ZDOMan.instance.GetZDO(id);
             bool waiting = journey.Waiting.Contains(id);
             string? rejected = _rules.AnimalRejection(animal);
-            if (rejected == null && !waiting && !_commands.FollowingAuthorized(id, journey.Peer, journey.Character, journey.Name)) rejected = "follow_authorization_ended";
+            if (rejected == null && !waiting && !_commands.FollowingAuthorized(id, journey.Traveller, journey.Character, journey.Name)) rejected = "follow_authorization_ended";
             if (rejected == null && !TameTravelCommandRules.ConsentValid(waiting ? TameOrder.Wait : TameOrder.Follow, animal!.GetString(ZDOVars.s_follow), journey.Name)) rejected = "follow_state_changed";
             if (rejected == null && (animal!.GetPosition() - journey.SourcePosition).sqrMagnitude > _settings.FollowerRangeMeters.Value * _settings.FollowerRangeMeters.Value) rejected = "animal_left_source_range";
             if (rejected != null)
             {
                 journey.EndReason = rejected; _reserved.Remove(id);
-                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(journey.Peer, "transfer_start", rejected, journey.Source, id, transition: true)) _diagnostics.Traversal(journey.Peer, "transfer_start", rejected, journey.Source, id, fields: null, transition: true, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("animal_position", animal?.GetPosition()), ("source_position", journey.SourcePosition) } : null); } }
+                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(journey.Traveller, "transfer_start", rejected, journey.Source, id, transition: true)) _diagnostics.Traversal(journey.Traveller, "transfer_start", rejected, journey.Source, id, fields: null, transition: true, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("animal_position", animal?.GetPosition()), ("source_position", journey.SourcePosition) } : null); } }
                 continue;
             }
             var transfer = new AnimalTransfer { Record = animal!, Id = id, Journey = journey, Started = now, PhaseTime = now, Waiting = waiting };
             _transfers.Add(id, transfer);
-            if (!_authority.Acquire(transfer, now))
+            if (!_authority.Acquire(transfer, now, out var ownershipReason))
             {
-                journey.EndReason = "authority_acquisition_unavailable"; _transfers.Remove(id); _reserved.Remove(id);
-                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(journey.Peer, "transfer_start", journey.EndReason, journey.Source, id, transition: true)) _diagnostics.Traversal(journey.Peer, "transfer_start", journey.EndReason, journey.Source, id, fields: null, transition: true, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("owner", animal!.GetOwner()), ("data_revision", animal.DataRevision) } : null); } }
+                _transfers.Remove(id);
+                if (journey.Traveller.IsLocal && ownershipReason is ("previous_owner_not_ready" or "previous_owner_transport_unavailable"))
+                {
+                    // Retry through the normal bounded scheduler while the journey is still valid.
+                    journey.Followers.Enqueue(id);
+                    continue;
+                }
+                journey.EndReason = "authority_acquisition_unavailable"; _reserved.Remove(id);
+                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(journey.Traveller, "transfer_start", journey.EndReason, journey.Source, id, transition: true)) _diagnostics.Traversal(journey.Traveller, "transfer_start", journey.EndReason, journey.Source, id, fields: null, transition: true, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("owner", animal!.GetOwner()), ("data_revision", animal.DataRevision) } : null); } }
             }
             break;
         }
@@ -204,13 +244,14 @@ internal sealed class TameTravelController : IDisposable
         {
             // One sector scan and portal-definition pass per sampled player/pass,
             // reused for every queued segment rather than rescanning per packet.
-            var scope = TameTravelRules.Nearby(position);
+            var scope = TameTravelRules.Nearby(position, static (z, _) =>
+                z.GetPrefab() == "portal_wood".GetStableHashCode() || z.GetPrefab() == "portal_stone".GetStableHashCode());
             _portalSnapshot.Clear();
             if (scope != null) foreach (var z in scope)
                 if (z.GetPrefab() == "portal_wood".GetStableHashCode() || z.GetPrefab() == "portal_stone".GetStableHashCode()) _portalSnapshot.Add(z);
             records = scope == null ? null : _portalSnapshot; queried = true;
         }
-        if (records == null) { { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(sample.Peer, "source_entry", "scope_over_capacity"); } return; }
+        if (records == null) { { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(sample.Traveller, "source_entry", "scope_over_capacity"); } return; }
         int nearby = 0, supported = 0, entries = 0, linkedEntries = 0;
         ZDO? soleNearby = null, source = null, linkedSource = null;
         foreach (var record in records)
@@ -235,14 +276,14 @@ internal sealed class TameTravelController : IDisposable
         if (linkedEntries == 1) { source = linkedSource; }
         else if (linkedEntries > 1 || entries != 1)
         {
-            { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(sample.Peer, "source_entry", linkedEntries > 1 || entries > 1 ? "ambiguous_trigger" : supported > 0 ? "outside_trigger" : nearby > 0 ? "source_portal_ineligible" : "no_portal_nearby", source: nearby == 1 ? soleNearby!.m_uid : (ZDOID?)null)) _diagnostics.Traversal(sample.Peer, "source_entry", linkedEntries > 1 || entries > 1 ? "ambiguous_trigger" : supported > 0 ? "outside_trigger" : nearby > 0 ? "source_portal_ineligible" : "no_portal_nearby", source: nearby == 1 ? soleNearby!.m_uid : (ZDOID?)null, fields: new (string, object?)[] { ("pos", position), ("followers", bindings.Count) }, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("portals", nearby), ("supported_portals", supported), ("creator", nearby == 1 ? soleNearby!.GetLong(ZDOVars.s_creator) : (long?)null), ("trigger_matches", entries), ("paired_trigger_matches", linkedEntries) } : null); } }
+            { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(sample.Traveller, "source_entry", linkedEntries > 1 || entries > 1 ? "ambiguous_trigger" : supported > 0 ? "outside_trigger" : nearby > 0 ? "source_portal_ineligible" : "no_portal_nearby", source: nearby == 1 ? soleNearby!.m_uid : (ZDOID?)null)) _diagnostics.Traversal(sample.Traveller, "source_entry", linkedEntries > 1 || entries > 1 ? "ambiguous_trigger" : supported > 0 ? "outside_trigger" : nearby > 0 ? "source_portal_ineligible" : "no_portal_nearby", source: nearby == 1 ? soleNearby!.m_uid : (ZDOID?)null, fields: new (string, object?)[] { ("pos", position), ("followers", bindings.Count) }, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("portals", nearby), ("supported_portals", supported), ("creator", nearby == 1 ? soleNearby!.GetLong(ZDOVars.s_creator) : (long?)null), ("trigger_matches", entries), ("paired_trigger_matches", linkedEntries) } : null); } }
             return;
         }
         var portalSource = source!;
         string? pairReason = PortalPairRejection(portalSource, out var destination);
         if (pairReason != null)
         {
-            _diagnostics.PortalPair(sample.Peer, portalSource, destination, pairReason);
+            _diagnostics.PortalPair(sample.Traveller, portalSource, destination, pairReason);
             if (TameTravelPortalRules.CanWait(pairReason))
                 sample.PendingPortal = new PortalWitness { Source = portalSource, SourceId = portalSource.m_uid,
                     Destination = portalSource.GetConnectionZDOID(ZDOExtraData.ConnectionType.Portal), Tag = portalSource.GetString(ZDOVars.s_tag),
@@ -252,14 +293,14 @@ internal sealed class TameTravelController : IDisposable
         BeginJourney(sample, portalSource, destination!, observation, now, bindings, pointOnly ? "fresh_inside_after_gap" : "owner_position_history");
     }
     private void BeginJourney(PlayerSample sample, ZDO portalSource, ZDO destination, PositionObservation observation, float now,
-        List<FollowBinding> bindings, string mode)
+        List<FollowBinding> bindings, string mode, Vector3? nativeExit = null)
     {
         var position = observation.Position;
         var portal = TameTravelRules.Portal(portalSource)!;
-        var journey = new PortalJourney { Peer = sample.Peer, Character = sample.Character, Name = sample.Peer.m_playerName,
+        var journey = new PortalJourney { Traveller = sample.Traveller, Character = sample.Character, Name = sample.Traveller.Name,
             Source = portalSource.m_uid, Destination = destination.m_uid, SourcePosition = portalSource.GetPosition(), DestinationPosition = destination.GetPosition(),
             SourceRotation = portalSource.GetRotation(), DestinationRotation = destination.GetRotation(), Tag = portalSource.GetString(ZDOVars.s_tag), Entered = observation.Time,
-            Exit = destination.GetPosition() + destination.GetRotation() * Vector3.forward * portal!.m_exitDistance + Vector3.up };
+            Exit = nativeExit ?? destination.GetPosition() + destination.GetRotation() * Vector3.forward * portal!.m_exitDistance + Vector3.up };
         float range = _settings.FollowerRangeMeters.Value;
         _orderedBindings.Clear();
         foreach (var binding in bindings) if (binding.Consent <= observation.Time) _orderedBindings.Add(binding);
@@ -276,7 +317,7 @@ internal sealed class TameTravelController : IDisposable
             if (reason == null && (animal!.GetPosition() - portalSource.GetPosition()).sqrMagnitude > range * range) reason = "animal_outside_portal_range";
             if (reason != null)
             {
-                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(sample.Peer, "follower_entry", reason, portalSource.m_uid, b.Animal)) _diagnostics.Traversal(sample.Peer, "follower_entry", reason, portalSource.m_uid, b.Animal, fields: new (string, object?)[] { ("pos", position) }, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("animal_position", animal?.GetPosition()), ("portal_position", portalSource.GetPosition()), ("maximum_range_m", range), ("order", b.Order) } : null); } }
+                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(sample.Traveller, "follower_entry", reason, portalSource.m_uid, b.Animal)) _diagnostics.Traversal(sample.Traveller, "follower_entry", reason, portalSource.m_uid, b.Animal, fields: new (string, object?)[] { ("pos", position) }, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("animal_position", animal?.GetPosition()), ("portal_position", portalSource.GetPosition()), ("maximum_range_m", range), ("order", b.Order) } : null); } }
                 continue;
             }
             journey.Followers.Enqueue(b.Animal); if (b.Order == TameOrder.Wait) journey.Waiting.Add(b.Animal);
@@ -287,10 +328,10 @@ internal sealed class TameTravelController : IDisposable
         if (journey.Followers.Count > 0)
         {
             sample.Journey = journey; _diagnostics.Entry(journey, mode);
-            TameTravelCommands.Feedback(sample.Peer, "Portal trip detected; move clear and stay within 48 metres of the destination exit until animal arrival is confirmed.");
+            TameTravelCommands.Feedback(sample.Traveller, "Portal trip detected; move clear and stay within 48 metres of the destination exit until animal arrival is confirmed.");
         }
     }
-    private static string? PortalPairRejection(ZDO source, out ZDO? destination)
+    internal static string? PortalPairRejection(ZDO source, out ZDO? destination)
     {
         var target = source.GetConnectionZDOID(ZDOExtraData.ConnectionType.Portal);
         destination = ZDOMan.instance.GetZDO(target);
@@ -313,12 +354,12 @@ internal sealed class TameTravelController : IDisposable
         if (rejected != null)
         {
             sample.PendingPortal = null;
-            { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(sample.Peer, "source_pair_wait", rejected, witness.SourceId); }
+            { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(sample.Traveller, "source_pair_wait", rejected, witness.SourceId); }
             return true;
         }
         if (witness.Destination.IsNone() && !target.IsNone()) witness.Destination = target;
         string? pairReason = PortalPairRejection(source, out var destination);
-        if (pairReason != null) _diagnostics.PortalPair(sample.Peer, source, destination, pairReason);
+        if (pairReason != null) _diagnostics.PortalPair(sample.Traveller, source, destination, pairReason);
         if (pairReason != null && !TameTravelPortalRules.CanWait(pairReason))
         { sample.PendingPortal = null; return true; }
         if (now - current.Time > 2) return true; // Never invent an arrival from a stale polling position.
@@ -332,7 +373,7 @@ internal sealed class TameTravelController : IDisposable
         if (!atExit && (current.Position - witness.Position).sqrMagnitude > 144)
         {
             sample.PendingPortal = null;
-            { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(sample.Peer, "source_pair_wait", "movement_outside_witnessed_endpoints", source.m_uid); }
+            { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(sample.Traveller, "source_pair_wait", "movement_outside_witnessed_endpoints", source.m_uid); }
             return true;
         }
         if (pairReason != null) return true;
@@ -354,7 +395,7 @@ internal sealed class TameTravelController : IDisposable
     private void UpdateJourney(PlayerSample sample, Vector3 p, float observedAt, float now, bool fresh)
     {
         var j = sample.Journey!;
-        if (!Pair(j) || j.Character != sample.Peer.m_characterID || j.Name != sample.Peer.m_playerName)
+        if (!Pair(j) || j.Character != sample.Traveller.Character || j.Name != sample.Traveller.Name)
         { Cancel(sample, now, "pair_or_actor_changed", p); return; }
         var delta = p - j.Exit;
         bool atExit = new Vector2(delta.x, delta.z).sqrMagnitude <= 9 && Math.Abs(delta.y) <= 4;
@@ -365,14 +406,14 @@ internal sealed class TameTravelController : IDisposable
             string? arrivalRejection = TameTravelTraversalRules.ArrivalRejection(atExit, observedAt - j.Entered, (p - j.SourcePosition).sqrMagnitude);
             if (arrivalRejection == "arrival_too_early")
             {
-                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(j.Peer, "arrival", arrivalRejection, j.Source)) _diagnostics.Traversal(j.Peer, "arrival", arrivalRejection, j.Source, fields: new (string, object?)[] { ("pos", p) }, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("entry_age_s", observedAt - j.Entered), ("expected_exit", j.Exit) } : null); } }
+                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(j.Traveller, "arrival", arrivalRejection, j.Source)) _diagnostics.Traversal(j.Traveller, "arrival", arrivalRejection, j.Source, fields: new (string, object?)[] { ("pos", p) }, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("entry_age_s", observedAt - j.Entered), ("expected_exit", j.Exit) } : null); } }
                 return;
             }
             if (arrivalRejection != null) { Cancel(sample, now, arrivalRejection, p); return; }
             if (atExit)
             {
                 j.Arrived = observedAt;
-                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(j.Peer, "arrival", "linked_exit_observed", j.Source, transition: true)) _diagnostics.Traversal(j.Peer, "arrival", "linked_exit_observed", j.Source, fields: new (string, object?)[] { ("pos", p) }, transition: true, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("expected_exit", j.Exit), ("entry_age_s", observedAt - j.Entered) } : null); } }
+                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(j.Traveller, "arrival", "linked_exit_observed", j.Source, transition: true)) _diagnostics.Traversal(j.Traveller, "arrival", "linked_exit_observed", j.Source, fields: new (string, object?)[] { ("pos", p) }, transition: true, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("expected_exit", j.Exit), ("entry_age_s", observedAt - j.Entered) } : null); } }
             }
         }
         else
@@ -381,27 +422,35 @@ internal sealed class TameTravelController : IDisposable
             if (rejection != null) { Cancel(sample, now, rejection, p); return; }
             // Start the destination path map while the arrival settles, so the access check is ready when placement begins.
             if (!j.Ready && now - j.PathWarmed >= 1 && ZoneSystem.instance.IsZoneLoaded(j.Exit)) { j.PathWarmed = now; _placement.WarmAccess(p, j.Exit); }
-            if (j.Ready || now - j.Arrived < 2 || now - j.Entered < 8 || !PlayerWorldScope.Finite(j.Peer.m_refPos) || (j.Peer.m_refPos - p).sqrMagnitude > 16) return;
-            if (j.Barrier == 0) j.Barrier = _authority.SendBarrier(j.Peer, null, now);
+            if (j.Ready || now - j.Arrived < 2 || now - j.Entered < 8) return;
+            if (j.Traveller.IsLocal)
+            {
+                j.Ready = !j.Traveller.Local!.IsTeleporting() && ZNetScene.instance.IsAreaReady(j.Exit) &&
+                    ZoneSystem.instance.IsZoneLoaded(j.Exit);
+                return;
+            }
+            var peer = j.Traveller.Remote!;
+            if (!PlayerWorldScope.Finite(peer.m_refPos) || (peer.m_refPos - p).sqrMagnitude > 16) return;
+            if (j.Barrier == 0) j.Barrier = _authority.SendBarrier(peer, null, now);
             else if (_authority.Echoed(j.Barrier))
             {
                 j.Ready = true;
-                { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(j.Peer, "destination", "readiness_confirmed", j.Source, transition: true); }
+                { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(j.Traveller, "destination", "readiness_confirmed", j.Source, transition: true); }
             }
         }
     }
     private void UpdateTransfer(AnimalTransfer t, float now)
     {
-        var sample = _samples.TryGetValue(t.Journey.Peer.m_uid, out var found) ? found : null;
+        var sample = _samples.TryGetValue(t.Journey.Traveller.Owner, out var found) ? found : null;
         string? reason = null;
         if (sample?.Journey != t.Journey) reason = "journey_changed";
-        else if (!_rules.Actor(t.Journey.Peer, out var actor)) reason = "traveller_unavailable";
+        else if (!_rules.Actor(t.Journey.Traveller, out var actor)) reason = "traveller_unavailable";
         else if (!Pair(t.Journey)) reason = "portal_pair_changed";
-        else if (t.Journey.Arrived >= 0 && TameTravelTraversalRules.DestinationRejection((actor.GetPosition() - t.Journey.Exit).sqrMagnitude,
+        else if (t.Journey.Arrived >= 0 && TameTravelTraversalRules.DestinationRejection((t.Journey.Traveller.Position(actor) - t.Journey.Exit).sqrMagnitude,
             now - t.Journey.Entered, _settings.TravelWindowSeconds.Value, t.Moved) is string destination) reason = destination;
         else if (ZDOMan.instance.GetZDO(t.Id) != t.Record || t.Record.m_uid != t.Id) reason = "animal_record_replaced";
         else if (_rules.AnimalRejection(t.Record) is string rejected) reason = rejected;
-        else if (!t.Waiting && !_commands.FollowingAuthorized(t.Id, t.Journey.Peer, t.Journey.Character, t.Journey.Name)) reason = "follow_authorization_ended";
+        else if (!t.Waiting && !_commands.FollowingAuthorized(t.Id, t.Journey.Traveller, t.Journey.Character, t.Journey.Name)) reason = "follow_authorization_ended";
         else if (!TameTravelCommandRules.ConsentValid(t.Waiting ? TameOrder.Wait : TameOrder.Follow, t.Record.GetString(ZDOVars.s_follow), t.Journey.Name)) reason = "follow_changed";
         else if (TameTravelTraversalRules.PhaseExpired(t.Phase, t.PlacementStarted, now - t.PhaseTime)) reason = "phase_timeout";
         if (reason != null) { FinishTransfer(t, false, reason); return; }
@@ -424,17 +473,26 @@ internal sealed class TameTravelController : IDisposable
             if (_placementUsed) return;
             _placementUsed = true;
             if ((t.Record.GetPosition() - t.Source).sqrMagnitude > 144)
-            { { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(t.Journey.Peer, "placement", "animal_moved_from_drain_source", t.Journey.Source, t.Id); } return; }
+            { { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(t.Journey.Traveller, "placement", "animal_moved_from_drain_source", t.Journey.Source, t.Id); } return; }
             if (!_placement.Find(t, _transfers.Values, _players.Presence.Peers, now, _settings.DebugLogging.Enabled, out var position))
             {
-                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(t.Journey.Peer, "placement", _placement.WaitReason, t.Journey.Source, t.Id)) _diagnostics.Traversal(t.Journey.Peer, "placement", _placement.WaitReason, t.Journey.Source, t.Id, fields: new (string, object?)[] { ("pos", ZDOMan.instance.GetZDO(t.Journey.Character)?.GetPosition()) }, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("blocking_object", _placement.BlockingObject), ("phase_age_s", now - t.PhaseTime), ("expected_exit", t.Journey.Exit), ("search_cursor", t.PlacementCursor), ("candidates", t.PlacementCandidates), ("rejections", TameTravelDiagnostics.PlacementReasons(t)), ("walkout_rejections", TameTravelDiagnostics.Reasons(t.PlacementWalkoutRejections)), ("surface_blocks", TameTravelDiagnostics.Reasons(t.PlacementSurfaceBlocks)), ("overlap_hits", TameTravelDiagnostics.Reasons(t.PlacementOverlapHits)) } : null); } }
+                { if (_diagnostics.SelectionEnabled) { if (_diagnostics.TraversalReady(t.Journey.Traveller, "placement", _placement.WaitReason, t.Journey.Source, t.Id)) _diagnostics.Traversal(t.Journey.Traveller, "placement", _placement.WaitReason, t.Journey.Source, t.Id, fields: new (string, object?)[] { ("pos", ZDOMan.instance.GetZDO(t.Journey.Character)?.GetPosition()) }, ready: true, verboseFields: _diagnostics.VerboseAfterNormalEnabled ? new (string, object?)[] { ("blocking_object", _placement.BlockingObject), ("phase_age_s", now - t.PhaseTime), ("expected_exit", t.Journey.Exit), ("search_cursor", t.PlacementCursor), ("candidates", t.PlacementCandidates), ("rejections", TameTravelDiagnostics.PlacementReasons(t)), ("walkout_rejections", TameTravelDiagnostics.Reasons(t.PlacementWalkoutRejections)), ("surface_blocks", TameTravelDiagnostics.Reasons(t.PlacementSurfaceBlocks)), ("overlap_hits", TameTravelDiagnostics.Reasons(t.PlacementOverlapHits)) } : null); } }
                 return;
             }
             // The original record remains owned and fenced throughout the move.
             TameTravelPlacement.Move(t, position); t.Placement = position; t.Moved = true; t.Journey.Moved++;
+            if (_settings.DebugLogging.Enabled)
+                DiagnosticLog.Write(_log, "TameTravel", TameTravelLogTopics.Travel,
+                    $"Outdoor tame relocated character={t.Journey.Character} animal={t.Id} order={(t.Waiting ? TameOrder.Wait : TameOrder.Follow)} source={t.Source} destination={position}.",
+                    level: LogLevel.Debug);
             t.Phase = 2; t.PhaseTime = now;
             ZDOMan.instance.ForceSendZDO(t.Id);
-            t.Barrier = _authority.SendBarrier(t.Journey.Peer, t.Record, now);
+            if (t.Journey.Traveller.IsLocal)
+            {
+                FinishTransfer(t, true);
+                return;
+            }
+            t.Barrier = _authority.SendBarrier(t.Journey.Traveller.Remote!, t.Record, now);
             return;
         }
         if (t.Phase == 2 && _authority.Echoed(t.Barrier) && now - t.PhaseTime >= 0.5f)
@@ -460,13 +518,14 @@ internal sealed class TameTravelController : IDisposable
                 Tamed = same ? t.Record.GetBool(ZDOVars.s_tamed) : (bool?)null, Rider = same ? t.Record.GetLong(ZDOVars.s_user) : (long?)null,
                 PhaseAge = Time.unscaledTime - t.PhaseTime, BarrierEchoed = _authority.Echoed(t.Barrier) };
         }
-        _transfers.Remove(t.Id); _reserved.Remove(t.Id); _authority.Release(t.Id, resetDestination: t.Moved && !confirmed);
-        t.FollowContinues = !t.Waiting && _commands.FollowingAuthorized(t.Id, t.Journey.Peer, t.Journey.Character, t.Journey.Name);
+        _transfers.Remove(t.Id); _reserved.Remove(t.Id); _authority.Release(t.Id, keepServerOwner: t.Journey.Traveller.IsLocal && confirmed,
+            resetDestination: t.Moved && !confirmed, restoreUndrainedOwner: t.Journey.Traveller.IsLocal);
+        t.FollowContinues = !t.Waiting && _commands.FollowingAuthorized(t.Id, t.Journey.Traveller, t.Journey.Character, t.Journey.Name);
         if (!confirmed) t.Journey.EndReason = reason;
         if (confirmed)
         {
             t.Journey.Confirmed++;
-            if (t.FollowContinues) _following.Command(t.Journey.Peer, t.Record, TameOrder.Follow);
+            if (t.FollowContinues) _following.Command(t.Journey.Traveller, t.Record, TameOrder.Follow);
         }
         _diagnostics.Transfer(t, confirmed, snapshot);
     }
@@ -477,14 +536,14 @@ internal sealed class TameTravelController : IDisposable
         if (j.Moved == 0)
         {
             reason ??= j.EndReason ?? "no_animal_transfer_completed";
-            { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(j.Peer, "journey_ended", reason, j.Source, transition: true); }
+            { if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(j.Traveller, "journey_ended", reason, j.Source, transition: true); }
             DiagnosticLog.Write(_log, "TameTravel", $"Portal travel for {j.Name} ended before relocation.");
-            TameTravelCommands.Feedback(j.Peer, TameTravelTraversalRules.CancellationMessage(reason) + " Following animals keep their permission; optional portal waits need a fresh command.");
+            TameTravelCommands.Feedback(j.Traveller, TameTravelTraversalRules.CancellationMessage(reason) + " Following animals keep their permission; optional portal waits need a fresh command.");
             return;
         }
         DiagnosticLog.Write(_log, "TameTravel", j.Moved == j.Confirmed ? $"Moved {j.Confirmed} follower(s) for {j.Name}; destination ownership resumed." :
             $"Relocated {j.Moved} follower(s) for {j.Name}; destination ownership confirmed for {j.Confirmed}.");
-        TameTravelCommands.Feedback(j.Peer, j.Moved == j.Confirmed ? $"Portal arrival confirmed for {j.Confirmed} animal(s)." :
+        TameTravelCommands.Feedback(j.Traveller, j.Moved == j.Confirmed ? $"Portal arrival confirmed for {j.Confirmed} animal(s)." :
             "Animal relocation was recorded but destination ownership was not fully confirmed; check the destination before retrying.");
     }
     private void Cancel(PlayerSample sample, float now, string reason = "session_or_competing_teleport", Vector3? position = null)
@@ -512,7 +571,10 @@ internal sealed class TameTravelController : IDisposable
         if (method == TeleportMethod || method == TeleportPlayerMethod)
         {
             var data = ZdoPackets.ReadRouted(packet);
-            foreach (var s in _samples.Values) if (s.Character == target || target.IsNone() && (data.m_targetPeerID == 0 || data.m_targetPeerID == s.Peer.m_uid)) Cancel(s, now);
+            if (!target.IsNone()) GuestSummons?.CancelCharacter(target);
+            else if (data.m_targetPeerID == 0) GuestSummons?.CancelAll();
+            else GuestSummons?.Cancel(data.m_targetPeerID);
+            foreach (var s in _samples.Values) if (s.Character == target || target.IsNone() && (data.m_targetPeerID == 0 || data.m_targetPeerID == s.Traveller.Owner)) Cancel(s, now);
             return;
         }
         if (method != CommandMethod && method != SayMethod && method != ChatMethod) return;
@@ -520,21 +582,92 @@ internal sealed class TameTravelController : IDisposable
         var key = (peer.m_uid, routed.m_msgID);
         if (_messagesSeen.ContainsKey(key) || _messagesSeen.Count >= 1024) return;
         _messagesSeen.Add(key, now);
-        if (!_samples.TryGetValue(peer.m_uid, out var sample) || !ReferenceEquals(sample.Peer, peer) || now - sample.CommandTime < 1) return;
+        if (!_samples.TryGetValue(peer.m_uid, out var sample) || !sample.Traveller.Matches(peer) || now - sample.CommandTime < 1) return;
         sample.CommandTime = now;
         try { _commands.Observe(peer, target, method, parameters, now); }
         catch (EndOfStreamException) { /* Malformed command is not consent; native handling remains independent. */ }
     }
+    private PlayerSample LocalSample(TameTravelActor host, float now)
+    {
+        if (_samples.TryGetValue(host.Owner, out var existing))
+        {
+            if (existing.Traveller.Matches(host) && existing.Character == host.Character) return existing;
+            Cancel(existing, now);
+        }
+        var sample = new PlayerSample { Traveller = host, Character = host.Character, Time = now };
+        _samples[host.Owner] = sample;
+        return sample;
+    }
+
+    internal void LocalCommand(TameTravelActor host, string text, bool emote)
+    {
+        if (_rules.ActorRejection(host, out _, allowInterior: true) != null) return;
+        if (!emote && text.Trim().Equals("!tame", StringComparison.OrdinalIgnoreCase))
+        {
+            TameTravelCommands.Feedback(host, "!follow: follow. !stay: stop/cancel. !wait: stop and keep one portal trip.");
+            return;
+        }
+
+        bool recognized = emote ? TameTravelCommandRules.Emote(text, out var order) :
+            TameTravelCommandRules.Chat(text, out order);
+        if (!recognized) return;
+        float now = Time.unscaledTime;
+        var sample = LocalSample(host, now);
+        if (now - sample.CommandTime < 1) return;
+        sample.CommandTime = now;
+        _commands.Request(host, order, now);
+    }
+
+    internal void LocalToggle(TameTravelActor host, ZDO? animal, bool message) =>
+        _commands.ObserveNativeToggle(host, animal, message, Time.unscaledTime);
+
+    internal void LocalPortalAccepted(TameTravelActor host, ZDO source, ZDOID expectedDestination,
+        Vector3 sourcePosition, Vector3 exit)
+    {
+        if (_holdNewWork || !_rules.Actor(host, out _) ||
+            !ReferenceEquals(ZDOMan.instance.GetZDO(source.m_uid), source) || TameTravelRules.Portal(source) == null ||
+            PortalPairRejection(source, out var destination) != null || destination!.m_uid != expectedDestination) return;
+
+        float now = Time.unscaledTime;
+        var bindings = _bindingSnapshot;
+        bindings.Clear();
+        foreach (var binding in _commands.Bindings.Values)
+            if (!binding.Pending && binding.Traveller.Matches(host) && binding.Character == host.Character)
+                bindings.Add(binding);
+        if (bindings.Count == 0) return;
+
+        var sample = LocalSample(host, now);
+        BeginJourney(sample, source, destination, new PositionObservation(sourcePosition, now, 0), now,
+            bindings, "native_host_portal", nativeExit: exit);
+    }
+
+    internal void LocalPortalFinished(TameTravelActor host, Vector3 position)
+    {
+        if (!_samples.TryGetValue(host.Owner, out var sample) || sample.Journey == null ||
+            !sample.Traveller.Matches(host) || sample.Character != host.Character) return;
+        float now = Time.unscaledTime;
+        if (!_rules.Actor(host, out _) || !ZNetScene.instance.IsAreaReady(sample.Journey.Exit))
+        {
+            Cancel(sample, now, "local_arrival_unavailable", position);
+            return;
+        }
+        UpdateJourney(sample, position, now, now, fresh: true);
+        if (sample.Journey is { Arrived: < 0 })
+            Cancel(sample, now, "local_arrival_mismatch", position);
+    }
+
     private static void CompetingTeleport(Player __instance)
     {
         var c = _current; if (c == null) return;
         var id = __instance.GetZDOID();
+        c.GuestSummons?.CancelCharacter(id);
         foreach (var s in c._samples.Values) if (s.Character == id) c.Cancel(s, Time.unscaledTime);
     }
     private static void AdministrativeTeleport(long targetPeerID)
     {
         var c = _current; if (c == null) return;
-        if (targetPeerID == 0) { c.ClearJourneys(); return; }
+        if (targetPeerID == 0) { c.GuestSummons?.CancelAll(); c.ClearJourneys(); return; }
+        c.GuestSummons?.Cancel(targetPeerID);
         if (c._samples.TryGetValue(targetPeerID, out var s)) c.Cancel(s, Time.unscaledTime);
     }
     private static bool BeginData(IncomingPackets.Context context, ref ZPackage packet, out (ZNetPeer? Peer, ZDO? Actor, uint Revision, int Emote) state)
@@ -568,22 +701,23 @@ internal sealed class TameTravelController : IDisposable
         var peer = state.Peer; var actor = state.Actor;
         if (peer == null || actor == null || !actor.IsValid() || actor.DataRevision <= state.Revision ||
             actor.m_uid != peer.m_characterID || actor.GetOwner() != peer.m_uid || !ReferenceEquals(ZDOMan.instance.GetZDO(peer.m_characterID), actor)) return;
+        GuestSummons?.Observe(peer, actor, Time.unscaledTime, !_holdNewWork);
         int emote = actor.GetInt(ZDOVars.s_emoteID);
         string command = actor.GetString(ZDOVars.s_emote);
         bool recognized = TameTravelCommandRules.Emote(command, out _);
         if (emote != state.Emote && recognized) _diagnostics.Command(peer, "emote_applied", command, counter: emote);
-        string? actorReason = _rules.ActorRejection(peer, out var current);
+        string? actorReason = _rules.ActorRejection(peer, out var current, allowInterior: true);
         _diagnostics.ActorGate(peer, actorReason);
         if (actorReason != null || !ReferenceEquals(actor, current))
         { if (emote != state.Emote && recognized) _diagnostics.Command(peer, "rejected", command, actorReason, emote); return; }
-        if (!_samples.TryGetValue(peer.m_uid, out var sample) || !ReferenceEquals(sample.Peer, peer) || sample.Character != peer.m_characterID)
+        if (!_samples.TryGetValue(peer.m_uid, out var sample) || !sample.Traveller.Matches(peer) || sample.Character != peer.m_characterID)
         { if (emote != state.Emote && recognized) _diagnostics.Command(peer, "rejected", command, "player_sample_unavailable", emote); return; }
         if (!sample.PlayerDataObserved)
         { sample.PlayerDataObserved = true; _diagnostics.Command(peer, "player_data_applied", command, counter: emote); }
         bool watching = sample.Journey != null;
         if (!watching) foreach (var binding in _commands.Bindings.Values)
-            if (ReferenceEquals(binding.Peer, peer) && binding.Character == sample.Character) { watching = true; break; }
-        if (watching || emote > sample.Emote && TameTravelCommandRules.Emote(command, out _))
+            if (binding.Traveller.Matches(peer) && binding.Character == sample.Character) { watching = true; break; }
+        if (!Character.InInterior(actor.GetPosition()) && (watching || emote > sample.Emote && TameTravelCommandRules.Emote(command, out _)))
             sample.Positions.Add(new PositionObservation(actor.GetPosition(), Time.unscaledTime, actor.DataRevision));
         else { sample.Position = actor.GetPosition(); sample.Time = Time.unscaledTime; }
         if (emote <= sample.Emote) return;
@@ -598,7 +732,7 @@ internal sealed class TameTravelController : IDisposable
     {
         if (_disposed) return; _disposed = true;
         var errors = new List<Exception>();
-        foreach (Action step in new Action[] { () => _messages.Dispose(), () => _packets?.Dispose(), () => _hooks.UnpatchSelf(), ClearJourneys, () => _commands.ClearForShutdown(), () => _stops.ClearPendingForShutdown(), () => _following.Dispose(), () => _authority.Dispose(), () => _placement.Dispose() })
+        foreach (Action step in new Action[] { () => _messages.Dispose(), () => _packets?.Dispose(), () => _hooks.UnpatchSelf(), () => _localActions?.Dispose(), () => GuestSummons?.Dispose(), ClearJourneys, () => _commands.ClearForShutdown(), () => _stops.ClearPendingForShutdown(), () => _following.Dispose(), () => _authority.Dispose(), () => _placement.Dispose() })
             try { step(); } catch (Exception error) { errors.Add(error); }
         if (ReferenceEquals(_current, this)) _current = null;
         _samples.Clear(); _commands.Bindings.Clear(); _reserved.Clear(); _messagesSeen.Clear(); _transfers.Clear();

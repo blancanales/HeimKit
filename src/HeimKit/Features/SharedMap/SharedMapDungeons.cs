@@ -78,7 +78,7 @@ internal sealed class SharedMapDungeons : IDisposable
         {
             var location = ZoneSystem.instance.m_locations[_locationCursor++];
             if (!location.m_prefab.IsValid) continue;
-            string name = location.m_prefab.Name;
+            string name = PrefabAssetRequest.AssetName(ref location.m_prefab);
             if (!SharedMapDungeonPrefab.Labels.ContainsKey(name) || !_found.Add(name)) continue;
             int hash = name.GetStableHashCode();
             if (_prefabs.TryReuse(hash, out var cached))
@@ -181,9 +181,9 @@ internal sealed class SharedMapDungeons : IDisposable
         }
     }
 
-    public void Tick(float now)
+    public void Tick(float now, AdaptiveOperation? batch = null)
     {
-        if (!_metadataReady) { InspectOne(now); return; }
+        if (!_metadataReady) { batch?.Count(); InspectOne(now); return; }
         // Queue real observations, including their original usable player position, before deferring evaluation.
         if ((_settings.DungeonDiscoverPreviouslyExplored.Value || _store.Count > 0 && _loot != null) && _nextScan.Ready(now) && _pending.Count < 32768)
         {
@@ -196,15 +196,16 @@ internal sealed class SharedMapDungeons : IDisposable
                 else
                 {
                     _scan.Clear(); _scanCursor = 0;
+                    batch?.Count();
                     _scanComplete = _world.GetAllZDOsWithPrefabIterative(_proxyName, _scan, ref _sector);
                     if (_scan.Count > SharedMapDungeonStore.MaximumDiscoveries)
                         throw new InvalidOperationException("Dungeon scan candidate limit exceeded; discoveries were retained.");
                 }
             }
-            for (int i = 0; i < 256 && _scanCursor < _scan.Count && _pending.Count < 32768; i++)
+            for (int i = 0; i < 256 && _scanCursor < _scan.Count && _pending.Count < 32768 && (batch?.Take() ?? true); i++)
                 Enqueue(_scan[_scanCursor++], null);
         }
-        for (int i = 0; i < 256 && _pending.Count > 0; i++)
+        for (int i = 0; i < 256 && _pending.Count > 0 && (batch?.Take() ?? true); i++)
         {
             if (i > 0 && !ModuleScheduler.Current.HasBudget) break;
             var candidate = _pending.Dequeue();

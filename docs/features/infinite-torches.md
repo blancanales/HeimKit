@@ -1,5 +1,9 @@
 # InfiniteTorches
 
+In player-hosted worlds, eligible host-owned lights refill through the same native fuel request and confirmation as guest-owned lights.
+
+See [optional client setup](../client-setup.md) for the in-game status and admin controls.
+
 Automatically refills eligible torches and braziers to normal capacity without spending player inventory fuel, including brazier coal. Optional campfire, hearth and bonfire refilling defaults off and can be controlled by fire type.
 
 ![InfiniteTorches: automatic fuel upkeep with optional campfire, hearth and bonfire controls disabled by default](../images/infinite-torches-workflow.jpg)
@@ -16,7 +20,9 @@ New refill scans pause during native raids or detected fights; pending refill co
 
 ## Configuration
 
-Settings belong under `[Torches]`. Stop the server before edits and restart to apply them. Existing values are preserved.
+Changing **Refill interval** from F7 takes effect when the next refill pass is scheduled.
+
+Settings belong under `[Torches]`. For hand edits, leave the hosted world or stop the dedicated server, edit the [active configuration](../client-setup.md#configuration-locations), then start the world again. Existing values are preserved.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |

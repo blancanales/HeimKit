@@ -124,12 +124,7 @@ internal sealed class UpgradeStartup : IDisposable
         bool chunked = world.IsChunkedSave();
         if (paths.Count != (chunked ? 1 : 2)) throw new InvalidDataException("Unrecognized native world save layout.");
         if (chunked)
-        {
-            string folder = Path.GetFullPath(paths[0]).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            string worldMetadata = Path.GetFullPath(world.GetSaveFWLPath());
-            if (!worldMetadata.StartsWith(folder, StringComparison.OrdinalIgnoreCase) || !File.Exists(worldMetadata))
-                throw new FileNotFoundException("The selected chunked world's metadata is missing or outside its save directory.");
-        }
+            RequireChunkedMetadata(paths[0], world.SaveNumber());
         var sources = new List<StartupWorldBackup.Source>();
         foreach (string path in paths)
         {
@@ -142,6 +137,15 @@ internal sealed class UpgradeStartup : IDisposable
         foreach (string name in new[] { "SharedMap", "ForestRenewal" })
             sources.Add(new StartupWorldBackup.Source(Path.Combine(_configDirectory, "HeimKit", name), "configuration/HeimKit/" + name, true, optional: true));
         return StartupWorldBackup.Create(directory, sources, request.Metadata, request.ArchiveName, request.RecordVerifiedArchive);
+    }
+
+    internal static void RequireChunkedMetadata(string worldDirectory, uint saveNumber)
+    {
+        // ServerLoadWorld has not yet copied the selected world's number into SaveSystem.
+        string file = "_main." + saveNumber.ToString(CultureInfo.InvariantCulture) + ".fwl2";
+        string path = Path.Combine(Path.GetFullPath(worldDirectory), file);
+        if (!File.Exists(path))
+            throw new FileNotFoundException("Missing metadata for the selected chunked world: " + path, path);
     }
 
     public void Dispose()

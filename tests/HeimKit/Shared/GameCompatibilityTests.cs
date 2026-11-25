@@ -1,3 +1,4 @@
+using HeimKit.Configuration;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -18,7 +19,7 @@ internal static class GameCompatibilityTests
     {
         foreach (bool allow in new[] { false, true })
         foreach (bool enabled in new[] { false, true })
-        foreach (string version in new[] { "1.0.20", "1.0.17", "1.0.18", "1.0.19", "1.0.21", "1.0.22", "" })
+        foreach (string version in new[] { "1.0.20", "1.0.17", "1.0.18", "1.0.19", "1.0.21", GameVersionCompatibility.AuditedVersion, "9.9.9", "" })
         {
             var config = new ConfigFile(Path.Combine(AppContext.BaseDirectory, Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
             config.Bind("Compatibility", "AllowUnverifiedVersions", allow);
@@ -35,10 +36,10 @@ internal static class GameCompatibilityTests
                 foreach (var module in modules)
                 {
                     module.Initialize(version);
-                    if (module.IsActive != (enabled && version.Length != 0 && (allow || version == "1.0.21")))
+                    if (module.IsActive != (enabled && version.Length != 0 && (allow || version == GameVersionCompatibility.AuditedVersion)))
                         throw new Exception(module.Name + " accepted an unsupported version or ignored Enabled: " + version);
                     bool warned = warnings.Any(message => message.Contains(module.Name + ":") && message.Contains("unsupported"));
-                    if (warned != (enabled && (version.Length == 0 || !allow && version != "1.0.21")))
+                    if (warned != (enabled && (version.Length == 0 || !allow && version != GameVersionCompatibility.AuditedVersion)))
                         throw new Exception(module.Name + " compatibility warning does not match its startup state.");
                 }
             }

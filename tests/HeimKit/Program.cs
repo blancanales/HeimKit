@@ -13,6 +13,12 @@ void Run(string name, Action action)
 }
 Run("NativeAccessTests", NativeAccessTests.Run);
 Run("ApplicationIdentityTests", ApplicationIdentityTests.Run);
+Run("ControlProtocolTests", ControlProtocolTests.Run);
+Run("PlayerModerationTests", PlayerModerationTests.Run);
+Run("ControlRequestRulesTests", ControlRequestRulesTests.Run);
+Run("ModuleReapplyTests", ModuleReapplyTests.Run);
+Run("ModuleSwitchesTests", ModuleSwitchesTests.Run);
+Run("ClientPolicyTests", ClientPolicyTests.Run);
 Run("CoreRebuildTests", CoreRebuildTests.Run);
 Run("GameCompatibilityTests", GameCompatibilityTests.Run);
 Run("PerformanceRegressionTests", PerformanceRegressionTests.Run);

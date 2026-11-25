@@ -12,7 +12,7 @@ using System.Runtime.CompilerServices;
 internal static class CooperativeProcessingTests
 {
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
-    internal static void Run() { Budgets(); TablePublication(); RejectionAndCancellation(); ReusedWeatherRecords(); }
+    internal static void Run() { Budgets(); AdaptiveBudgets(); TablePublication(); RejectionAndCancellation(); ReusedWeatherRecords(); }
     private static void Budgets()
     {
         int progressed = 0, disposed = 0;
@@ -34,6 +34,50 @@ internal static class CooperativeProcessingTests
         work.Dispose(); Check(disposed == 1, "Cancelling a slice did not run iterator cleanup exactly once.");
         System.Console.WriteLine("PASS: cooperative work enforces elapsed and unit limits, retains mandatory progress during raids, and disposes suspended work.");
     }
+    private static void AdaptiveBudgets()
+    {
+        using var log = new BepInEx.Logging.ManualLogSource("Adaptive scheduling checks");
+        var config = new BepInEx.Configuration.ConfigFile(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".cfg"), false)
+        { SaveOnConfigSet = false };
+        var policy = new HeimKit.Configuration.DebugLoggingPolicy(config.Bind("Diagnostics", "Enabled", false, ""), false);
+        long clock = 0;
+        var scheduler = new ModuleScheduler(() => clock);
+        var work = new AdaptiveOperation(log, policy, "Test", "optional", 4, scheduler: scheduler);
+        int RunBatch(float now, double unitCost)
+        {
+            scheduler.BeginFrame(now);
+            if (!work.Due(work, now, 0)) return 0;
+            using var batch = work.Begin(now);
+            int count = 0;
+            while (batch.Take())
+            {
+                count++;
+                clock += (long)(unitCost * Stopwatch.Frequency / 1000);
+            }
+            return count;
+        }
+
+        for (int i = 0; i < 8; i++) Check(RunBatch(i, .1) == 1, "Cold batch exceeded one unit.");
+        Check(RunBatch(8, .1) == 2, "Healthy work did not grow after eight samples.");
+        Check(RunBatch(9, .75) > 0, "Spike sample was skipped.");
+        Check(RunBatch(10, .1) == 0, "An expensive batch did not yield the next update.");
+        for (int i = 11; i < 19; i++) Check(RunBatch(i, .1) == 1, "Backoff did not retain bounded progress.");
+        Check(RunBatch(19, .1) == 2, "Recovered background work remained throttled.");
+        scheduler.Combat.SetRaid(true);
+        Check(RunBatch(20, .1) == 0, "Optional recovery bypassed combat.");
+        Check(scheduler.Due(work, "required", 20, 0), "Combat blocked required work.");
+        var requested = new AdaptiveOperation(log, policy, "Test", "admin_candidates", 8, scheduler: scheduler);
+        for (int i = 0; i < 10; i++)
+        {
+            scheduler.BeginFrame(21 + i);
+            if (!requested.RequestedDue(requested, 21 + i)) continue;
+            using var batch = requested.Begin(21 + i);
+            Check(batch.Take() && !batch.Take(), "Requested scan exceeded one unit during combat.");
+        }
+        scheduler.BeginFrame(32);
+        Check(requested.RequestedDue(requested, 32), "A sustained raid starved an accepted administrative request.");
+    }
+
     private static byte[] Payload(int size, int version = 3, bool invalidTerrain = false, bool trailing = false)
     {
         using var raw = new MemoryStream();

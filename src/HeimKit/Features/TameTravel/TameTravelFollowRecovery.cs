@@ -13,23 +13,33 @@ internal sealed class TameTravelFollowRecovery : IDisposable
     private static TameTravelFollowRecovery? _current;
     private readonly Harmony _hooks = new("heimkit.tametravel.follow_recovery");
     private readonly ManualLogSource _log;
+    private readonly bool _playerHosted;
+    private readonly ZDOMan? _localWorld;
     private int _cleared;
-    internal TameTravelFollowRecovery(ManualLogSource log)
+    internal TameTravelFollowRecovery(ManualLogSource log, bool playerHosted = false)
     {
         _log = log;
+        _playerHosted = playerHosted;
+        _localWorld = playerHosted ? ZDOMan.instance : null;
         if (_current != null) throw new InvalidOperationException("Follow recovery is already active.");
         _current = this;
         try
         {
-            foreach (string name in new[] { "Load", "LoadOldFormat" })
-                _hooks.Patch(AccessTools.Method(typeof(ZDO), name, new[] { typeof(ZPackage), typeof(global::Version.World) })
-                    ?? throw new MissingMethodException("ZDO", name), postfix: new HarmonyMethod(typeof(TameTravelFollowRecovery), nameof(Loaded)));
+            if (!playerHosted)
+                foreach (string name in new[] { "Load", "LoadOldFormat" })
+                    _hooks.Patch(AccessTools.Method(typeof(ZDO), name, new[] { typeof(ZPackage), typeof(global::Version.World) })
+                        ?? throw new MissingMethodException("ZDO", name), postfix: new HarmonyMethod(typeof(TameTravelFollowRecovery), nameof(Loaded)));
             _hooks.Patch(AccessTools.Method(typeof(ZDOMan), "PrepareSave")
                 ?? throw new MissingMethodException("ZDOMan", "PrepareSave"), prefix: new HarmonyMethod(typeof(TameTravelFollowRecovery), nameof(Saving)));
         }
         catch { _current = null; _hooks.UnpatchSelf(); throw; }
     }
-    private static void Saving(ZDOMan __instance) => TameTravelFollowState.PrepareSave(__instance);
+    private static void Saving(ZDOMan __instance)
+    {
+        var current = _current;
+        if (current != null && (!current._playerHosted || ReferenceEquals(current._localWorld, __instance)))
+            TameTravelFollowState.PrepareSave(__instance);
+    }
     private static void Loaded(ZDO __instance)
     {
         var current = _current;

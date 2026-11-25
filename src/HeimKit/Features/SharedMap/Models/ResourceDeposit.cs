@@ -15,6 +15,8 @@ public sealed class ResourceDeposit
     public float X { get; }
     public float Y { get; }
     public float Z { get; }
+    internal ZDOID PillarBinding { get; set; }
+    public SkullBounds? Skull { get; internal set; }
     public bool Depleted { get; internal set; }
     public bool SilverDiscovered { get; internal set; }
     public int? SapPercent { get; internal set; }

@@ -6,6 +6,7 @@ namespace HeimKit.Core.World;
 
 internal sealed class CandidateSubscription : IDisposable
 {
+    private const int NearbyLimit = 8192;
     private readonly WorldObjectProvider _provider;
     private readonly Func<ZDO, bool> _accept;
     private readonly List<ZDO> _records = new();
@@ -19,7 +20,24 @@ internal sealed class CandidateSubscription : IDisposable
     private readonly List<ZDO> _nearby = new();
     private readonly CandidateView _nearbyView;
     // Borrowed until the next query on this subscription. Callers cannot mutate it.
-    internal CandidateView? Nearby(Vector3 point) { _nearby.Clear(); Query(ZoneSystem.GetZone(point), new SimulationDistance(1, 0), _nearby); return _nearby.Count <= 8192 ? _nearbyView : null; }
+    internal CandidateView? Nearby(Vector3 point, Func<ZDO, Vector3, bool>? include = null)
+    {
+        _nearby.Clear();
+        Query(ZoneSystem.GetZone(point), new SimulationDistance(1, 0), _nearby);
+        if (include != null)
+        {
+            int kept = 0;
+            for (int i = 0; i < _nearby.Count; i++)
+            {
+                var record = _nearby[i];
+                if (!include(record, point)) continue;
+                if (kept == NearbyLimit) return null;
+                _nearby[kept++] = record;
+            }
+            _nearby.RemoveRange(kept, _nearby.Count - kept);
+        }
+        return _nearby.Count <= NearbyLimit ? _nearbyView : null;
+    }
     internal string Owner { get; }
     internal ScanKind Kind { get; }
     internal bool Broad { get; }

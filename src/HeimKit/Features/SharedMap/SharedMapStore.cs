@@ -57,16 +57,19 @@ public sealed class SharedMapStore
         return true;
     }
 
+    internal bool Clean => _savedPixels == _map.ExploredPixels && _snapshotFile?.Pending != true;
+    internal SnapshotPreparation? Preparation { get; set; }
     public bool SaveIfDue(float now, float interval)
     {
         bool saved = Poll();
         if (Persistence.Pending) return saved;
-        if (!_nextSave.Ready(now)) return saved;
+        bool due = Preparation?.Ready(_nextSave, now, interval, _savedPixels != _map.ExploredPixels) ?? (interval <= 0 || _nextSave.Ready(now));
+        if (!due) return saved;
         _nextSave.Postpone(now, interval);
         if (_savedPixels != _map.ExploredPixels)
         {
             int pixels = _map.ExploredPixels;
-            Persistence.Queue(Snapshot(), pixels);
+            SnapshotPreparation.Queue(Preparation, now, Persistence, Snapshot, pixels);
         }
         return saved;
     }

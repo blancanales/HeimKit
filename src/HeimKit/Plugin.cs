@@ -8,28 +8,24 @@ using HeimKit.Core.Lifecycle;
 using System;
 using System.Collections.Generic;
 using BepInEx;
+using HeimKit.Client;
+using HeimKit.Core.Control.Server;
 using BepInEx.Logging;
 using HeimKit.Configuration;
-using HeimKit.Features.InfiniteTorches;
 using HeimKit.Features.WeatherGuard;
-using HeimKit.Features.AFKNightWatch;
 using HeimKit.Core.Players;
-using HeimKit.Features.AFKRaidWatch;
-using HeimKit.Features.SharedMap;
 using UnityEngine;
-using HeimKit.Features.DoorKeeper;
-using HeimKit.Features.ForestRenewal;
-using HeimKit.Features.SeaSalvage;
-using HeimKit.Features.TameTravel;
-using HeimKit.Features.HeimMender;
-using HeimKit.Features.StationSupply;
 
 namespace HeimKit;
 
-[BepInPlugin("heimkit", "HeimKit", "0.2.3")]
+[BepInPlugin("heimkit", "HeimKit", "0.2.4")]
 [BepInProcess("valheim_server.exe")]
+[BepInProcess("valheim.exe")]
 public sealed class Plugin : BaseUnityPlugin
 {
+    private ProcessRole _role;
+    private ClientHost? _client;
+    private ControlServer? _control;
     private ModuleHost? _host;
     private PlayerServices? _players;
     private WorldObjectProvider? _world;
@@ -41,38 +37,53 @@ public sealed class Plugin : BaseUnityPlugin
 
     private void Awake()
     {
+        _role = string.Equals(Paths.ProcessName, "valheim", StringComparison.OrdinalIgnoreCase)
+            ? ProcessRole.GameClient : ProcessRole.DedicatedServer;
+        if (_role == ProcessRole.GameClient)
+        {
+            try { _client = new ClientHost(gameObject, Paths.ConfigPath, Info.Metadata.Version.ToString() + Info.Metadata.VersionExtra, Logger); }
+            catch (Exception error) { DiagnosticLog.Write(Logger, "HeimKit", CoreLogTopics.Control, "HeimKit Settings could not start.", level: LogLevel.Error, error: error); }
+            return;
+        }
         _host = new ModuleHost(Logger);
         DiagnosticLog.StartSession();
 #if DEBUG
-        DiagnosticLog.Write(Logger, "HeimKit", CoreLogTopics.Lifecycle, $"Starting version 0.2.3 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Debug.");
+        DiagnosticLog.Write(Logger, "HeimKit", CoreLogTopics.Lifecycle, $"Starting version 0.2.4 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Debug.");
 #else
-        DiagnosticLog.Write(Logger, "HeimKit", $"Starting version 0.2.3 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Release.");
+        DiagnosticLog.Write(Logger, "HeimKit", $"Starting version 0.2.4 at {DiagnosticLog.WallClock().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}. Build configuration: Release.");
 #endif
         try
         {
             _failureProtection = new ModuleFailureProtection(Logger);
+            ControlSettings? controlSettings = null;
             var configuration = ConfigurationLoader.Load(Paths.ConfigPath, Logger, config =>
             {
                 GameVersionCompatibility.Resolve(config, Logger);
+                controlSettings = new ControlSettings(config);
                 _players = new PlayerServices(config, Logger);
+                _host.AttachPresence(_players.Events);
                 _world = new WorldObjectProvider(_players.Presence, logger: Logger);
-                _host.Register(() => new InfiniteTorches(config, Logger, _players), "InfiniteTorches");
-                _host.Register(() => new WeatherGuard(config, Logger, _players), "WeatherGuard");
-                _host.Register(() => new AFKNightWatch(config, Logger, _players), "AFKNightWatch");
-                _host.Register(() => new AFKRaidWatch(config, Logger, _players), "AFKRaidWatch");
-                _host.Register(() => new SharedMap(config, Logger, _players), "SharedMap");
-                _host.Register(() => new DoorKeeper(config, Logger, _players), "DoorKeeper");
-                _host.Register(() => new ForestRenewal(config, Logger, _players), "ForestRenewal");
-                _host.Register(() => new SeaSalvage(config, Logger, _players), "SeaSalvage");
-                _host.Register(() => new TameTravel(config, Logger, _players), "TameTravel");
-                _host.Register(() => new HeimMender(config, Logger, _players), "HeimMender");
-                _host.Register(() => new StationSupply(config, Logger, _players), "StationSupply");
+                GameplayModules.Register(_host, config, Logger, _players);
                 return config;
             });
             _gameVersion = global::Version.CurrentVersion.ToString();
             var policy = GameVersionCompatibility.Resolve(configuration, Logger);
             policy.Supports(_gameVersion);
             _startup = new UpgradeStartup(policy, _gameVersion, Paths.ConfigPath, Logger);
+            if (controlSettings != null)
+            {
+                try
+                {
+                    _control = new ControlServer(controlSettings, _host, _players!, Logger, Info.Metadata.Version.ToString() + Info.Metadata.VersionExtra, policy, _gameVersion);
+                    _control.InstallIdentification();
+                }
+                catch (Exception error)
+                {
+                    var control = _control; _control = null;
+                    ModuleCleanup.Run(Logger, "HeimKit", () => control?.Dispose());
+                    DiagnosticLog.Write(Logger, "HeimKit", CoreLogTopics.Control, "HeimKit Settings could not start.", level: LogLevel.Error, error: error);
+                }
+            }
             _startup.Initialize();
             InitializeModulesIfReady();
         }
@@ -100,6 +111,11 @@ public sealed class Plugin : BaseUnityPlugin
     }
     private void Update()
     {
+        if (_role == ProcessRole.GameClient)
+        {
+            _client?.Tick(Time.unscaledTime);
+            return;
+        }
         if (_processingBlocked) return;
         try
         {
@@ -111,12 +127,14 @@ public sealed class Plugin : BaseUnityPlugin
             long measuredUpdate = ServerPerformance.BeginUpdate();
             ModuleScheduler.Current.BeginFrame(now);
             using (PerformanceStages.Measure("HeimKit", "world_services")) WorldServices.Refresh();
+            if (_players != null) _players.Connections.ClientDetectionAvailable = _control?.DetectsClients == true;
             using (PerformanceStages.Measure("HeimKit", "player_services")) _players?.Tick(now);
             _failureProtection?.ThrowIfFailed();
             using (PerformanceStages.Measure("HeimKit", "world_preparation")) _world?.Tick(now);
             _failureProtection?.ThrowIfFailed();
             using (PerformanceStages.Measure("HeimKit", "feature_dispatch")) _host?.Tick(now, _players?.Presence.HasJoinedPlayers, beginFrame: false);
             _failureProtection?.ThrowIfFailed();
+            _control?.Tick(now);
             using (PerformanceStages.Measure("HeimKit", "player_reporting")) _players?.Events.ReportProcessing();
             using (PerformanceStages.Measure("HeimKit", "player_diagnostics")) _players?.Context.Tick(now);
             using (PerformanceStages.Measure("PlayerActivity", "arrival_diagnostics")) _players?.Arrivals.EndFrame(now, measuredUpdate);
@@ -133,6 +151,14 @@ public sealed class Plugin : BaseUnityPlugin
     }
     private void OnDestroy()
     {
+        if (_role == ProcessRole.GameClient)
+        {
+            _client?.Dispose();
+            _client = null;
+            return;
+        }
+        var control = _control; _control = null;
+        ModuleCleanup.Run(Logger, "HeimKit", () => control?.Dispose());
         _processingBlocked = true;
         var startup = _startup; _startup = null;
         var host = _host; _host = null;

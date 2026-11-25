@@ -1,5 +1,7 @@
 # SeaSalvage specification
 
+In player-hosted worlds, the host and guests both count for clearance. Drops owned by guests wait for native ownership release.
+
 ## Behavior and native evidence
 
 Recover inaccessible sunken loose ItemDrop records into newly created vanilla CargoCrate containers. Installed CargoCrate has persistent ZNetView, Floating (0.5 metre water offset), a public 2x2 Container, no default loot and native empty-container destruction. Its inventory and float behavior require no client handlers. The [LetItFloat reference](https://github.com/ArgusMagnus/ValheimServersideQoL/blob/main/ServersideQoL.LetItFloat/ItemDropProcessor.cs) uses this prefab; HeimKit keeps fixed native capacity and does not merge stacks or mutate client component fields.
@@ -8,7 +10,7 @@ Eligible definitions have ItemDrop and persistent ZNetView, no Floating, Fish, C
 
 ## Configuration and defaults
 
-SeaSalvage.Enabled=true enables eligible sunken-drop recovery by default; DebugMode=false. MinimumDepthMeters=4 (3..100), MaximumDepthMeters=50 (4..500), DelaySeconds=30 (10..3600), ScanRangeMeters=128 (32..512), GroupRadiusMeters=4 (0..10), SlotsPerCrate=4 (1..4), MaxItemsPerPass=16 (1..32), IntervalSeconds=2 (1..30). The depth interval must be ordered. These defaults avoid shallow collectible drops, wait for settling and keep native crate capacity. No player may be within ten metres in 3D, including the latest observed movement segment. Scan one ready actor per pass; require all current actor observations to be reliable for pickup exclusion. Probe at most four settled candidates per pass using a rotating cursor. Track at most 4,096 settling observations and reject over-8,192-record sector scopes. Owner, revision or position changes restart settling.
+SeaSalvage.Enabled=true enables eligible sunken-drop recovery by default; DebugMode=false. MinimumDepthMeters=4 (3..100), MaximumDepthMeters=50 (4..500), DelaySeconds=30 (10..3600), ScanRangeMeters=128 (32..512), GroupRadiusMeters=4 (0..10), SlotsPerCrate=4 (1..4), MaxItemsPerPass=16 (1..32), IntervalSeconds=2 (1..30). The depth interval must be ordered. These defaults avoid shallow collectible drops, wait for settling and keep native crate capacity. No player may be within ten metres in 3D, including the latest observed movement segment. Scan one ready actor per pass; require all current actor observations to be reliable for pickup exclusion. Probe at most four settled candidates per pass using a rotating cursor. Track at most 4,096 settling observations and reject over-8,192-record sector scopes. Owner, revision or position changes restart settling. Changing DelaySeconds from F7 preserves the current settling observations and uses the new delay on the next check.
 
 ## Ownership and transfer
 
@@ -26,7 +28,7 @@ New scans and recovery transfers use cooperative admission and pause during nati
 
 ## Player-service integration
 
-Follow the [required feature hookup](../architecture.md#required-feature-hookup). Plugin injects its existing PlayerServices. The module owns one presence subscription and at most one controller per world. Enablement, exact game compatibility, dedicated-server world readiness and joined-world presence gate gameplay independently. False or unknown presence disposes the controller before acknowledging pause; reconnect creates a fresh controller. World replacement disposes old resources. No activity lease or AFK inference is needed. Ready is reported once independently of presence. There is no independent empty-server gameplay responsibility.
+Follow the [required feature hookup](../architecture.md#required-feature-hookup). Plugin injects its existing PlayerServices. The module owns one presence subscription and at most one controller per world. Enablement, exact game compatibility, hosted-world readiness and joined-world presence gate gameplay independently. False or unknown presence disposes the controller before acknowledging pause; reconnect creates a fresh controller. World replacement disposes old resources. No activity lease or AFK inference is needed. Ready is reported once independently of presence. There is no independent empty-server gameplay responsibility.
 
 ## Logging
 
@@ -47,3 +49,7 @@ Use the [supported environment](../server-setup.md#supported-environment) and sh
 The performance rebuild in `src/HeimKit/Features/` consumes CandidateSubscription for loose drops and terrain context, PrefabRegistry item/crate metadata, TerrainContext, NativeWorldObject, ObjectAuthority/ZdoPackets and ModuleScheduler. Diagnostics use the shared `FeatureDiagnostics` gate and budget. The [Core ownership table](../architecture.md#core-layer-and-anti-duplication) and [rebuild specification](../ai/heimkit-rebuild-spec.md) govern placement; the behavior and configuration contract above applies unchanged.
 
 Module-disabling exceptions follow the shared [persistent failure protection contract](server-upgrade-compatibility.md#persistent-feature-failure-protection), including future-start enable overrides.
+
+## Adaptive host scheduling
+
+Core tracks discovery cells, drop evaluation and crate transfers independently. Sector discovery retains original IDs and rejects an oversized scope before evaluating it. A pass retains the rotation and probe limits while evaluating candidates across updates. Before each crate the host refreshes player clearance and validates every original source, including current owner, payload, position and water depth. One admitted transfer completes its crate, source consumption and rollback boundary synchronously. Consumed-source authority release runs before admission. Normal transfer counts are grouped by pass. Feature Debug timing includes elapsed work and the bytes examined for a crate. See [adaptive host throttling](adaptive-host-throttling.md).

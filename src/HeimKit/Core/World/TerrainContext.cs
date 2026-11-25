@@ -118,6 +118,12 @@ internal sealed class TerrainContext : IDisposable
         return ZoneSystem.instance != null && ZoneSystem.instance.IsZoneLoaded(point) && map != null &&
             map.GetPaintMask() != null && !map.HaveQueuedRebuild();
     }
+    internal static bool WithinTerrainArea(Vector3 delta, float radius) =>
+        Math.Abs(delta.x) <= 64 + radius && Math.Abs(delta.z) <= 64 + radius;
+
+    internal static bool IsTerrainPrefab(GameObject prefab) =>
+        PrefabRegistry.Component<TerrainComp>(prefab) != null || PrefabRegistry.Component<TerrainModifier>(prefab) != null;
+
     public bool Prepare(Vector3 point, IReadOnlyList<ZDO> scope, float now, float radius = 12)
     {
         ThrowIfFailed();
@@ -133,13 +139,13 @@ internal sealed class TerrainContext : IDisposable
         {
             var record = scope[index];
             var position = record.GetPosition();
-            if (Math.Abs(position.x - point.x) > 64 + radius || Math.Abs(position.z - point.z) > 64 + radius) continue;
+            if (!WithinTerrainArea(position - point, radius)) continue;
             int hash = record.GetPrefab();
             if (!_terrainDefinitions.TryGetValue(hash, out bool terrain))
             {
                 var prefab = PrefabRegistry.Current.Prefab(hash);
                 if (prefab == null) continue;
-                terrain = PrefabRegistry.Component<TerrainComp>(prefab) != null || PrefabRegistry.Component<TerrainModifier>(prefab) != null;
+                terrain = IsTerrainPrefab(prefab);
                 if (_terrainDefinitions.Count < 4096) _terrainDefinitions[hash] = terrain;
             }
             if (!terrain) continue;

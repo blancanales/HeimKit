@@ -42,6 +42,7 @@ public static class AFKNightWatchSleepVoteCoordinator
     private static Func<bool>? _debug;
     private static Action<bool, bool?, SleepDecision?>? _lifecycle;
     private static readonly AFKNightWatchSleepDelay SleepDelay = new();
+    internal static void ResetCountdown() => SleepDelay.Reset();
     private static Func<int>? _delaySeconds;
     private static SleepDecision? _acceptedVote;
     private static Action<string, NativeSleepObservation?>? _hook;

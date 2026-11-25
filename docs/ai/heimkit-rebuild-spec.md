@@ -9,6 +9,8 @@
 
 The Core-based implementation now lives in `src/HeimKit/`. The legacy source tree is retired; this specification governs the current code and its shared responsibilities.
 
+The Windows game provides HeimKit Settings (F7) and can also host the gameplay runtime in private and Start Server worlds. For work spanning the client and host, use the [process roles and live administration contract](../architecture.md#process-roles-and-live-administration) and the [HeimKit Settings specification](../specs/client-control.md) alongside this Core specification.
+
 The central goal is **de-duplication for performance**: today each feature independently scans
 the world, classifies prefabs, caches native reflection, and re-runs world-readiness checks.
 In the rebuild those responsibilities move into one **Core** layer that every feature consumes.
@@ -37,7 +39,7 @@ transpilers, replication fences), preserve it exactly — port, do not reinvent 
   release artifacts unless Trevor explicitly asks. Leave all edits local and reviewable.
 - **Work in `src/HeimKit/`.** Keep changes scoped to the requested task and preserve unrelated work.
 - **One HeimKit implementation runs on a server.** The rebuild replaces the legacy plugin and retains the `HeimKit` product name, `heimkit` BepInEx GUID, `HeimKit.dll` assembly, `HeimKit` namespaces and `heimkit.<feature>` Harmony IDs. The source directory is `src/HeimKit/`; deploy only one HeimKit DLL. Do not declare incompatibility with the plugin's own GUID or reject its own loader registration.
-- **Server-only compatibility discipline** from `docs/architecture.md#server-only-compatibility`
+- **Server-only compatibility discipline** from `docs/architecture.md#dedicated-server-gameplay-compatibility`
   applies unchanged. Do not change the audited game version.
 - **Testing stays in chat.** Do not write test results, validation status, or testing instructions
   into any committed file (`AGENTS.md` chat-only rule). Report those to Trevor in conversation.

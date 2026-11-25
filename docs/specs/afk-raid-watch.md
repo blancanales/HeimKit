@@ -1,9 +1,11 @@
 # AFKRaidWatch specification
 
+In player-hosted worlds, the host and ready guests contribute to raid eligibility. The host provides local gameplay input to the shared activity observer.
+
 Gameplay and observation limitations: [safety and limitations](../limitations.md).
 ## Behavior and dedicated-server feasibility
 
-AFKRaidWatch independently protects inferred-idle-only locations from new normal automatic random raids on the Windows dedicated server. Supported versions are defined in [server setup](../server-setup.md#supported-environment). It uses the existing native RandEventSystem.UpdateRandomEvent scope and GetValidEventPoints output; no client installation or custom messages are required. Native horizontal event range and dungeon-height exclusion determine locality. A nearby known living actor must exist and every nearby actor must be alive, outside beds and inferred idle. Active, dead, loading or unreliable actors retain native eligibility. Active players elsewhere do not remove local protection.
+AFKRaidWatch independently protects inferred-idle-only locations from new normal automatic random raids in player-hosted worlds and on dedicated servers. Supported versions are defined in [server setup](../server-setup.md#supported-environment). It uses the existing native RandEventSystem.UpdateRandomEvent scope and GetValidEventPoints output; guests can use vanilla Valheim. Native horizontal event range and dungeon-height exclusion determine locality. A nearby known living actor must exist and every nearby actor must be alive, outside beds and inferred idle. Active, dead, loading or unreliable actors retain native eligibility. Active players elsewhere do not remove local protection.
 
 Only normal random events inside the native automatic update are filtered. Existing raids, explicit/admin events, forced/named/scripted events and standalone selection retain native behavior. Protection never cancels or resets an event. Native timing, chance, biome, base and global-key gates remain unchanged. Candidates are evaluated when supplied by the game; there is no continuous selection scan. With no connected players, HeimKit filtering is bypassed while native processing continues.
 

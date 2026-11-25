@@ -15,6 +15,7 @@ namespace HeimKit.Features.TameTravel;
 public sealed class TameTravelSettings
 {
     public ConfigEntry<bool> Enabled { get; }
+    public ConfigEntry<bool> SummonTravel { get; }
     public ConfigEntry<bool> DebugMode { get; }
     public DebugLoggingPolicy DebugLogging { get; }
     public ConfigEntry<float> CommandRangeMeters { get; }
@@ -29,10 +30,11 @@ public sealed class TameTravelSettings
     public TameTravelSettings(ConfigFile config, ManualLogSource logger)
     {
         const string section = "TameTravel";
-        Enabled = config.Bind(section, "Enabled", true, "Enable validated portal travel for explicitly following tames. Restart after edits.");
+        Enabled = config.Bind(section, "Enabled", true, "Enable validated portal travel for explicitly following tames. File edits require a restart. HeimKit Settings applies changes live.");
+        SummonTravel = config.Bind(section, "SummonTravel", true, "Bring following Dead Raiser summons through linked portals and native dungeon entrances and exits.");
         DebugMode = config.Bind(section, "DebugMode", false, "Enable feature diagnostics through the shared debug policy.");
         CommandRangeMeters = config.Bind(section, "CommandRangeMeters", 8f, new ConfigDescription("Maximum follow/wait selection distance. Stay addresses your associated animals within 32 metres.", new AcceptableValueRange<float>(2, 12)));
-        FollowSpacingEnabled = config.Bind(section, "FollowSpacingEnabled", true, "Use bounded server ownership to apply follow spacing after an explicit follow command. Restart after edits.");
+        FollowSpacingEnabled = config.Bind(section, "FollowSpacingEnabled", true, "Use bounded server ownership to apply follow spacing after an explicit follow command. File edits require a restart. HeimKit Settings applies changes live.");
         FollowStopDistanceMeters = config.Bind(section, "FollowStopDistanceMeters", 4f, new ConfigDescription("Horizontal follow stopping distance; enlarged when needed for animal and player clearance.", new AcceptableValueRange<float>(3, 12)));
         FollowResumeDistanceMeters = config.Bind(section, "FollowResumeDistanceMeters", 5f, new ConfigDescription("Horizontal distance to resume following; effective value is at least the stop distance plus one metre.", new AcceptableValueRange<float>(4, 16)));
         MaxControlledFollowers = config.Bind(section, "MaxControlledFollowers", 8, new ConfigDescription("Global cap on server-controlled followers; native following remains when capacity is unavailable.", new AcceptableValueRange<int>(1, 16)));

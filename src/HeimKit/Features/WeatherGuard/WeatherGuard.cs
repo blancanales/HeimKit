@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -15,7 +16,7 @@ using HeimKit.Core.Players;
 
 namespace HeimKit.Features.WeatherGuard;
 
-public sealed class WeatherGuard : IServerModule, IImmediateActivation
+public sealed class WeatherGuard : IServerModule, IModuleSwitches, IImmediateActivation
 {
     private readonly WeatherGuardSettings _settings;
     private readonly ManualLogSource _logger;
@@ -23,12 +24,23 @@ public sealed class WeatherGuard : IServerModule, IImmediateActivation
     private readonly string _configPath;
     private readonly WeatherGuardCoverageRequests _coverageRequests;
     private readonly WeatherGuardDiagnostics _adminDiagnostics;
+    private bool _resumeAfterBattle;
     private WeatherGuardController? _controller;
     private ZDOMan? _world;
     private readonly PlayerServices _players;
     private IDisposable? _presenceRegistration;
     private bool? _occupied;
     private readonly PlayerProcessingNotices _processing;
+    private SwitchBinding[]? _switches;
+    IReadOnlyList<SwitchBinding> IModuleSwitches.Switches => _switches ??= new SwitchBinding[]
+    {
+        new("Enabled", _settings.Enabled),
+        new("Debug logging", _settings.DebugMode, applyLive: true),
+        new("Rain protection", _settings.ProtectRain, applyInPlace: ApplyProtectionInPlace),
+        new("Underwater protection", _settings.ProtectUnderwater, applyInPlace: ApplyProtectionInPlace),
+    };
+    SwitchApplyMode IModuleSwitches.ApplyMode => SwitchApplyMode.Reinitialize;
+
     public string Name => "WeatherGuard";
     public bool IsActive { get; private set; }
 
@@ -43,6 +55,14 @@ public sealed class WeatherGuard : IServerModule, IImmediateActivation
         _coverageRequests = new WeatherGuardCoverageRequests(Path.GetDirectoryName(_configPath)!, logger);
         _adminDiagnostics = new WeatherGuardDiagnostics(logger, false);
     }
+    private bool ApplyProtectionInPlace()
+    {
+        bool rain = _settings.ProtectRain.Value, underwater = _settings.ProtectUnderwater.Value;
+        if (!IsActive || !(_controller?.SetProtection(rain, underwater) ?? (rain || underwater))) return false;
+        WeatherGuardDiagnostics.StartupSettings(_logger, _settings);
+        return true;
+    }
+
     public void Initialize(string gameVersion)
     {
         Shutdown();
@@ -55,6 +75,7 @@ public sealed class WeatherGuard : IServerModule, IImmediateActivation
         if (!_compatibility.Supports(gameVersion))
         { DiagnosticLog.Write(_logger, "WeatherGuard", $"DISABLED (unsupported Valheim version {gameVersion}; required version {_compatibility.RequiredVersion}; built-in audited version {GameVersionCompatibility.AuditedVersion}).", level: LogLevel.Warning); return; }
         IsActive = true;
+        ModuleScheduler.Current.Battle.Register(this);
         if (_settings.DebugLogging.Enabled)
             DiagnosticLog.Write(_logger, Name, "Waiting for joined players and dedicated-server world", level: LogLevel.Debug);
         _presenceRegistration = _players.Events.Subscribe(PresenceChanged, Fail, () => _processing.IsEmptyPaused, () => _processing.IsRunning, () => _processing.IsServerReady);
@@ -69,7 +90,9 @@ public sealed class WeatherGuard : IServerModule, IImmediateActivation
                 using (PerformanceStages.Measure("WeatherGuard", "idle_release")) StopController();
             else
             {
-                using (PerformanceStages.Measure("WeatherGuard", "controller_start")) StartController();
+                if (ModuleScheduler.Current.Battle.Active && _controller == null) _resumeAfterBattle = true;
+                if (!ModuleScheduler.Current.Battle.Active || _controller != null)
+                    using (PerformanceStages.Measure("WeatherGuard", "controller_start")) StartController();
                 _controller?.Tick(now);
             }
         }
@@ -97,6 +120,8 @@ public sealed class WeatherGuard : IServerModule, IImmediateActivation
         using var timing = PerformanceStages.Measure("WeatherGuard", "activation");
         _world = world;
         _controller = new WeatherGuardController(this, _logger, _settings.DebugLogging, _settings.DebugLogLevel.Value, _settings.LogWorldCreatedItems.Value, _settings.ProtectRain.Value, _settings.ProtectUnderwater.Value, _settings.ExcludedPrefabs.Value, _players.Presence, _players.Context, reuseSceneLists: _settings.ReuseSceneLists.Value);
+        if (_resumeAfterBattle) _controller.ResumeGradually();
+        _resumeAfterBattle = false;
         _controller.Install();
         _processing.Ready();
     }
@@ -109,8 +134,8 @@ public sealed class WeatherGuard : IServerModule, IImmediateActivation
     private readonly Action _coverageReport;
     private void PollCoverage(float now) { _coverageNow = now; _coverageRequests.Poll(now, _coverageReport); }
     private void ReportCoverage() => _adminDiagnostics.Coverage(
-        (_controller != null && ReferenceEquals(_world, ZDOMan.instance) && WorldServices.Terrain ? _controller.Coverage(_coverageNow) : null)
-        ?? new CoverageSnapshot { State = !IsActive ? "module_inactive" : _occupied == false ? "server_empty" : _occupied == null ? "player_presence_unavailable" : "waiting_for_world",
+        (_controller != null && _controller.Running && ReferenceEquals(_world, ZDOMan.instance) && WorldServices.Terrain ? _controller.Coverage(_coverageNow) : null)
+        ?? new CoverageSnapshot { State = !IsActive ? "module_inactive" : ModuleScheduler.Current.Battle.Active ? "battle_pause" : _occupied == false ? "server_empty" : _occupied == null ? "player_presence_unavailable" : "waiting_for_world",
             RainEnabled = _settings.ProtectRain.Value, UnderwaterEnabled = _settings.ProtectUnderwater.Value });
     internal void Fail(Exception error)
     {
@@ -119,6 +144,8 @@ public sealed class WeatherGuard : IServerModule, IImmediateActivation
     }
     public void Shutdown()
     {
+        ModuleScheduler.Current.Battle.Unregister(this);
+        _resumeAfterBattle = false;
         IsActive = false; _occupied = null; _processing.Reset();
         var registration = _presenceRegistration; _presenceRegistration = null;
         ModuleCleanup.Run(_logger, Name, () => registration?.Dispose(), StopController);

@@ -408,10 +408,10 @@ public static class SharedMapTableData
                     cleanup, inputs.HideDistance)) yield return unit;
             }
         }
-        internal bool Advance()
+        internal bool Advance(AdaptiveOperation? adaptive = null)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Reconciliation));
-            return _complete || (_complete = WorkSlice.Advance(_measured));
+            return _complete || (_complete = WorkSlice.Advance(_measured, adaptive: adaptive));
         }
         public void Dispose()
         {

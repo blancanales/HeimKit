@@ -1,6 +1,10 @@
 # StationSupply
 
-StationSupply moves real resources from a nearby chest into a production station. It runs on the dedicated server with unmodified clients. See [supported environment](../server-setup.md#supported-environment), the [specification](../specs/station-supply.md) and [limitations](../limitations.md#stationsupply).
+In player-hosted worlds, transfers wait until the station and chest are both owned by the host process. Native host chest requests and lever use defer automatic feeding, using the same quiet checks as guest requests.
+
+See [optional client setup](../client-setup.md) for the in-game status and admin controls.
+
+StationSupply moves real resources from a nearby chest into a production station. The world host runs StationSupply, so guests can use it with vanilla Valheim. See [supported environment](../server-setup.md#supported-environment), the [specification](../specs/station-supply.md) and [limitations](../limitations.md#stationsupply).
 
 ![StationSupply workflow: place one chest near each intake, stock it with compatible resources, and collect the station's output as usual](../images/station-supply-workflow.jpg)
 
@@ -82,6 +86,8 @@ Supported storage is ordinary player-built public wooden, reinforced, black-meta
 
 StationSupply defaults enabled. Fill the supply chests with the intended resources and close their inventories. Each completed transaction transfers up to `MaxItemsPerVisit` compatible items into one intake in one atomic visit, respecting native capacity and conversion order. The default is ten; fermenters always take one input. Each moved material retains its own queue entry. A visit that fails before commit consumes nothing. Ownership handoff and bounded processing can delay feeding. Materials are consumed normally. Production speed, fuel cost, roof/wind/smoke checks and outputs remain native. StationSupply does not collect products, tap fermenters, supply fireplaces or feed during native sleep/time skipping. Fermenter filling requires native roof/cover readiness and defaults off.
 
+With StationSupply Debug enabled, sampled chest open records identify the chest, requesting peer, observed owner and whether the chest was in an active transfer. For an open that StationSupply queues, the outcome includes queue_ms measured from the original request through replay, expiry or cancellation. Replay records the handoff to native processing. Requests handled entirely on another player’s client are outside the server observer’s view.
+
 Manual chest use takes priority. Opening, stacking into or taking all from a supported nearby chest pauses automation for that container for ten seconds. An observed open inventory extends that pause, leaving time to finish after closing it. When a request arrives during a transfer, StationSupply preserves the first request and yields after confirming current inventory state. If the item has already moved, it completes synchronization first, then passes the request to the native handler. The same priority applies to an enabled Obliterator's inventory. The intake keeps its selected chest throughout the pause. See [manual-access limitations](../limitations.md#stationsupply).
 
 Nearby-object discovery is shared with HeimKit's other features. StationSupply prepares separate station/chest/ward selections, limits station candidates per visit and runs up to `MaxActiveTransactions` transactions at once (default two), over separate station and chest records. A shared chest or already-active station waits until its transaction ends. A chest confirmed to have no compatible or category-eligible input waits without another ownership handoff or inventory parse until its native data changes. Its nearest-chest assignment still blocks fallback. Ownership waits check nearby-player eligibility without repeatedly loading candidate lists; placement and access are checked again before transfer. See [performance scope](../specs/station-supply.md#performance) and [limitations](../limitations.md#stationsupply).
@@ -119,7 +125,9 @@ Unselected categories stay in the selected supply chest; they do not block eligi
 
 ## Configuration
 
-Settings belong in `[StationSupply]` in the generated `heimkit.cfg`. Set `Enabled = false` to disable every StationSupply intake, or use the family switches below to choose which stations receive supplies. Restart after edits. Existing values are preserved and missing keys are added automatically. Shared/non-feature sections remain before feature sections.
+Under **F7 → Server Settings**, changing `MaxItemsPerVisit` caps the next batch sized for transfer. Station capacity still applies.
+
+Settings belong in `[StationSupply]` in the generated `heimkit.cfg`. Set `Enabled = false` to disable every StationSupply intake, or use the family switches below to choose which stations receive supplies. For hand edits, leave the hosted world or stop the dedicated server, edit the [active configuration](../client-setup.md#configuration-locations), then start the world again. Existing values are preserved and missing keys are added automatically. Shared/non-feature sections remain before feature sections.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -150,3 +158,7 @@ Set `DebugMode = true` in the existing `[StationSupply]` section to enable its o
 `StationSupply.config` reports enabled native station families and placement settings. `StationSupply.scope` reports observed station/chest counts and omitted optional attempts by stream. Twelve detailed records per minute are divided into six blocked conditions, four terminal outcomes and two progress samples, so progress cannot consume the outcome allowance. Successful stages use a nonempty activity summary at most once per minute. This reports committed transfers, transaction starts, cancellations, failures, source-state requests, cache-reset calls, completed refresh groups and blocked-check counts since the previous report; Verbose also reports ordinary state-snapshot calls and deferred manual requests queued, yielded, replayed or unavailable. `selected_chest_manual_grace`, `obliterator_manual_grace` and `manual_container_priority` distinguish manual-use deferral from ordinary open storage; `manual_request_expired`, `manual_request_unsafe` and `manual_request_unavailable` count requests that could not be replayed. Counts continue when optional records are suppressed, and blocked-check counts describe repeated checks, not unique failures or lost items. Identical reasons from different station/intake/chest combinations remain distinct. See [observation and delivery limitations](../limitations.md#stationsupply).
 
 With effective debugging enabled, `StationSupply.timing` reports scheduled processing-pass count, average milliseconds, maximum milliseconds and observed scope at most once per minute. Stage records in the same window separate world discovery, chest selection, ownership, inventory parsing, commits, client refresh, native context checks and diagnostic output. `diagnostic_fields` narrows admitted evidence preparation before formatting/listener dispatch. Each includes calls, average milliseconds and maximum milliseconds. Network wait duration remains in supply evidence. Feature timing collection is disabled with debug suppression and does not add work on unscheduled ticks. The shared [performance window](../server-setup.md#performance-observations) supplies update, native context and logger measurements in global Verbose Debug. The [measurement boundaries](../limitations.md#server-observations-and-logs) explain interpretation.
+
+## Automatic host pacing
+
+The host spreads station discovery and candidate evaluation across updates. A busy host can take longer to start feeding a station. Active transfers, chest access requests and ownership release keep their ordinary cadence.

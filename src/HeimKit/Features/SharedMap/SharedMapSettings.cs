@@ -1,3 +1,4 @@
+using System;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -14,6 +15,23 @@ namespace HeimKit.Features.SharedMap;
 public sealed class SharedMapSettings
 {
     public ConfigEntry<bool> Enabled { get; }
+    internal Func<string, bool> StructurePublicationFilter()
+    {
+        bool guardTowers = DvergrGuardTowerMarkerSync.Value;
+        bool lighthouses = DvergrLighthouseMarkerSync.Value;
+        bool excavations = DvergrExcavationMarkerSync.Value;
+        bool villages = FulingVillageMarkerSync.Value;
+        bool other = OtherStructureMarkerSync.Value;
+        return label => label switch
+        {
+            "Dvergr Guard Tower" => guardTowers,
+            "Dvergr Lighthouse" => lighthouses,
+            "Dvergr Excavation" => excavations,
+            SharedMapLandmarkPrefab.FulingVillage => villages,
+            _ => other && SharedMapLandmarkPrefab.AdditionalStructureLabel(label)
+        };
+    }
+
     public ConfigEntry<bool> DebugMode { get; }
     public ConfigEntry<string> PinDebugNameFilter { get; }
     public ConfigEntry<bool> PortalMarkerSync { get; }
@@ -34,7 +52,10 @@ public sealed class SharedMapSettings
     public ConfigEntry<bool> DvergrGuardTowerMarkerSync { get; }
     public ConfigEntry<bool> DvergrLighthouseMarkerSync { get; }
     public ConfigEntry<bool> DvergrExcavationMarkerSync { get; }
-    internal bool StructureMarkersEnabled => DvergrGuardTowerMarkerSync.Value || DvergrLighthouseMarkerSync.Value || DvergrExcavationMarkerSync.Value;
+    public ConfigEntry<bool> FulingVillageMarkerSync { get; }
+    public ConfigEntry<bool> OtherStructureMarkerSync { get; }
+    internal bool StructureMarkersEnabled => DvergrGuardTowerMarkerSync.Value || DvergrLighthouseMarkerSync.Value ||
+        DvergrExcavationMarkerSync.Value || FulingVillageMarkerSync.Value || OtherStructureMarkerSync.Value;
     public ConfigEntry<float> TableIntervalSeconds { get; }
     public ConfigEntry<int> MaxTablesPerPass { get; }
     public ConfigEntry<float> SaveIntervalSeconds { get; }
@@ -44,43 +65,47 @@ public sealed class SharedMapSettings
     public SharedMapSettings(ConfigFile config, ManualLogSource? logger = null)
     {
         Enabled = config.Bind("SharedMap", "Enabled", true,
-            "Persist community exploration and normalize vanilla table map data, excluding shared death pins. Optionally add player-built portals, outdoor resource deposits and supported dungeon entrances. Restart after edits.");
+            "Persist community exploration and normalize vanilla table map data, excluding shared death pins. Optionally add player-built portals, outdoor resource deposits and supported dungeon entrances. File edits require a restart. HeimKit Settings applies changes live.");
         PortalMarkerSync = config.Bind("SharedMap", "PortalMarkerSync", true,
-            "Automatically maintain named player-built portal markers in explored terrain. Replace all portal-icon pins from server portal records, blocking stale names and positions. Renamed markers use small persistent offsets to encourage replacement on Read Map; client replacement is not guaranteed. Player hammer pins are preserved. Other icons are preserved except matching portal labels within three metres of a generated marker. Disabling removes generated portal pins while preserving player-owned pins. Restart after edits.");
+            "Automatically maintain named player-built portal markers in explored terrain. Replace all portal-icon pins from server portal records, blocking stale names and positions. Renamed markers use small persistent offsets to encourage replacement on Read Map; client replacement is not guaranteed. Player hammer pins are preserved. Other icons are preserved except matching portal labels within three metres of a generated marker. Disabling removes generated portal pins while preserving player-owned pins. File edits require a restart. HeimKit Settings applies changes live.");
         PortalClusterDistanceMeters = config.Bind("SharedMap", "PortalClusterDistanceMeters", 60f,
             new ConfigDescription("Group portals within this horizontal distance of a group's first portal into one Multi Portals marker at their centre. Zero shows separate portal markers. Restart after edits.", new AcceptableValueRange<float>(0f, 100f)));
         ResourceMarkerSync = config.Bind("SharedMap", "ResourceMarkerSync", true,
-            "Record outdoor Copper, Tin, Silver, Obsidian, static Flametal deposits, Black Marble skull/rib remains and discovered Ancient Roots with sap-reserve percentages and share dot markers through Read Map. Excludes scraps, dungeons, creatures and ordinary stone. Independent of PortalMarkerSync. Restart after edits.");
+            "Record outdoor Copper, Tin, Silver, Obsidian, static Flametal deposits, sinking Flametal pillars, Black Marble skull/rib remains with (ST) for observed Soft Tissue and discovered Ancient Roots with sap-reserve percentages and share dot markers through Read Map. Excludes scraps, dungeons, creatures and ordinary stone. Independent of PortalMarkerSync. File edits require a restart. HeimKit Settings applies changes live.");
         ResourceDiscoverPreviouslyExplored = config.Bind("SharedMap", "ResourceDiscoverPreviouslyExplored", false,
-            "Also discover remaining eligible deposits in previously community-explored terrain without a player revisit. False collects only within current player exploration range. Silver always requires mining discovery evidence. Previously recorded discoveries persist either way. Restart after edits.");
+            "Also discover remaining eligible deposits in previously community-explored terrain without a player revisit. False collects only within current player exploration range. Silver always requires mining discovery evidence. Previously recorded discoveries persist either way. File edits require a restart. HeimKit Settings applies changes live.");
         ResourceClusterDistanceMeters = config.Bind("SharedMap", "ResourceClusterDistanceMeters", 30f,
             new ConfigDescription("Group same-type discoveries within this horizontal distance of a fixed first discovery. Tin groups show remaining discovered node counts; zero disables grouping. Restart after edits.", new AcceptableValueRange<float>(0f, 100f)));
         ResourceMarkerHideDistanceMeters = config.Bind("SharedMap", "ResourceMarkerHideDistanceMeters", 10f,
-            new ConfigDescription("Hide generated resource markers at or within this horizontal distance of published portal, dungeon, runestone, physical-spawner or Dvergr structure markers. Compare final publication positions; discoveries and depletion tracking are retained. Personal pins and resource-to-resource grouping are unchanged. Zero disables hiding. Restart after edits.", new AcceptableValueRange<float>(0f, 100f)));
+            new ConfigDescription("Hide generated resource markers at or within this horizontal distance of published portal, dungeon, runestone, physical-spawner or structure markers. Compare final publication positions; discoveries and depletion tracking are retained. Personal pins and resource-to-resource grouping are unchanged. Zero disables hiding. Restart after edits.", new AcceptableValueRange<float>(0f, 100f)));
         SilverDiscoveryRadiusMeters = config.Bind("SharedMap", "SilverDiscoveryRadiusMeters", 10f,
             new ConfigDescription("Reveal only the nearest undiscovered Silver vein within this horizontal distance of an observed player pickaxe impact. A direct pickaxe hit always selects the struck eligible Silver vein. Old explored terrain cannot bypass mining discovery. Restart after edits.", new AcceptableValueRange<float>(1f, 30f)));
         ResourceRemoveDepleted = config.Bind("SharedMap", "ResourceRemoveDepleted", true,
-            "Remove resource nodes only after confirmed terminal destruction or complete depleted health. Missing/unloaded records never establish depletion. False retains historical nodes in markers. Restart after edits.");
+            "Remove resource nodes only after confirmed terminal destruction or complete depleted health. Missing/unloaded records never establish depletion. False retains historical nodes in markers. File edits require a restart. HeimKit Settings applies changes live.");
         DungeonMarkerSync = config.Bind("SharedMap", "DungeonMarkerSync", true,
-            "Record supported dungeon exterior entrances within native player exploration range and share labeled hammer markers through Read Map. Publish one dungeon anchor within ten horizontal metres and clean nearby uploaded dungeon-labeled hammer copies. Retain independent saved discoveries. Independent of portal and resource markers. Disabling retains discoveries and removes generated dungeon pins during normalization. Restart after edits.");
+            "Record supported dungeon exterior entrances within native player exploration range and share labeled hammer markers through Read Map. Publish one dungeon anchor within ten horizontal metres and clean nearby uploaded dungeon-labeled hammer copies. Retain independent saved discoveries. Independent of portal and resource markers. Disabling retains discoveries and removes generated dungeon pins during normalization. File edits require a restart. HeimKit Settings applies changes live.");
         DungeonLootProgress = config.Bind("SharedMap", "DungeonLootProgress", true,
-            "Show remaining permanent-pickup percentages after observed entry or verified already-picked items. Supported empty inventories show 0%. Visits persist across restarts. Restart after edits.");
+            "Show remaining permanent-pickup percentages after observed entry or verified already-picked items. Supported empty inventories show 0%. Visits persist across restarts. File edits require a restart. HeimKit Settings applies changes live.");
         SharePinCheckmarks = config.Bind("SharedMap", "SharePinCheckmarks", false,
-            "Share player X checkmarks through accepted Write Map uploads and Read Map. Requires AllowPlayerMapWrites. False leaves player checkmarks personal. Manual checkmarks do not change dungeon pickup percentages. Restart after edits.");
+            "Share player X checkmarks through accepted Write Map uploads and Read Map. Requires AllowPlayerMapWrites. False leaves player checkmarks personal. Manual checkmarks do not change dungeon pickup percentages. File edits require a restart. HeimKit Settings applies changes live.");
         DungeonDiscoverPreviouslyExplored = config.Bind("SharedMap", "DungeonDiscoverPreviouslyExplored", false,
-            "Also discover supported placed dungeon entrances in previously community-explored terrain without a revisit. Never reveals entrances in unexplored terrain or generates locations. Existing discoveries persist either way. Restart after edits.");
+            "Also discover supported placed dungeon entrances in previously community-explored terrain without a revisit. Never reveals entrances in unexplored terrain or generates locations. Existing discoveries persist either way. File edits require a restart. HeimKit Settings applies changes live.");
         AllowPlayerMapWrites = config.Bind("SharedMap", "AllowPlayerMapWrites", true,
-            "Accept player cartography uploads, including exploration and ordinary pins. False rejects incoming map-field changes before importing terrain, retaining server data and Read Map. Vanilla clients still show Write Map and may report success locally. Existing table data and first-run import are retained. Restart after edits.");
+            "Accept player cartography uploads, including exploration and ordinary pins. False rejects incoming map-field changes before importing terrain, retaining server data and Read Map. Vanilla clients still show Write Map and may report success locally. Existing table data and first-run import are retained. File edits require a restart. HeimKit Settings applies changes live.");
         RunestoneMarkerSync = config.Bind("SharedMap", "RunestoneMarkerSync", true,
-            "Record validated placed lore runestones within native exploration range or saved community exploration and share dot markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. Restart after edits.");
+            "Record validated placed lore runestones within native exploration range or saved community exploration and share dot markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. File edits require a restart. HeimKit Settings applies changes live.");
         SpawnerMarkerSync = config.Bind("SharedMap", "SpawnerMarkerSync", true,
-            "Record visible, player-destructible persistent recurring spawner objects within native exploration range or saved community exploration and share dot markers. Hide confirmed destroyed sources. Excludes invisible spawn points, one-shot sources and unassociated interiors. Independent of other marker switches. Restart after edits.");
+            "Record visible, player-destructible persistent recurring spawner objects within native exploration range or saved community exploration and share dot markers. Hide confirmed destroyed sources. Excludes invisible spawn points, one-shot sources and unassociated interiors. Independent of other marker switches. File edits require a restart. HeimKit Settings applies changes live.");
+        FulingVillageMarkerSync = config.Bind("SharedMap", "FulingVillageMarkerSync", true,
+            "Share discovered Fuling villages as house pins. File edits require a restart. HeimKit Settings applies changes live.");
+        OtherStructureMarkerSync = config.Bind("SharedMap", "OtherStructureMarkerSync", true,
+            "Share discovered Draugr villages, Black Forest towers, Swamp ruins, Mountain cabins, Charred Fortresses and Deep North villages. File edits require a restart. HeimKit Settings applies changes live.");
         DvergrGuardTowerMarkerSync = config.Bind("SharedMap", "DvergrGuardTowerMarkerSync", true,
-            "Record placed Dvergr guard towers, occupied or ruined, within native exploration range or saved community exploration and share labeled house markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. Restart after edits.");
+            "Record placed Dvergr guard towers, occupied or ruined, within native exploration range or saved community exploration and share labeled house markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. File edits require a restart. HeimKit Settings applies changes live.");
         DvergrLighthouseMarkerSync = config.Bind("SharedMap", "DvergrLighthouseMarkerSync", true,
-            "Record placed Dvergr lighthouses, occupied or ruined, within native exploration range or saved community exploration and share labeled house markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. Restart after edits.");
+            "Record placed Dvergr lighthouses, occupied or ruined, within native exploration range or saved community exploration and share labeled house markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. File edits require a restart. HeimKit Settings applies changes live.");
         DvergrExcavationMarkerSync = config.Bind("SharedMap", "DvergrExcavationMarkerSync", true,
-            "Record placed Dvergr excavations, occupied or ruined, within native exploration range or saved community exploration and share labeled house markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. Restart after edits.");
+            "Record placed Dvergr excavations, occupied or ruined, within native exploration range or saved community exploration and share labeled house markers. Disabling removes generated table pins and retains discovery history. Independent of other marker switches. File edits require a restart. HeimKit Settings applies changes live.");
         TableIntervalSeconds = config.Bind("SharedMap", "TableIntervalSeconds", 10f,
             new ConfigDescription("Seconds between nearby table reconciliation passes.", new AcceptableValueRange<float>(2f, 120f)));
         MaxTablesPerPass = config.Bind("SharedMap", "MaxTablesPerPass", 1,

@@ -23,6 +23,8 @@ public sealed class SharedMapResourceStore
     private readonly long _world;
     private readonly List<ResourceDeposit> _deposits = new();
     private readonly Dictionary<(int, int), List<ResourceDeposit>> _cells = new();
+    private readonly List<ResourceDeposit> _pillars = new();
+    internal IReadOnlyList<ResourceDeposit> Pillars => _pillars;
     private long _revision, _savedRevision;
     private readonly ScheduleToken _nextSave = new();
     public string FilePath { get; }
@@ -38,6 +40,7 @@ public sealed class SharedMapResourceStore
     private void Add(ResourceDeposit deposit)
     {
         _deposits.Add(deposit);
+        if (deposit.Kind == ResourceKind.FlametalPillar) { _pillars.Add(deposit); return; }
         var key = ((int)Math.Floor(deposit.X), (int)Math.Floor(deposit.Z));
         if (!_cells.TryGetValue(key, out var cell)) _cells.Add(key, cell = new List<ResourceDeposit>());
         cell.Add(deposit);
@@ -66,7 +69,7 @@ public sealed class SharedMapResourceStore
     public ResourceDeposit? Observe(ResourceKind kind, float x, float y, float z, bool? depleted, bool allowNew,
         MiningProgress? progress = null, bool silverDiscovered = false, int? sapPercent = null)
     {
-        if (!Enum.IsDefined(typeof(ResourceKind), kind) || !ValidPosition(x, y, z)) return null;
+        if (kind == ResourceKind.FlametalPillar || !Enum.IsDefined(typeof(ResourceKind), kind) || !ValidPosition(x, y, z)) return null;
         if (progress.HasValue && (!SharedMapResourceHealth.TracksProgress(kind) || progress.Value.TotalSections < 1 ||
             progress.Value.TotalSections > 8192 || progress.Value.RemainingSections < 0 ||
             progress.Value.RemainingSections > progress.Value.TotalSections ||
@@ -98,6 +101,28 @@ public sealed class SharedMapResourceStore
         return d;
     }
 
+    internal ResourceDeposit AddPillar(float x, float y, float z)
+    {
+        if (!ValidPosition(x, y, z) || _deposits.Count >= MaximumDeposits)
+            throw new InvalidOperationException("Invalid or excess Flametal pillar discovery.");
+        var deposit = new ResourceDeposit(_deposits.Count + 1, ResourceKind.FlametalPillar, x, y, z);
+        Add(deposit); _revision++;
+        return deposit;
+    }
+
+    internal void RetirePillar(ResourceDeposit deposit)
+    {
+        if (deposit.Depleted) return;
+        deposit.Depleted = true;
+        _revision++;
+    }
+
+    internal void RecordSkull(ResourceDeposit deposit, SkullBounds bounds)
+    {
+        deposit.Skull = bounds;
+        _revision++;
+    }
+
     public bool Retire(ResourceKind kind, float x, float y, float z)
     {
         var d = Find(kind, x, y, z, out _);
@@ -119,7 +144,7 @@ public sealed class SharedMapResourceStore
             return false;
         }
         using var stream = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (stream.Length < 52 || stream.Length > 52L + MaximumDeposits * 34L)
+        if (stream.Length < 52 || stream.Length > 52L + MaximumDeposits * 59L)
             throw new InvalidDataException("Invalid resource discovery file length.");
         using var reader = new BinaryReader(stream);
         byte[] body = reader.ReadBytes((int)stream.Length - 32), checksum = reader.ReadBytes(32);
@@ -127,10 +152,10 @@ public sealed class SharedMapResourceStore
         if (!sha.ComputeHash(body).SequenceEqual(checksum)) throw new InvalidDataException("Resource discovery checksum mismatch.");
         using var fields = new BinaryReader(new MemoryStream(body, false));
         uint magic = fields.ReadUInt32(); int format = fields.ReadInt32(); long world = fields.ReadInt64();
-        if (magic != Magic || (format < 1 || format > 4) || world != _world)
+        if (magic != Magic || (format < 1 || format > 6) || world != _world)
             throw new InvalidDataException("Unsupported resource discovery format or world.");
         int count = fields.ReadInt32();
-        if (count < 0 || count > MaximumDeposits || fields.BaseStream.Length != 20L + count * (format == 1 ? 21L : format == 2 ? 29L : format == 3 ? 30L : 34L))
+        if (count < 0 || count > MaximumDeposits || fields.BaseStream.Length != 20L + count * (format == 1 ? 21L : format == 2 ? 29L : format == 3 ? 30L : format == 4 ? 34L : 59L))
             throw new InvalidDataException("Invalid resource discovery count or length.");
         var loaded = new List<ResourceDeposit>();
         for (int i = 0; i < count; i++)
@@ -146,28 +171,42 @@ public sealed class SharedMapResourceStore
                 throw new InvalidDataException("Invalid root sap percentage.");
             if (discovered > 1 || kind != (int)ResourceKind.Silver && discovered != 0)
                 throw new InvalidDataException("Invalid Silver discovery evidence.");
-            if (id != i + 1 || !Enum.IsDefined(typeof(ResourceKind), kind) || !ValidPosition(x, y, z) || depleted > 1)
+            if (format < 6 && kind == (int)ResourceKind.FlametalPillar || id != i + 1 || !Enum.IsDefined(typeof(ResourceKind), kind) || !ValidPosition(x, y, z) || depleted > 1)
                 throw new InvalidDataException("Invalid resource discovery record.");
             if ((remaining != -1 || total != 0) && (!SharedMapResourceHealth.TracksProgress((ResourceKind)kind) || total < 1 || total > 8192 ||
                 remaining < 0 || remaining > total || (depleted != 0) != (remaining == 0)))
                 throw new InvalidDataException("Invalid resource discovery progress.");
             MiningProgress? progress = total > 0 ? new MiningProgress(remaining, total) : null;
-            loaded.Add(new ResourceDeposit(id, (ResourceKind)kind, x, y, z, depleted != 0, progress, discovered != 0, sapPercent >= 0 ? sapPercent : (int?)null));
+            var deposit = new ResourceDeposit(id, (ResourceKind)kind, x, y, z, depleted != 0, progress, discovered != 0, sapPercent >= 0 ? sapPercent : (int?)null);
+            if (format >= 5)
+            {
+                byte skull = fields.ReadByte();
+                var bounds = new SkullBounds(fields.ReadSingle(), fields.ReadSingle(), fields.ReadSingle(),
+                    fields.ReadSingle(), fields.ReadSingle(), fields.ReadSingle());
+                if (skull > 1 || skull == 1 && (deposit.Kind != ResourceKind.BlackMarble || !bounds.Valid))
+                    throw new InvalidDataException("Invalid skull placement.");
+                if (skull == 1) deposit.Skull = bounds;
+            }
+            loaded.Add(deposit);
         }
-        _deposits.Clear(); _cells.Clear();
+        _deposits.Clear(); _cells.Clear(); _pillars.Clear();
         foreach (var d in loaded) Add(d);
         _revision = _savedRevision = 0; return true;
     }
 
     private SnapshotFile? _snapshotFile;
     private SnapshotFile Persistence => _snapshotFile ??= new SnapshotFile(FilePath);
+    internal bool Clean => _revision == _savedRevision && _snapshotFile?.Pending != true;
+    internal SnapshotPreparation? Preparation { get; set; }
     public bool SaveIfDue(float now, float interval)
     {
         bool saved = Persistence.Poll();
         if (saved) _savedRevision = Persistence.CompletedGeneration;
-        if (Persistence.Pending || !_nextSave.Ready(now)) return saved;
+        if (Persistence.Pending) return saved;
+        bool due = Preparation?.Ready(_nextSave, now, interval, _revision != _savedRevision) ?? (interval <= 0 || _nextSave.Ready(now));
+        if (!due) return saved;
         _nextSave.Postpone(now, interval);
-        if (_revision != _savedRevision) Persistence.Queue(Snapshot(), _revision);
+        if (_revision != _savedRevision) SnapshotPreparation.Queue(Preparation, now, Persistence, Snapshot, _revision);
         return saved;
     }
     public bool Save()
@@ -183,12 +222,21 @@ public sealed class SharedMapResourceStore
         using (var writer = new BinaryWriter(body, Encoding.UTF8, true))
         {
             bool roots = _deposits.Any(d => d.Kind == ResourceKind.AncientRoot);
-            writer.Write(Magic); writer.Write(roots ? 4 : 3); writer.Write(_world); writer.Write(_deposits.Count);
+            bool pillars = _pillars.Count != 0;
+            bool tissue = pillars || _deposits.Any(d => d.Skull.HasValue || d.Kind == ResourceKind.SoftTissue);
+            writer.Write(Magic); writer.Write(pillars ? 6 : tissue ? 5 : roots ? 4 : 3); writer.Write(_world); writer.Write(_deposits.Count);
             foreach (var d in _deposits)
             {
                 writer.Write(d.Identity); writer.Write((int)d.Kind); writer.Write(d.X); writer.Write(d.Y); writer.Write(d.Z); writer.Write(d.Depleted);
                 writer.Write(d.Progress?.RemainingSections ?? -1); writer.Write(d.Progress?.TotalSections ?? 0); writer.Write(d.SilverDiscovered);
-                if (roots) writer.Write(d.SapPercent ?? -1);
+                if (roots || tissue) writer.Write(d.SapPercent ?? -1);
+                if (tissue)
+                {
+                    writer.Write(d.Skull.HasValue);
+                    var bounds = d.Skull.GetValueOrDefault();
+                    writer.Write(bounds.MinX); writer.Write(bounds.MinY); writer.Write(bounds.MinZ);
+                    writer.Write(bounds.MaxX); writer.Write(bounds.MaxY); writer.Write(bounds.MaxZ);
+                }
             }
         }
         return body.ToArray();

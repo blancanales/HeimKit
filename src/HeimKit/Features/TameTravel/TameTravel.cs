@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HeimKit.Core.Scheduling;
 using HeimKit.Core.World;
 using HeimKit.Core.Prefabs;
@@ -11,7 +12,7 @@ using System;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 namespace HeimKit.Features.TameTravel;
-public sealed class TameTravel : IServerModule
+public sealed class TameTravel : IServerModule, IModuleSwitches, IModuleNumericSettings, IModuleIdle
 {
     private readonly TameTravelSettings _settings;
     private readonly ManualLogSource _logger;
@@ -24,6 +25,29 @@ public sealed class TameTravel : IServerModule
     private ZDOMan? _world;
     private long _worldUid;
     private readonly PlayerProcessingNotices _processing;
+    bool IModuleIdle.Idle => _controller?.Idle != false;
+    void IModuleIdle.HoldNewWork(bool hold)
+    {
+        _controller?.HoldNewWork(hold);
+    }
+
+    private SwitchBinding[]? _switches;
+    IReadOnlyList<SwitchBinding> IModuleSwitches.Switches => _switches ??= new SwitchBinding[]
+    {
+        new("Enabled", _settings.Enabled),
+        new("Debug logging", _settings.DebugMode, applyLive: true),
+        new("Dead Raiser summon travel", _settings.SummonTravel),
+        new("Follow spacing", _settings.FollowSpacingEnabled),
+    };
+    SwitchApplyMode IModuleSwitches.ApplyMode => SwitchApplyMode.Reinitialize;
+
+    IReadOnlyList<NumericSettingBinding> IModuleNumericSettings.NumericSettings => new[]
+    {
+        NumericSettingBinding.Create("Maximum tames per portal trip", _settings.MaxFollowersPerTraversal,
+            "Maximum followers reserved at portal entry. Animals already reserved for a trip keep their places.",
+            () => "Applies at the next portal entry.")
+    };
+
     public string Name => "TameTravel";
     public bool IsActive { get; private set; }
     public TameTravel(ConfigFile config, ManualLogSource logger, PlayerServices players)
@@ -43,8 +67,8 @@ public sealed class TameTravel : IServerModule
         if (!_settings.Enabled.Value) return;
         if (!_compatibility.Supports(gameVersion)) { Log("DISABLED: unsupported game version " + gameVersion + "; required version " + _compatibility.RequiredVersion, LogLevel.Warning); return; }
         IsActive = true;
-        try { _followRecovery = new(_logger); } catch (Exception error) { Fail(error); return; }
-        if (_settings.DebugLogging.Enabled) Log("Waiting for joined players and dedicated-server world", LogLevel.Debug);
+        try { _followRecovery = new(_logger, _players.PlayerHosted); } catch (Exception error) { Fail(error); return; }
+        if (_settings.DebugLogging.Enabled) Log("Waiting for joined players and a hosted world", LogLevel.Debug);
         try { _presenceRegistration = _players.Events.Subscribe(PresenceChanged, Fail, () => _processing.IsEmptyPaused, () => _processing.IsRunning, () => _processing.IsServerReady); }
         catch (Exception error) { Fail(error); }
         if (!IsActive) { var registration = _presenceRegistration; _presenceRegistration = null; registration?.Dispose(); }

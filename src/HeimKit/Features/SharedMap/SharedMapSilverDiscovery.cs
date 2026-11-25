@@ -23,6 +23,7 @@ internal sealed class SharedMapSilverDiscovery : IDisposable
     private readonly Action<Vector3, ZDOID> _impact;
     private readonly Action<Exception> _failed;
     private readonly Dictionary<long, (ZDOID Actor, float At)> _recent = new();
+    private readonly Queue<(ZDOID Actor, Vector3 Point, ZDOID Target, float At)> _localImpacts = new();
     private IDisposable? _subscription;
     private int _terrainBudget;
     private float _terrainWindow;
@@ -47,6 +48,12 @@ internal sealed class SharedMapSilverDiscovery : IDisposable
         float health = actor.GetFloat(ZDOVars.s_health, float.NaN);
         position = actor.GetPosition();
         if (!SharedMapExploration.Finite(health) || health <= 0 || !Finite(position) || Character.InInterior(position)) return false;
+        return Pickaxe(actor, out animation);
+    }
+
+    private static bool Pickaxe(ZDO actor, out string animation)
+    {
+        animation = "";
         var item = PrefabRegistry.Component<ItemDrop>(PrefabRegistry.Current.Prefab(actor.GetInt(ZDOVars.s_rightItem)));
         if (item == null || item.m_itemData.m_shared.m_skillType != Skills.SkillType.Pickaxes) return false;
         animation = item.m_itemData.m_shared.m_attack?.m_attackAnimation ?? "";
@@ -66,6 +73,7 @@ internal sealed class SharedMapSilverDiscovery : IDisposable
 
     private void Observe(ZRpc rpc, ZPackage packet)
     {
+        if (ModuleScheduler.Current.Battle.Active) return;
         if (_presence.HasJoinedPlayers != true) return;
         var peer = _presence.Peers.FirstOrDefault(p => p.IsReady() && ReferenceEquals(p.m_rpc, rpc));
         if (peer == null) return;
@@ -93,23 +101,73 @@ internal sealed class SharedMapSilverDiscovery : IDisposable
                 int start = parameters.GetPos(), length = parameters.ReadInt();
                 if (length < 17 || length > 64 || parameters.Size() - parameters.GetPos() != length) return;
                 parameters.SetPos(start); var operation = parameters.ReadPackage();
-                Vector3 point = operation.ReadVector3(); byte rotated = operation.ReadByte();
-                if (rotated > 1) return;
-                if (rotated != 0 && !Finite(operation.ReadVector3())) return;
-                int type = operation.ReadInt();
-                if (operation.GetPos() != operation.Size() || type != "digg_v3".GetStableHashCode() || !Near(position, point)) return;
-                _impact(point, ZDOID.None); return;
+                if (DigPoint(operation, position, out var point)) _impact(point, ZDOID.None);
+                return;
             }
             var hit = new HitData(); hit.Deserialize(ref parameters);
             int left = parameters.Size() - parameters.GetPos();
             if (left == 4) { if (parameters.ReadInt() < 0) return; }
             else if (left != 0) return;
-            if (hit.m_attacker != peer.m_characterID || hit.m_skill != Skills.SkillType.Pickaxes ||
-                !SharedMapExploration.Finite(hit.m_damage.m_pickaxe) || hit.m_damage.m_pickaxe <= 0 || !Near(position, hit.m_point)) return;
-            _impact(hit.m_point, target);
+            if (MiningHit(hit, peer.m_characterID, position)) _impact(hit.m_point, target);
         }
         catch (Exception error) when (error is System.IO.IOException || error is System.IO.InvalidDataException || error is ArgumentException || error is FormatException)
         { /* Incomplete/unsupported evidence never reveals a vein or modifies native traffic. */ }
+    }
+
+    private static bool MiningHit(HitData hit, ZDOID actor, Vector3 position) =>
+        hit.m_attacker == actor && hit.m_skill == Skills.SkillType.Pickaxes &&
+        SharedMapExploration.Finite(hit.m_damage.m_pickaxe) && hit.m_damage.m_pickaxe > 0 && Near(position, hit.m_point);
+
+    private static bool DigPoint(ZPackage operation, Vector3 position, out Vector3 point)
+    {
+        point = operation.ReadVector3();
+        byte rotated = operation.ReadByte();
+        if (rotated > 1 || rotated != 0 && !Finite(operation.ReadVector3())) return false;
+        return operation.ReadInt() == "digg_v3".GetStableHashCode() && operation.GetPos() == operation.Size() && Near(position, point);
+    }
+
+    internal void ObserveLocal(ZDOID target, string method, object[] parameters)
+    {
+        if (ModuleScheduler.Current.Battle.Active) return;
+        if (_localImpacts.Count >= 32 || parameters.Length == 0 ||
+            !WorldActors.TryLocal(out var host) || WorldActors.Resolve(host) is not ZDO actor ||
+            !NativeCharacterHealth.IsAlive(actor) || !Pickaxe(actor, out _) ||
+            _world.GetZDO(target) is not ZDO record || !record.IsValid()) return;
+        var position = Player.m_localPlayer.transform.position;
+        if (!Finite(position) || Character.InInterior(position)) return;
+
+        Vector3 point;
+        if (method == "RPC_ApplyOperation")
+        {
+            if (record.GetPrefab() != TerrainPrefab || parameters[0] is not ZPackage operation ||
+                operation.Size() is < 17 or > 64) return;
+            try
+            {
+                if (!DigPoint(new ZPackage(operation.GetArray()), position, out point)) return;
+            }
+            catch (System.IO.IOException) { return; }
+            target = ZDOID.None;
+        }
+        else
+        {
+            if (parameters[0] is not HitData hit || !MiningHit(hit, host.Character, position)) return;
+            point = hit.m_point;
+        }
+        _localImpacts.Enqueue((host.Character, point, target, Time.unscaledTime));
+    }
+
+    internal bool HasLocalImpacts => _localImpacts.Count != 0;
+
+    internal void ProcessLocal(float now)
+    {
+        if (_localImpacts.Count == 0) return;
+        if (!WorldActors.TryLocal(out var host)) { _localImpacts.Clear(); return; }
+        for (int budget = 4; budget > 0 && _localImpacts.Count > 0; budget--)
+        {
+            var impact = _localImpacts.Dequeue();
+            if (impact.Actor == host.Character && now >= impact.At && now - impact.At <= 3)
+                _impact(impact.Point, impact.Target);
+        }
     }
 
     private bool RecentNear(Vector3 point)
@@ -152,6 +210,6 @@ internal sealed class SharedMapSilverDiscovery : IDisposable
     {
         var subscription = _subscription; _subscription = null;
         try { subscription?.Dispose(); }
-        finally { _recent.Clear(); }
+        finally { _recent.Clear(); _localImpacts.Clear(); }
     }
 }
