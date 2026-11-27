@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.6
+
+- Fixed the images on HeimKit’s Thunderstore Details page, including the feature overview and HeimDefender illustration.
+
 ## 0.2.5
 
 - Added **HeimDefender**, a host feature that keeps player-built Ballistas from targeting players and tamed animals. Hosts can also enable automatic bolt refills.

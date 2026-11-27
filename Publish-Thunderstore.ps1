@@ -166,7 +166,9 @@ $repoReadme = $readme
 $readme = [regex]::Replace($repoReadme, '\]\((docs/[^)]+|AGENTS\.md|LICENSE)\)', {
     param($match)
     $target = $ReadmeBaseUrl.TrimEnd('/') + '/' + $match.Groups[1].Value
-    if ($match.Groups[1].Value -match '\.(png|jpe?g)$') { $target += '?raw=true' }
+    if ($match.Groups[1].Value -match '\.(png|jpe?g)$') {
+        $target = $target -replace '^https?://github\.com/([^/]+/[^/]+)/blob/', 'https://raw.githubusercontent.com/$1/'
+    }
     return '](' + $target + ')'
 })
 foreach ($file in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'docs') -Recurse -File | Where-Object { $_.Extension -in @('.md', '.png', '.jpg', '.jpeg') }) {
