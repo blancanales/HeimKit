@@ -6,7 +6,7 @@ Install HeimKit on a Windows Valheim dedicated server. Vanilla clients can join.
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit release baseline | 0.2.5 |
+| HeimKit release baseline | 0.2.6 |
 | Supported Valheim version | 1.0.31 |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
