@@ -183,7 +183,8 @@ internal sealed class TameTravelPlacement : IDisposable
                     if (Physics.CheckBox(centre, body.extents, t.Journey.DestinationRotation, _obstacles, QueryTriggerInteraction.Ignore))
                     { if (evidence) Reject(t, "lox_body_obstructed"); continue; }
                 }
-                if (loxAtHousedPortal || _access.Reachable(traveller.GetPosition(), support, out accessReason))
+                bool outdoorLoxLanding = loxAtHousedPortal && Roof(support + Vector3.up * .1f) == null;
+                if (outdoorLoxLanding || _access.Reachable(traveller.GetPosition(), support, out accessReason))
                 { position = point.Value; t.PlacementTraveller = traveller.GetPosition(); WaitReason = "placed"; return true; }
                 if (evidence) Reject(t, accessReason);
                 WaitReason = accessReason;
@@ -215,6 +216,7 @@ internal sealed class TameTravelPlacement : IDisposable
             Note("obstacle_padding");
             if (push == TameTravelPlacementRules.MaximumPushes || away.sqrMagnitude < .0001f) return null;
             candidate = point.Value + away.normalized * (away.magnitude + .05f);
+            candidate.y -= _probeExtent - _probeCenterOffset.y + .15f;
             if (_probeEvidence) _probeTransfer.PlacementLastProbe = candidate;
         }
     }
@@ -232,19 +234,24 @@ internal sealed class TameTravelPlacement : IDisposable
         var probe = PaddingProbe();
         probe.radius = radius; probe.height = 2 * (_probeHalfLine + radius); probe.direction = _probeDirection;
         // Penetration needs an enabled collider; it stays enabled only for these synchronous queries.
+        float bodyTop = root.y + _probeCenterOffset.y + _probeExtent + .05f;
+        bool crowded = false;
         probe.enabled = true;
         try
         {
             for (int i = 0; i < count; i++)
             {
                 var other = _overlaps[i]; _overlaps[i] = null!;
-                if (other != null && Physics.ComputePenetration(probe, center, _probeRotation, other, other.transform.position, other.transform.rotation, out var direction, out float distance))
+                // The unpadded capsule checks headroom. Extra side clearance is for nearby obstacles.
+                if (other == null || other.bounds.min.y > bodyTop) continue;
+                crowded = true;
+                if (Physics.ComputePenetration(probe, center, _probeRotation, other, other.transform.position, other.transform.rotation, out var direction, out float distance))
                     away += direction * distance;
             }
         }
         finally { probe.enabled = false; }
         away.y = 0;
-        return true;
+        return crowded;
     }
     private CapsuleCollider PaddingProbe()
     {
@@ -257,6 +264,7 @@ internal sealed class TameTravelPlacement : IDisposable
     private Vector3? ProbeGround(Vector3 p)
         {
             Vector3? Rejected(string reason) { Note(reason); return null; }
+            if (_probeWalkout) p.y -= _probeExtent - _probeCenterOffset.y + .15f;
             if (!_surfaces.Probe(p, out float height, out var normal, out string surfaceReason))
             {
                 if (_surfaces.Unsupported != null) Name(_probeTransfer.PlacementSurfaceBlocks, _surfaces.Unsupported);
@@ -264,12 +272,10 @@ internal sealed class TameTravelPlacement : IDisposable
             }
             if (Math.Abs(height - _probeTransfer.Journey.Exit.y) > 24) return Rejected("vertical_range");
             p.y = height + _probeExtent - _probeCenterOffset.y + .15f;
-            string? roof = Roof(new Vector3(p.x, height + .1f, p.z));
-            if (roof != null) { Name(_probeTransfer.PlacementSurfaceBlocks, roof + ":building_overhead"); return Rejected("building_overhead"); }
             if ((p - _probeTransfer.Journey.Exit).sqrMagnitude > TameTravelPlacementRules.ContextRadius * TameTravelPlacementRules.ContextRadius) return Rejected("walkout_range");
             // Cardinal and diagonal support samples cover the complete conservative footprint.
             foreach (var offset in FootprintOffsets)
-                if (!_surfaces.Probe(p + offset * _probeHorizontalExtent, out float sample, out _, out _) ||
+                if (!_surfaces.Probe(new Vector3(p.x, height, p.z) + offset * _probeHorizontalExtent, out float sample, out _, out _) ||
                     !TameTravelPlacementRules.SupportedFootprint(height, sample, offset * _probeHorizontalExtent, normal)) return Rejected("footprint_support");
             foreach (var player in _players)
                 if ((player - p).sqrMagnitude < (_probeHorizontalExtent + 1.5f) * (_probeHorizontalExtent + 1.5f)) return Rejected("player_clearance");

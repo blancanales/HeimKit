@@ -7,6 +7,7 @@ namespace HeimKit.Core.Control;
 
 internal static class ControlProtocol
 {
+    internal const string DiagnosticsGroup = "Server Diagnostics";
     internal const int Version = 2, MaxBytes = 16 * 1024, MaxEntries = 256;
     internal const string Disabled = "HeimKit_Disabled";
     internal const string Identify = "HeimKit_Identify";
@@ -14,7 +15,7 @@ internal static class ControlProtocol
     internal static readonly System.Collections.Generic.IReadOnlyList<string> ModuleNames = Array.AsReadOnly(new string[]
     {
         "InfiniteTorches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch", "SharedMap",
-        "DoorKeeper", "ForestRenewal", "SeaSalvage", "TameTravel", "HeimMender", "StationSupply"
+        "DoorKeeper", "ForestRenewal", "SeaSalvage", "TameTravel", "HeimMender", "StationSupply", "HeimDefender"
     });
     private static readonly Encoding Utf8 = new UTF8Encoding(false, true);
 

@@ -24,7 +24,8 @@ public sealed class PlayerServices : IDisposable
     public PlayerActivityService Activity { get; }
     public PlayerRoutedMessages RoutedMessages { get; } = new();
     private readonly CombatActivity _combat;
-    private readonly ObjectInteractionDiagnostics? _interactions;
+    private ObjectInteractionDiagnostics? _interactions;
+    private readonly DebugLoggingPolicy _interactionPolicy;
     internal PlayerContextDiagnostics Context { get; }
     internal PlayerArrivalDiagnostics Arrivals { get; }
     public static bool Ready => PlayerActivityService.Ready;
@@ -41,10 +42,22 @@ public sealed class PlayerServices : IDisposable
         Context = new PlayerContextDiagnostics(Presence, RoutedMessages, _debug, logger);
         Arrivals = new PlayerArrivalDiagnostics(Presence, _debug, logger, Context.Weather);
         _combat = new CombatActivity(Presence, RoutedMessages, logger, Context);
-        if (DiagnosticsSettings.ObjectInteractionsEnabled(config, logger))
+        _interactionPolicy = DiagnosticsSettings.ObjectInteractionsPolicy(config, logger);
+        RefreshInteractionTrace();
+    }
+
+    private void RefreshInteractionTrace()
+    {
+        if (_interactionPolicy.ConfiguredEnabled == (_interactions != null)) return;
+        if (_interactions == null)
         {
-            DebugLoggingDelivery.Report(logger, "HeimKit");
-            _interactions = new ObjectInteractionDiagnostics(Presence, RoutedMessages, logger);
+            DebugLoggingDelivery.Report(_logger, "HeimKit");
+            _interactions = new ObjectInteractionDiagnostics(Presence, RoutedMessages, _logger);
+        }
+        else
+        {
+            _interactions.Dispose();
+            _interactions = null;
         }
     }
     public void Tick(float now)
@@ -53,6 +66,7 @@ public sealed class PlayerServices : IDisposable
         Presence.Refresh();
         History.Flush(now);
         DiagnosticLog.ObservePlayers(Presence.HasConnectedPlayers);
+        RefreshInteractionTrace();
         _interactions?.Tick(now);
         Arrivals.Observe(now);
         _combat.Tick(now);

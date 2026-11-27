@@ -10,6 +10,12 @@ SharedMap and its portal, resource, dungeon, runestone, recurring-spawner and st
 
 ![SharedMap: explore, save and Read Map, with Portal Marker, Resource Marker, Dungeon Marker, Runestone Marker and Spawner Marker options](../images/shared-map-workflow.jpg)
 
+## Automatic personal markers
+
+**F7 → Client Settings → SharedMap → Automatic markers** is on by default. Nearby portals, outdoor resources, dungeon entrances, runestones, recurring spawners and supported structures appear as you explore. Silver requires mining evidence. Entering a chamber records its exterior doorway. Automatic pins use the map’s shared-data visibility setting and are saved per character and world.
+
+On a vanilla server, discoveries stay on your personal map. On a HeimKit host, automatic markers follow the host’s enabled categories and grouping settings. Read a cartography table to import community terrain and more distant discoveries. A table read reuses matching markers and preserves your own map notes.
+
 ## Shared exploration
 
 Background discovery, metadata preparation, dungeon loot observation and table updates now share bounded work admission. They pause entirely during native raids and server-observed fights, then resume through ordinary bounded scheduling. Routine discovery/publication stores flush snapshots in the background; orderly lifecycle changes still finish pending writes. See [performance observations](../server-setup.md#performance-observations) and [limitations](../limitations.md#server-observations-and-logs).
@@ -26,7 +32,7 @@ On first use without a saved community map, SharedMap imports valid exploration 
 
 Player-built portals in community-explored terrain receive portal-shaped markers. Labels use current portal tags, or `NoName` when blank; connected and unconnected endpoints qualify.
 
-PortalClusterDistanceMeters groups endpoints around a fixed first portal. Groups display `Multi Portals (N)` at their centre; single portals keep their tag. Zero shows individual endpoints. Renames and removals are reconciled from current world records; small persistent publication offsets help refresh renamed markers.
+PortalClusterDistanceMeters groups endpoints around a fixed first portal. Groups display `Multi Portals (N)` at their centre; single portals show their tag or NoName. A standalone portal without a destination adds (Unconnected) to its label and appears white on a HeimKit client. With Automatic markers enabled, an installed client also updates a known standalone portal’s label and colour from its native connection record, even at a distance, on both vanilla and HeimKit hosts. Pairing it restores the normal grey shared icon. If Valheim has not supplied a fresh record, the displayed status can be stale. Reading and writing a cartography table work as usual. Groups stay grey, including when a member is unconnected. Vanilla guests can see the status label through Read Map. Zero shows individual endpoints. Renames and removals are reconciled from current world records; small persistent publication offsets help refresh renamed markers.
 
 While enabled, automatic portal management reserves every portal-icon pin in table data for actual portals. Other icons are preserved except matching nearby obsolete portal pins; automatic reconciliation preserves player-owned hammer pins. Disabling portal sync removes generated portal records and preserves player-owned pins.
 

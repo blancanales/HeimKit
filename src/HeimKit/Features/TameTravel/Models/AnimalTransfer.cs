@@ -24,7 +24,7 @@ internal sealed class AnimalTransfer : OwnershipLease
     public readonly System.Collections.Generic.Dictionary<string, int> PlacementRejections = new();
     public readonly System.Collections.Generic.Dictionary<string, int> PlacementWalkoutRejections = new();
     public readonly System.Collections.Generic.Dictionary<string, int> PlacementWaitReasons = new();
-    // Up to sixteen named pieces or layers behind unsupported_surface, building_overhead and solid_overlap rejections.
+    // Up to sixteen named pieces or layers behind unsupported_surface and solid_overlap rejections.
     public readonly System.Collections.Generic.Dictionary<string, int> PlacementSurfaceBlocks = new();
     public readonly System.Collections.Generic.Dictionary<string, int> PlacementOverlapHits = new();
     public Vector3? PlacementTraveller;

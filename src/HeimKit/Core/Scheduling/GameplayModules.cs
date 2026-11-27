@@ -2,6 +2,7 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Core.Players;
 using HeimKit.Features.InfiniteTorches;
+using HeimKit.Features.HeimDefender;
 using HeimKit.Features.WeatherGuard;
 using HeimKit.Features.AFKNightWatch;
 using HeimKit.Features.AFKRaidWatch;
@@ -30,5 +31,6 @@ internal static class GameplayModules
         host.Register(() => new TameTravel(config, logger, players), "TameTravel");
         host.Register(() => new HeimMender(config, logger, players), "HeimMender");
         host.Register(() => new StationSupply(config, logger, players), "StationSupply");
+        host.Register(() => new HeimDefender(config, logger, players), "HeimDefender");
     }
 }

@@ -5,7 +5,7 @@ namespace HeimKit.Client;
 
 public sealed class ControlPanelMark : MaskableGraphic
 {
-    internal bool IsCheckmark;
+    [SerializeField] internal bool IsCheckmark;
 
     protected override void OnPopulateMesh(VertexHelper mesh)
     {

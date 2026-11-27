@@ -113,7 +113,7 @@ internal sealed class ObjectTransferAuthority : IDisposable
     public bool Holds(OwnershipLease t) => _leases.TryGetValue(t.Id, out var current) && ReferenceEquals(current, t);
     public bool Acquire(OwnershipLease transfer, float now, bool allowDisconnectedOwner = false)
         => Acquire(transfer, now, out _, allowDisconnectedOwner);
-    public bool Acquire(OwnershipLease transfer, float now, out string reason, bool allowDisconnectedOwner = false)
+    public bool Acquire(OwnershipLease transfer, float now, out string reason, bool allowDisconnectedOwner = false, bool allowInitialStaticRevision = false)
     {
         ServerPerformance.OwnershipAttempts.Add(0);
         reason = "ownership_acquired";
@@ -126,8 +126,8 @@ internal sealed class ObjectTransferAuthority : IDisposable
         if (_world.GetZDO(transfer.Id) != transfer.Record || !transfer.Record.IsValid()) { reason = "object_record_unavailable"; return false; }
         var z = transfer.Record; transfer.PreviousOwner = z.GetOwner(); transfer.Source = z.GetPosition();
         CheckRevisions(z.DataRevision, z.OwnerRevision);
-        if (z.DataRevision == 0) { reason = "object_revision_unavailable"; return false; }
-        if (_staticObjects && !Preflight(z, out reason)) return false;
+        if (z.DataRevision == 0 && !(_staticObjects && allowInitialStaticRevision)) { reason = "object_revision_unavailable"; return false; }
+        if (_staticObjects && !Preflight(z, out reason, allowInitialStaticRevision)) return false;
         if (_staticObjects && _sourceWaits.Count + _leases.Count >= 256 && !_sourceWaits.ContainsKey(transfer.Id))
         { reason = "source_wait_limit"; return false; }
         if (_staticObjects && _sourceWaits.TryGetValue(transfer.Id, out var waiting))
@@ -200,11 +200,11 @@ internal sealed class ObjectTransferAuthority : IDisposable
         return false;
     }
     // Readiness only: callers can inspect both originals before changing either owner.
-    internal bool Preflight(ZDO record, out string reason)
+    internal bool Preflight(ZDO record, out string reason, bool allowInitialStaticRevision = false)
     {
         reason = "native_state_ready";
         if (!record.IsValid() || !ReferenceEquals(_world.GetZDO(record.m_uid), record)) { reason = "object_record_unavailable"; return false; }
-        if (record.DataRevision == 0) { reason = "object_revision_unavailable"; return false; }
+        if (record.DataRevision == 0 && !(_staticObjects && allowInitialStaticRevision)) { reason = "object_revision_unavailable"; return false; }
         var source = OwnerConnection(record);
         if (_sourceWaits.ContainsKey(record.m_uid))
         {

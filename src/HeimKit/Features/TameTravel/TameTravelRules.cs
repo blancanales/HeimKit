@@ -91,6 +91,7 @@ internal sealed class TameTravelRules
     private static string? LocalName() =>
         WorldSession.IsPlayerHosted(WorldSession.Identify(ZNet.instance)) ? Game.instance?.GetPlayerProfile()?.GetName() : null;
 
+    internal static readonly int AdultWolf = "Wolf".GetStableHashCode();
     public bool Animal(ZDO? z) => AnimalRejection(z) == null;
     public string? AnimalRejection(ZDO? z, bool allowInterior = false)
     {

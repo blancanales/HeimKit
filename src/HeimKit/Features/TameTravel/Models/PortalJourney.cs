@@ -24,5 +24,6 @@ internal sealed class PortalJourney
     public string? EndReason;
     public readonly Queue<ZDOID> Followers = new();
     public readonly HashSet<ZDOID> Waiting = new();
+    public readonly HashSet<ZDOID> NativeWolves = new();
     public int Moved, Confirmed;
 }

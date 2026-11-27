@@ -14,6 +14,7 @@ public sealed class MapMarker
     public float Y { get; }
     public float Z { get; }
     public string Identity { get; }
-    public MapMarker(string name, float x, float y, float z, string identity = "")
-    { Name = name; X = x; Y = y; Z = z; Identity = identity; }
+    public bool UnconnectedPortal { get; }
+    public MapMarker(string name, float x, float y, float z, string identity = "", bool unconnectedPortal = false)
+    { Name = name; X = x; Y = y; Z = z; Identity = identity; UnconnectedPortal = unconnectedPortal; }
 }

@@ -11,6 +11,7 @@ internal sealed class TableMapSnapshot
 {
     public SharedMapController Controller { get; }
     public byte[]? Previous { get; }
+    internal byte[]? PreviousKeys, SourceKeys;
     public byte[]? Received { get; set; }
     public long? SenderPeer { get; set; }
     public string SenderName { get; set; } = "";

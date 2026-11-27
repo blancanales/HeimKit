@@ -250,8 +250,8 @@ internal sealed class StationSupplyController : IDisposable
                 }
                 if (_inputHistory.TryGet(chest, port, out var rejected))
                 { Evidence(now, rejected.Status, station, port, chest, selection, inventory: rejected); continue; }
-                bool stationReady = _authority.Preflight(station, out string stationWait);
-                bool chestReady = _authority.Preflight(chest, out string chestWait);
+                bool stationReady = _authority.Preflight(station, out string stationWait, allowInitialStaticRevision: true);
+                bool chestReady = _authority.Preflight(chest, out string chestWait, allowInitialStaticRevision: true);
                 var retryState = RetryState(station, chest, stationReady, chestReady);
                 if (!_retry.Ready(station.m_uid, port, chest.m_uid, retryState, now, out float retryIn))
                 { ServerPerformance.RetryDeferrals.Add(0); Evidence(now, "ownership_retry_backoff", station, port, chest, selection, remaining: retryIn); continue; }
@@ -269,9 +269,9 @@ internal sealed class StationSupplyController : IDisposable
                 _counts.Transactions++;
                 using (_diagnostics.Stage("ownership"))
                 {
-                    if (!_authority.Acquire(transaction.Station, now, out var stationReason)) { transaction.StationWait = stationReason; End(transaction, now, "station_ownership_unavailable"); if (_settings.MaxActiveTransactions.Value == 1) return; break; }
+                    if (!_authority.Acquire(transaction.Station, now, out var stationReason, allowInitialStaticRevision: true)) { transaction.StationWait = stationReason; End(transaction, now, "station_ownership_unavailable"); if (_settings.MaxActiveTransactions.Value == 1) return; break; }
                     if (transaction.Station.PreviousPeer != null) _counts.SourceDrains++;
-                    if (!_authority.Acquire(transaction.Chest, now, out var chestReason)) { transaction.ChestWait = chestReason; End(transaction, now, "chest_ownership_unavailable"); if (_settings.MaxActiveTransactions.Value == 1) return; break; }
+                    if (!_authority.Acquire(transaction.Chest, now, out var chestReason, allowInitialStaticRevision: true)) { transaction.ChestWait = chestReason; End(transaction, now, "chest_ownership_unavailable"); if (_settings.MaxActiveTransactions.Value == 1) return; break; }
                     if (transaction.Chest.PreviousPeer != null) _counts.SourceDrains++;
                 }
                 transaction.Stage = "source_state_drain";
@@ -335,7 +335,7 @@ internal sealed class StationSupplyController : IDisposable
         bool diagnostics = _diagnostics.SelectionReady(now);
         selection.CountsMeasured = diagnostics;
         float rejectedDistance = float.MaxValue;
-        var placement = StationSupplyRules.Placement(station.GetPosition(), station.GetRotation(), intake.LocalPoint, _settings.ChestRangeMeters.Value, _settings.ChestHeightToleranceMeters.Value);
+        var placement = StationSupplyRules.Placement(station.GetPosition(), station.GetRotation(), intake.LocalPoint, _settings.ChestRangeMeters.Value, _settings.ChestHeightToleranceMeters.Value, intake.AllowChestOnAnySide);
         foreach (var candidateChest in _chests)
         {
             var chest = candidateChest.Record;
@@ -676,7 +676,7 @@ internal sealed class StationSupplyController : IDisposable
             if (!t.Committed) _inputHistory.Remember(t.Chest.Record, t.Intake, t.SourceRevision, t.SourceInventory, t.Inventory);
             if (reason == "native_state_timeout" || reason == "station_ownership_unavailable" || reason == "chest_ownership_unavailable" || reason == "source_transport_unavailable")
             {
-                bool stationReady = _authority.Preflight(t.Station.Record, out _), chestReady = _authority.Preflight(t.Chest.Record, out _);
+                bool stationReady = _authority.Preflight(t.Station.Record, out _, allowInitialStaticRevision: true), chestReady = _authority.Preflight(t.Chest.Record, out _, allowInitialStaticRevision: true);
                 _retry.Failed(t.Station.Id, t.Intake, t.Chest.Id, RetryState(t.Station.Record, t.Chest.Record, stationReady, chestReady), now);
             }
         }

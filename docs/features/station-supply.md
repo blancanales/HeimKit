@@ -64,7 +64,7 @@ Find the ice-loading prompt at the end opposite the output. Use the prompt to or
 
 ![Small chest in front of the shield generator at its base](../images/station-supply/shield-generator-in-game.jpg)
 
-Find the fuel-loading prompt at the base and place the chest just beyond it.
+Place a public chest near the fuel-loading prompt at the base. The generator uses the closest eligible chest to that prompt on any side.
 
 #### Fermenter (optional)
 
@@ -78,13 +78,13 @@ Put the chest beside the barrel within reach of its central loading point. Leave
 
 Put a dedicated disposal chest beside the inventory opening and leave the lever accessible.
 
-Each intake selects **one nearest chest** independently of what it contains. If that chest is empty, open, inaccessible or missing the correct resource, the intake waits. It never falls back to a farther chest or combines inventories. Put each chest closer to its intended hatch than other eligible storage. Chests on the inward side behind an off-centre hatch are excluded. Exact distance ties use stable object identity. One chest can feed more than one intake if it qualifies for each, including neighbouring stations.
+Each intake selects **one nearest chest** independently of what it contains. If that chest is empty, open, inaccessible or missing the correct resource, the intake waits. It never falls back to a farther chest or combines inventories. Put each chest closer to its intended hatch than other eligible storage. For stations other than shield generators, an off-centre hatch excludes chests on its inward side. Exact distance ties use stable object identity. One chest can feed more than one intake if it qualifies for each, including neighbouring stations.
 
 Supported storage is ordinary player-built public wooden, reinforced, black-metal and grausten chests and barrels when their native definitions are available. Personal/private chests, wardrobes, carts, ships, cargo crates, tombstones and world loot are excluded. Enabled native wards require the station creator to have access at both source and station. Chests do not need a matching creator outside restricted areas.
 
 ## Behavior
 
-StationSupply defaults enabled. Fill the supply chests with the intended resources and close their inventories. Each completed transaction transfers up to `MaxItemsPerVisit` compatible items into one intake in one atomic visit, respecting native capacity and conversion order. The default is ten; fermenters always take one input. Each moved material retains its own queue entry. A visit that fails before commit consumes nothing. Ownership handoff and bounded processing can delay feeding. Materials are consumed normally. Production speed, fuel cost, roof/wind/smoke checks and outputs remain native. StationSupply does not collect products, tap fermenters, supply fireplaces or feed during native sleep/time skipping. Fermenter filling requires native roof/cover readiness and defaults off.
+StationSupply defaults enabled. Stock the supply chests and close them. The world host supplies the first item to an empty station and replenishes it as room opens. Each completed transaction transfers up to `MaxItemsPerVisit` compatible items into one intake in one atomic visit, respecting native capacity and conversion order. The default is ten; fermenters always take one input. Each moved material retains its own queue entry. A visit that fails before commit consumes nothing. Ownership handoff and bounded processing can delay feeding. Materials are consumed normally. Production speed, fuel cost, roof/wind/smoke checks and outputs remain native. StationSupply does not collect products, tap fermenters, supply fireplaces or feed during native sleep/time skipping. Fermenter filling requires native roof/cover readiness and defaults off.
 
 With StationSupply Debug enabled, sampled chest open records identify the chest, requesting peer, observed owner and whether the chest was in an active transfer. For an open that StationSupply queues, the outcome includes queue_ms measured from the original request through replay, expiry or cancellation. Replay records the handoff to native processing. Requests handled entirely on another player’s client are outside the server observer’s view.
 
@@ -147,7 +147,7 @@ Settings belong in `[StationSupply]` in the generated `heimkit.cfg`. Set `Enable
 
 ## Diagnostics
 
-Confirmed resource moves are combined into a nonempty count once per minute, with pending moves reported when processing stops. Native reconnect/send suspension and unavailable source revisions defer ownership work before the station is acquired. Repeated unchanged handoff failures back off from four to thirty seconds; changed source readiness resumes on an ordinary discovery visit. Paired client refreshes combine native destruction and acknowledgement work while retaining both original records and all ready clients. See the [performance contract](../specs/station-supply.md#performance).
+Confirmed resource moves are combined into a nonempty count once per minute, with pending moves reported when processing stops. Native reconnect/send suspension can defer ownership work before the station is acquired. Repeated unchanged handoff failures back off from four to thirty seconds; changed source readiness resumes on an ordinary discovery visit. Paired client refreshes combine native destruction and acknowledgement work while retaining both original records and all ready clients. See the [performance contract](../specs/station-supply.md#performance).
 
 Normal output reports enabled/disabled state, Ready, grouped completed transfers and actionable failures. Timeout and invalid-inventory warnings identify the affected station/intake/chest, last observed stage and whether a transfer already committed. These warnings remain available with debugging off or its detail allowance exhausted. Unchanged incidents receive at most one reminder per five minutes; a completed transfer with confirmed native refresh reports recovery once. Runtime errors retain the existing feature-failure protection.
 

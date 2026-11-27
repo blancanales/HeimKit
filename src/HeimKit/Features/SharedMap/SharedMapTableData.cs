@@ -27,7 +27,10 @@ public static class SharedMapTableData
     public const long RunestoneOwner = long.MinValue + 3;
     public const long SpawnerOwner = long.MinValue + 4;
     public const long StructureOwner = long.MinValue + 5;
-    public static bool ManagedOwner(long owner) => owner == PortalOwner || owner == ResourceOwner || owner == DungeonOwner || owner == RunestoneOwner || owner == SpawnerOwner || owner == StructureOwner;
+    public const long UnconnectedPortalOwner = long.MinValue + 6;
+    internal static long CanonicalOwner(long owner) => owner == UnconnectedPortalOwner ? PortalOwner : owner;
+    internal static long PortalPinOwner(MapMarker marker) => marker.UnconnectedPortal ? UnconnectedPortalOwner : PortalOwner;
+    public static bool ManagedOwner(long owner) => CanonicalOwner(owner) == PortalOwner || owner == ResourceOwner || owner == DungeonOwner || owner == RunestoneOwner || owner == SpawnerOwner || owner == StructureOwner;
 
     // Startup imports terrain only, after validating the entire native payload; no table write is produced.
     public static void Import(SharedMapExploration exploration, byte[] compressed)
@@ -55,6 +58,7 @@ public static class SharedMapTableData
     {
         internal readonly byte[] Raw;
         internal readonly byte[] OriginalRaw;
+        internal byte[]? SourceKeys;
         internal readonly int RemovedDeaths;
         internal ValidatedTable(byte[] raw, int removedDeaths, byte[]? original = null) { Raw = raw; OriginalRaw = original ?? raw; RemovedDeaths = removedDeaths; }
     }
@@ -138,7 +142,7 @@ public static class SharedMapTableData
             changed |= !raw.AsSpan().SequenceEqual(normalized);
             raw = normalized;
         }
-        work.Normalized = new ValidatedTable(raw, 0);
+        work.Normalized = new ValidatedTable(raw, 0) { SourceKeys = work.SourceKeys };
         if (changed)
         {
             work.Stage = "table_compression_slice";
@@ -170,7 +174,7 @@ public static class SharedMapTableData
         var dungeonPins = new SharedMapDungeonPins(dungeons);
         dungeons = dungeonPins.Markers;
         int obsoleteDungeons = 0;
-        portals = portals.Where(p => removePin?.Invoke(new MapPin(PortalOwner, p.Name, p.X, p.Y, p.Z, (int)Minimap.PinType.Icon4)) != true).ToArray();
+        portals = portals.Where(p => removePin?.Invoke(new MapPin(PortalPinOwner(p), p.Name, p.X, p.Y, p.Z, (int)Minimap.PinType.Icon4)) != true).ToArray();
         resources = resources.Where(p => removePin?.Invoke(new MapPin(ResourceOwner, p.Name, p.X, p.Y, p.Z, (int)Minimap.PinType.Icon3)) != true).ToArray();
         dungeons = dungeons.Where(p => removePin?.Invoke(new MapPin(DungeonOwner, p.Name, p.X, p.Y, p.Z, (int)Minimap.PinType.Icon2)) != true).ToArray();
         using var reader = new BinaryReader(new MemoryStream(raw, false), new UTF8Encoding(false, true));
@@ -217,33 +221,22 @@ public static class SharedMapTableData
         }
         if (version == 1 && portals.Count == 0 && resources.Count == 0 && dungeons.Count == 0 && runestones.Count == 0 && spawners.Count == 0 && structures.Count == 0) { work.Raw = raw; yield break; }
         var generated = new List<MapPin>();
-        IEnumerable<bool> Add(IReadOnlyList<MapMarker> markers, long owner, int icon)
-        {
-            int added = 0;
-            foreach (var marker in markers)
-            {
-                if ((added++ & 15) == 0) yield return true;
-                var pin = new MapPin(owner, marker.Name, marker.X, marker.Y, marker.Z, icon);
-                if (removePin?.Invoke(pin) == true) continue;
-                var published = publication == null ? pin : publication(pin, marker.Identity.Length > 0 ? marker.Identity : SharedMapPinRemovals.Identity(pin));
-                if (published != null && removePin?.Invoke(published) != true) generated.Add(published);
-            }
-        }
-        foreach (bool unit in Add(portals, PortalOwner, (int)Minimap.PinType.Icon4)) yield return unit;
-        foreach (bool unit in Add(resources, ResourceOwner, (int)Minimap.PinType.Icon3)) yield return unit;
-        foreach (bool unit in Add(dungeons, DungeonOwner, (int)Minimap.PinType.Icon2)) yield return unit;
-        foreach (bool unit in Add(runestones, RunestoneOwner, (int)Minimap.PinType.Icon3)) yield return unit;
-        foreach (bool unit in Add(spawners, SpawnerOwner, (int)Minimap.PinType.Icon3)) yield return unit;
-        foreach (bool unit in Add(structures, StructureOwner, (int)Minimap.PinType.Icon1)) yield return unit;
-        yield return true;
-        SharedMapResourcePinSpacing.Apply(generated, resourceMarkerHideDistanceMeters);
+        var identities = new Dictionary<MapPin,string>();
+        foreach (bool unit in GenerateMarkers(portals, resources, dungeons, runestones, spawners, structures, removePin,
+            publication, generated, resourceMarkerHideDistanceMeters, (pin,id) => identities.Add(pin,id))) yield return unit;
         if (keptCount + generated.Count > 8192) throw new InvalidDataException("Merged table exceeds the pin limit.");
         int outputVersion = version == 1 ? 3 : version;
         using var output = new MemoryStream();
         using var writer = new BinaryWriter(output, Encoding.UTF8, true);
         writer.Write(keptCount + generated.Count); writer.Write(kept.GetBuffer(), 0, (int)kept.Length);
         int encoded = 0;
-        foreach (var pin in generated) { if ((encoded++ & 15) == 0) yield return true; WritePin(writer, outputVersion, pin); }
+        work.SourceKeys = new byte[generated.Count * 32];
+        foreach (var pin in generated)
+        {
+            if ((encoded & 15) == 0) yield return true;
+            SharedMapTableKeys.Encode(SharedMapPinState.MarkerKey(pin.Owner,identities[pin]),work.SourceKeys,encoded++ * 32);
+            WritePin(writer, outputVersion, pin);
+        }
         if (output.Length > MaximumPinBytes + 4) throw new InvalidDataException("Merged marker data exceeds the payload limit.");
         // Keep the multi-megabyte terrain out of a growing MemoryStream. Copy it
         // once into an exactly sized result, with the separately encoded pin tail.
@@ -254,6 +247,55 @@ public static class SharedMapTableData
         Buffer.BlockCopy(output.GetBuffer(), 0, result, 8 + count, (int)output.Length);
         dungeonCleanup?.Invoke(dungeonPins.Suppressed, obsoleteDungeons);
         work.Raw = result;
+    }
+
+    internal static IEnumerable<bool> GenerateMarkers(IReadOnlyList<MapMarker> portals, IReadOnlyList<MapMarker> resources,
+        IReadOnlyList<MapMarker> dungeons, IReadOnlyList<MapMarker> runestones, IReadOnlyList<MapMarker> spawners,
+        IReadOnlyList<MapMarker> structures, Func<MapPin, bool>? removePin, Func<MapPin, string?, MapPin?>? publication,
+        List<MapPin> generated, float resourceMarkerHideDistanceMeters, Action<MapPin,string>? identify = null)
+    {
+        IEnumerable<bool> Add(IReadOnlyList<MapMarker> markers, long owner, int icon)
+        {
+            int added = 0;
+            foreach (var marker in markers)
+            {
+                if ((added++ & 15) == 0) yield return true;
+                var pin = new MapPin(owner == PortalOwner ? PortalPinOwner(marker) : owner, marker.Name, marker.X, marker.Y, marker.Z, icon);
+                if (removePin?.Invoke(pin) == true) continue;
+                var published = publication == null ? pin : publication(pin, marker.Identity.Length > 0 ? marker.Identity : SharedMapPinRemovals.Identity(pin));
+                if (published != null && removePin?.Invoke(published) != true)
+                {
+                    generated.Add(published);
+                    identify?.Invoke(published, marker.Identity.Length > 0 ? marker.Identity : SharedMapPinRemovals.Identity(pin));
+                }
+            }
+        }
+        foreach (bool unit in Add(portals, PortalOwner, (int)Minimap.PinType.Icon4)) yield return unit;
+        foreach (bool unit in Add(resources, ResourceOwner, (int)Minimap.PinType.Icon3)) yield return unit;
+        foreach (bool unit in Add(dungeons, DungeonOwner, (int)Minimap.PinType.Icon2)) yield return unit;
+        foreach (bool unit in Add(runestones, RunestoneOwner, (int)Minimap.PinType.Icon3)) yield return unit;
+        foreach (bool unit in Add(spawners, SpawnerOwner, (int)Minimap.PinType.Icon3)) yield return unit;
+        foreach (bool unit in Add(structures, StructureOwner, (int)Minimap.PinType.Icon1)) yield return unit;
+        yield return true;
+        SharedMapResourcePinSpacing.Apply(generated, resourceMarkerHideDistanceMeters);
+    }
+
+    internal static List<MapPin> SeparateManagedPins(int size, ref byte[] raw)
+    {
+        int count = checked(size * size);
+        if (raw.Length > count + MaximumPinBytes + 12) throw new InvalidDataException("Map exceeds supported bounds.");
+        _ = ValidateAndClean(raw, count, out _);
+        var pins = ReadValidatedPins(count, raw);
+        var managed = pins.Where(p => ManagedOwner(p.Owner)).ToList();
+        if (managed.Count == 0) return managed;
+        int version = BitConverter.ToInt32(raw, 0);
+        using var output = new MemoryStream();
+        output.Write(raw, 0, 8 + count);
+        using var writer = new BinaryWriter(output, Encoding.UTF8, true);
+        writer.Write(pins.Count - managed.Count);
+        foreach (var pin in pins) if (!ManagedOwner(pin.Owner)) WritePin(writer, version, pin);
+        raw = output.ToArray();
+        return managed;
     }
 
     public static IReadOnlyList<MapPin> ReadPins(int size, byte[]? compressed, bool includeDeaths = false)
@@ -368,7 +410,7 @@ public static class SharedMapTableData
     {
         internal string Stage = "table_decode_slice";
         internal ValidatedTable? Decoded, Normalized;
-        internal byte[]? Raw, Output;
+        internal byte[]? Raw, Output, SourceKeys;
         internal int RemovedDeaths;
     }
     internal sealed class Reconciliation : IDisposable

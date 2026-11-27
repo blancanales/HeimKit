@@ -13,6 +13,7 @@ internal sealed class PlayerSample
     public ZDOID Character;
     public Vector3 Position;
     public float Time, CommandTime = -10, BlockedUntil;
+    public float WolfApproachUntil = float.NegativeInfinity;
     public int Emote;
     public bool PlayerDataObserved;
     public readonly TameTravelPositionHistory Positions = new();

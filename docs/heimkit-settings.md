@@ -1,16 +1,22 @@
 # HeimKit Settings
 
-Press **F7** in Valheim to open **HeimKit Settings**. Choose **Server Settings** to see what is running in the world you are playing. Choose **Client Settings** to record container interactions on your own PC or see which key opens the menu.
+Press **F7** in Valheim to open **HeimKit Settings**. Server Settings shows the active world’s features and logging controls. Client Settings manages personal map markers and diagnostics on your PC.
 
 ## Open the menu
 
 1. Launch Valheim with [HeimKit installed in the Windows game](client-setup.md). Load a world or join a server and wait for your character to appear.
 2. Close the native menus and press **F7**. Press **Close**, **F7** or **Escape** to dismiss the panel.
-3. Choose **Server Settings** for gameplay or **Client Settings** for local diagnostics and the menu shortcut. If you host the world or have dedicated-server admin access, choose **[Server Administration](#moderate-players)** for player history and bans.
+3. Choose **Server Settings** for host controls or **Client Settings** for personal preferences. If you host the world or have dedicated-server admin access, choose **[Server Administration](#moderate-players)** for player history and bans.
 
 ![Server Settings with InfiniteTorches selected, its fireplace controls and refill interval, and the Client Settings and Server Administration tabs](images/heimkit-settings-server-settings-0.2.4.png)
 
 *Server Settings in the F7 menu, as seen by a dedicated-server admin.*
+
+## Change server diagnostics during play
+
+Open **F7 → Server Settings → Server Diagnostics** as the world host or an authorized dedicated-server admin. **Global debug logging** enables diagnostics across features. **Log detail** selects **Normal** or **Verbose** for enabled diagnostics. **Object interaction tracing** records sampled container requests and replies on the host. Changes apply during play and persist in the active host configuration.
+
+For a TameTravel investigation, enable **TameTravel → Debug logging** under Server Settings, then choose **Server Diagnostics → Log detail → Verbose**. Global debug logging can stay off. Return log detail to **Normal** when finished. The host and client both need versions that support the Server Diagnostics panel.
 
 ## See which settings you can change
 
@@ -48,18 +54,19 @@ Applied changes save to the [active world or server configuration](client-setup.
 
 Every feature has **Enabled** and **Debug logging** switches. The table lists the additional controls by their names in F7. Select a feature's guide for its gameplay rules and file settings.
 
-| Feature | Additional switches | Numeric settings |
+| Feature | Additional switches and choices | Numeric settings |
 | --- | --- | --- |
 | [AFKNightWatch](features/afk-night-watch.md) | Majority sleep, Exclude AFK players, Exceed the sleep threshold | Required sleeping (%), Sleep delay (seconds) |
 | [AFKRaidWatch](features/afk-raid-watch.md) | Common switches only | None |
 | [DoorKeeper](features/door-keeper.md) | Common switches only | Close delay (seconds) |
 | [ForestRenewal](features/forest-renewal.md) | Exclude cleared ground | Replant delay (seconds) |
+| [HeimDefender](features/heim-defender.md) | Free bolts, Bolt type | Bolts per reload |
 | [HeimMender](features/heim-mender.md) | Automatic repairs | Automatic repairs per cycle |
 | [InfiniteTorches](features/infinite-torches.md) | Include fireplaces, Campfires, Hearths, Bonfires | Refill interval (seconds) |
 | [SeaSalvage](features/sea-salvage.md) | Common switches only | Salvage delay (seconds) |
 | [SharedMap](features/shared-map.md) | Portal markers, Resource markers, Discover resources in explored areas, Remove depleted resources, Dungeon markers, Discover dungeons in explored areas, Allow player map writes, Share pin checkmarks, Dungeon loot progress, Runestone markers, Spawner markers, Dvergr guard tower markers, Dvergr lighthouse markers, Dvergr excavation markers, Fuling village markers, Other structure markers | Portal grouping distance (metres) |
 | [StationSupply](features/station-supply.md) | Smelters, Charcoal kilns, Blast furnaces, Windmills, Spinning wheels, Eitr refineries, Frigid Kilns, Shield generators, Fermenters, Obliterators | Items per visit |
-| [TameTravel](features/tame-travel.md) | Follow spacing | Maximum tames per portal trip |
+| [TameTravel](features/tame-travel.md) | Dead Raiser summon travel, Follow spacing | Maximum tames per portal trip |
 | [WeatherGuard](features/weather-guard.md) | Rain protection, Underwater protection | None |
 
 For example, to give players longer to pass through an open door, select **DoorKeeper**, enter the number of seconds in **Close delay (seconds)** and click **Apply**. The new delay applies on the next check, including to doors already open. DoorKeeper waits for the doorway to clear before closing it.
@@ -68,17 +75,20 @@ For example, to give players longer to pass through an open door, select **DoorK
 
 ![Client Settings showing the F7 menu shortcut and separate switches for object interaction logging and TameTravel debug logging](images/heimkit-settings-client.png)
 
-A gold checkmark means logging is on. An empty box means logging is off. Click the box to change it immediately. These preferences follow your Windows game installation or mod manager profile across worlds. You can use them as a guest, including when the host's gameplay settings are read-only.
+A gold checkmark means the option is on. Click the box to change it immediately. These preferences follow your Windows game installation or mod manager profile across worlds. You can use them as a guest, including when the host's gameplay settings are read-only.
 
 | Control | How to use it |
 | --- | --- |
 | **TameTravel → Debug logging** | Off by default. Records local travel and animal observations on this PC immediately. |
 | **Object interaction logging** | Off by default. Click the switch to start or stop recording container interactions on this PC during play. |
+| **SharedMap → Automatic markers** | Show nearby discoveries on your map. Defaults on. |
+| **SharedMap → Debug logging** | Record client marker deliveries and Read Map merges. Defaults off. |
+| **HeimDefender → Debug logging** | Record target selections and the live targeting and ammunition settings on this PC. Defaults off. |
 | **Menu shortcut** | Shows the current key (default **F7**). Hover over the label to find the preferences file, then follow [Change the F7 shortcut](#change-the-f7-shortcut). |
 
 ## Record TameTravel on a client
 
-In **F7 → Client Settings → TameTravel**, turn on **Debug logging**. It persists as `[Diagnostics] TraceTameTravel` in `heimkit.client.cfg`. Entries tagged `[TameTravel.client]` go to the game installation’s `BepInEx/LogOutput.log`, or to `BepInEx/HeimKit-tametravel.log` when the disk listener is disabled. The trace records the local player’s accepted portal or dungeon travel, final position, and nearby living tames and friendly skeletons seen at departure. It watches those original animal IDs in the destination scene for up to a minute. The end-of-observation list includes bystanders. Scene sightings show the local transform and network record positions. Use the character and animal IDs to match the client observations with TameTravel debug on the host.
+In **F7 → Client Settings → TameTravel**, turn on **Debug logging**. It persists as `[Diagnostics] TraceTameTravel` in `heimkit.client.cfg`. Entries tagged `[TameTravel.client]` go to the game installation’s `BepInEx/LogOutput.log`, or to `BepInEx/HeimKit-tametravel.log` when the disk listener is disabled. The trace records the local player’s accepted portal or dungeon travel, final position, and nearby living tames and friendly skeletons seen at departure. It watches those original animal IDs in the destination scene for up to a minute. The end-of-observation list includes bystanders. With departure animals under observation, the client samples the floor beneath the traveller on arrival and again three seconds later if observation continues. The destination_floor event identifies the floor and overhead collider, their network IDs when available, the floor height above terrain, the vertical clearance at that point and the watched animal IDs. A missed upward probe reports its twelve-metre range. Scene sightings show the local transform and network record positions. Use the character and animal IDs to match the client observations with TameTravel debug on the host.
 
 ## Record client interactions
 

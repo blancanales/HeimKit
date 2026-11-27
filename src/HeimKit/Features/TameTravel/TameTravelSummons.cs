@@ -54,22 +54,22 @@ internal sealed class TameTravelSummons
         record.Set(Summoner, player.GetPlayerID());
     }
 
-    internal void Begin(Player player, Vector3 from, Vector3 exit, Quaternion rotation, Func<bool> pairValid)
+    internal void Begin(Player player, Vector3 from, TameTravelSummonGate gate)
     {
         Cancel();
-        if (!_settings.SummonTravel.Value || player.IsDead() || !player.IsTeleporting() || player.GetPlayerID() == 0 || !pairValid()) return;
+        if (!_settings.SummonTravel.Value || player.IsDead() || !player.IsTeleporting() || player.GetPlayerID() == 0 || !gate.Valid()) return;
         var nearby = TameTravelRules.Nearby(from, static (record, _) => record.GetPrefab() == Skeleton);
         if (nearby == null) return;
         _traveller = player;
         _character = player.GetZDOID();
-        _from = from;
-        _exit = exit;
-        _rotation = rotation;
-        _pairValid = pairValid;
+        _from = gate.Source;
+        _exit = gate.Exit;
+        _rotation = gate.Rotation;
+        _pairValid = gate.Valid;
         _deadline = Time.unscaledTime + _settings.TravelWindowSeconds.Value;
         foreach (var record in nearby)
         {
-            if (!Eligible(record, player)) continue;
+            if (!Eligible(record, player) || !WithinRange(record, from)) continue;
             var view = ZNetScene.instance.FindInstance(record);
             if (view == null || view.GetComponent<MonsterAI>()?.GetFollowTarget() != player.gameObject ||
                 view.GetComponent<Character>() is not { } skeleton || skeleton.IsDead()) continue;
@@ -82,7 +82,10 @@ internal sealed class TameTravelSummons
     private bool Eligible(ZDO record, Player player) => record.IsValid() && record.Persistent &&
         record.GetPrefab() == Skeleton && record.IsOwner() && NativeCharacterHealth.IsAlive(record) &&
         record.GetLong(Summoner) == player.GetPlayerID() && record.GetString(ZDOVars.s_follow) == player.GetPlayerName() &&
-        (record.GetPosition() - _from).sqrMagnitude <= Mathf.Pow(_settings.FollowerRangeMeters.Value, 2);
+        WithinRange(record, _from);
+
+    private bool WithinRange(ZDO record, Vector3 point) =>
+        (record.GetPosition() - point).sqrMagnitude <= _settings.SummonRangeMeters.Value * _settings.SummonRangeMeters.Value;
 
     internal void Forget(ZDO? record)
     {

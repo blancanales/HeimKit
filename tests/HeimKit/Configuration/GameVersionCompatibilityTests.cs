@@ -26,7 +26,7 @@ internal static class GameVersionCompatibilityTests
                 Check(config.Policy.AllowUnverifiedVersions == allow, "Boolean version policy default/preservation/validation failed.");
                 Check(config.Policy.Supports(GameVersionCompatibility.AuditedVersion), "Audited version was rejected.");
                 Check(!config.Policy.NeedsStartupBackup(GameVersionCompatibility.AuditedVersion), "Audited startup requested an upgrade backup.");
-                foreach (string version in new[] { "0.0.0", "1.0.21", "1.0.29", "2.10.300", "9.9.9", GameVersionCompatibility.AuditedVersion + ".1-public-test", GameVersionCompatibility.AuditedVersion + ".1", "future-release" })
+                foreach (string version in new[] { "0.0.0", "1.0.21", "1.0.29", "1.0.30", "2.10.300", "9.9.9", GameVersionCompatibility.AuditedVersion + ".1-public-test", GameVersionCompatibility.AuditedVersion + ".1", "future-release" })
                 {
                     Check(config.Policy.Supports(version) == allow, "Unverified version policy failed: " + version);
                     Check(config.Policy.NeedsStartupBackup(version) == (allow && (GameVersionCompatibility.CompareToAudited(version) ?? 1) > 0), "Upgrade backup requirement failed: " + version);

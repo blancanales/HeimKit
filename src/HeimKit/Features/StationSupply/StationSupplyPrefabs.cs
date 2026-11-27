@@ -10,34 +10,57 @@ internal sealed class StationSupplyPrefabs
     internal readonly PrefabCatalog<SupplyStation> Stations = PrefabRegistry.Current.Catalog<SupplyStation>("StationSupply.stations");
     internal readonly PrefabCatalog<Container> Chests = PrefabRegistry.Current.Catalog<Container>("StationSupply.chests");
     internal readonly PrefabCatalog<float> Wards = PrefabRegistry.Current.Catalog<float>("StationSupply.wards");
+    private static readonly string[] ChestNames = new[] { "piece_chest_wood", "piece_chest", "piece_chest_blackmetal", "piece_chest_grausten", "piece_chest_barrel" };
+
+    private static IEnumerable<string> EnabledSmelters(StationSupplySettings settings)
+    {
+        if (settings.Smelters.Value) yield return "smelter";
+        if (settings.CharcoalKilns.Value) yield return "charcoal_kiln";
+        if (settings.BlastFurnaces.Value) yield return "blastfurnace";
+        if (settings.Windmills.Value) yield return "windmill";
+        if (settings.SpinningWheels.Value) yield return "piece_spinningwheel";
+        if (settings.EitrRefineries.Value) yield return "eitrrefinery";
+        if (settings.FrigidKilns.Value) yield return "piece_FrostKiln";
+    }
+
+    private const string ShieldGeneratorName = "piece_shieldgenerator";
+    private const string FermenterName = "fermenter";
+    private const string ObliteratorName = "incinerator";
+
+    internal static Func<ZDO, bool> FirstHandoffEligibility(StationSupplySettings settings)
+    {
+        var supported = new HashSet<int>();
+        foreach (string name in ChestNames) supported.Add(name.GetStableHashCode());
+        foreach (string name in EnabledSmelters(settings)) supported.Add(name.GetStableHashCode());
+        if (settings.ShieldGenerators.Value) supported.Add(ShieldGeneratorName.GetStableHashCode());
+        if (settings.Fermenters.Value) supported.Add(FermenterName.GetStableHashCode());
+        if (settings.Obliterators.Value) supported.Add(ObliteratorName.GetStableHashCode());
+        return z => z.IsValid() && z.Persistent && supported.Contains(z.GetPrefab()) && z.GetLong(ZDOVars.s_creator) != 0;
+    }
+
     internal StationSupplyPrefabs(StationSupplySettings settings)
     {
-        Smelter("smelter", settings.Smelters.Value);
-        Smelter("charcoal_kiln", settings.CharcoalKilns.Value);
-        Smelter("blastfurnace", settings.BlastFurnaces.Value);
-        Smelter("windmill", settings.Windmills.Value);
-        Smelter("piece_spinningwheel", settings.SpinningWheels.Value);
-        Smelter("eitrrefinery", settings.EitrRefineries.Value);
-        Smelter("piece_FrostKiln", settings.FrigidKilns.Value);
+        foreach (string name in EnabledSmelters(settings)) Smelter(name);
         if (settings.ShieldGenerators.Value)
         {
-            var prefab = Persistent("piece_shieldgenerator");
+            var prefab = Persistent(ShieldGeneratorName);
             var shield = PrefabRegistry.Component<ShieldGenerator>(prefab);
             if (prefab == null || shield == null || shield.m_addFuelSwitch == null || shield.m_maxFuel < 1 || shield.m_fuelItems.Count == 0) throw new InvalidOperationException("Native shield generator intake is unavailable.");
             var port = Intake(prefab, shield.m_addFuelSwitch.transform, SupplyKind.Fuel, shield.m_maxFuel, shield.m_fuelItems);
             port.DefaultFuel = shield.m_defaultFuel;
+            port.AllowChestOnAnySide = true;
             Stations.Add(prefab.name.GetStableHashCode(), new SupplyStation { Name = prefab.name, Intakes = new[] { port } });
         }
         if (settings.Fermenters.Value)
         {
-            var prefab = Persistent("fermenter"); var fermenter = PrefabRegistry.Component<Fermenter>(prefab);
+            var prefab = Persistent(FermenterName); var fermenter = PrefabRegistry.Component<Fermenter>(prefab);
             if (prefab == null || fermenter == null || fermenter.m_addSwitch == null) throw new InvalidOperationException("Native fermenter intake is unavailable.");
             var items = new List<ItemDrop>(); foreach (var conversion in fermenter.m_conversion) if (conversion.m_from != null) items.Add(conversion.m_from);
             Stations.Add(prefab.name.GetStableHashCode(), new SupplyStation { Name = prefab.name, Intakes = new[] { Intake(prefab, fermenter.m_addSwitch.transform, SupplyKind.Fermenter, 1, items) } });
         }
         if (settings.Obliterators.Value)
         {
-            var prefab = Persistent("incinerator"); var incinerator = PrefabRegistry.Component<Incinerator>(prefab);
+            var prefab = Persistent(ObliteratorName); var incinerator = PrefabRegistry.Component<Incinerator>(prefab);
             if (prefab == null || incinerator == null || incinerator.m_container == null || incinerator.m_incinerateSwitch == null ||
                 incinerator.m_container.m_privacy != Container.PrivacySetting.Public || incinerator.m_container.m_rootObjectOverride != PrefabRegistry.Component<ZNetView>(prefab))
                 throw new InvalidOperationException("Native Obliterator container/root contract is unavailable.");
@@ -52,7 +75,7 @@ internal sealed class StationSupplyPrefabs
                 QuietSeconds = Math.Max(10, incinerator.m_effectDelayMax + 4.5f) };
             Stations.Add(prefab.name.GetStableHashCode(), new SupplyStation { Name = prefab.name, Intakes = new[] { port } });
         }
-        foreach (string name in new[] { "piece_chest_wood", "piece_chest", "piece_chest_blackmetal", "piece_chest_grausten", "piece_chest_barrel" })
+        foreach (string name in ChestNames)
         {
             var prefab = Persistent(name); var chest = PrefabRegistry.Component<Container>(prefab);
             if (prefab != null && chest != null && chest.m_privacy == Container.PrivacySetting.Public && chest.m_rootObjectOverride == null && chest.m_wagon == null && !chest.m_autoDestroyEmpty && chest.m_width > 0 && chest.m_height > 0)
@@ -73,9 +96,8 @@ internal sealed class StationSupplyPrefabs
         var prefab = PrefabRegistry.Current.Prefab(name); var view = PrefabRegistry.Component<ZNetView>(prefab);
         return prefab != null && view != null && view.m_persistent && PrefabRegistry.Component<Piece>(prefab) != null ? prefab : null;
     }
-    private void Smelter(string name, bool enabled)
+    private void Smelter(string name)
     {
-        if (!enabled) return;
         var prefab = Persistent(name); var smelter = PrefabRegistry.Component<Smelter>(prefab);
         if (prefab == null || smelter == null) throw new InvalidOperationException("Native station definition is unavailable: " + name);
         var ports = new List<SupplyIntake>();

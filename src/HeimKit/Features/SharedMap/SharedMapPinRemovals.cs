@@ -23,6 +23,7 @@ public sealed class SharedMapPinRemovals
     private readonly long _world;
     private HashSet<string> _ids = new(StringComparer.Ordinal);
     public string FilePath { get; }
+    internal IEnumerable<string> Ids => _ids;
     public long Revision { get; private set; }
     public SharedMapPinRemovals(string directory, long world)
     { _world = world; FilePath = Path.Combine(directory, "world-" + world.ToString("X16", CultureInfo.InvariantCulture) + ".pin-removals"); }

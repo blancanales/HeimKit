@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using HeimKit.Core.Control;
+
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -10,7 +12,7 @@ internal sealed class ControlPanelArtwork : IDisposable
     private static readonly string[] IconOrder =
     {
         "InfiniteTorches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch", "SharedMap", "DoorKeeper",
-        "ForestRenewal", "SeaSalvage", "TameTravel", "HeimMender", "StationSupply"
+        "ForestRenewal", "SeaSalvage", "TameTravel", "HeimMender", "StationSupply", "HeimDefender"
     };
 
     internal enum ButtonRole { Scope, Feature, Close, Apply }
@@ -77,6 +79,12 @@ internal sealed class ControlPanelArtwork : IDisposable
 
     internal void PaintFeatureIcon(RectTransform rect, string name)
     {
+        if (name == ControlProtocol.DiagnosticsGroup)
+        {
+            Paint(rect, 544, 312, 40, 34);
+            return;
+        }
+
         int slot = Array.IndexOf(IconOrder, name);
         if (slot >= 0) Paint(rect, slot * 44, 312, 40, 34);
     }

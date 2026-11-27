@@ -158,7 +158,7 @@ internal sealed class TameTravelController : IDisposable
                     if (now - observation.Time > 2) Cancel(sample, now, "stale_position_observation", observation.Position);
                     else UpdateJourney(sample, observation.Position, observation.Time, now, fresh: true);
                 }
-                else if (!_holdNewWork && bindings.Count > 0)
+                else if (!_holdNewWork && (bindings.Count > 0 || observation.Time <= sample.WolfApproachUntil || sample.PendingPortal != null))
                 {
                     if (sample.PendingPortal != null && ResolvePortal(sample, observation, now, bindings))
                     { sample.Position = observation.Position; sample.Time = observation.Time; continue; }
@@ -176,8 +176,7 @@ internal sealed class TameTravelController : IDisposable
             // Timeouts, destination clearance and ordered echoes continue while a
             // stationary/loading owner has no newer payload. Arrival itself needs
             // an accepted owner position, not this polling snapshot.
-            if (bindings.Count == 0) sample.PendingPortal = null;
-            else if (!_holdNewWork && sample.PendingPortal != null)
+            if (!_holdNewWork && sample.PendingPortal != null)
                 ResolvePortal(sample, new PositionObservation(sample.Position, sample.Time, 0), now, bindings);
             if (sample.Journey != null) UpdateJourney(sample, actor.GetPosition(), now, now, fresh: false);
         }
@@ -204,7 +203,7 @@ internal sealed class TameTravelController : IDisposable
             var id = journey.Followers.Dequeue(); var animal = ZDOMan.instance.GetZDO(id);
             bool waiting = journey.Waiting.Contains(id);
             string? rejected = _rules.AnimalRejection(animal);
-            if (rejected == null && !waiting && !_commands.FollowingAuthorized(id, journey.Traveller, journey.Character, journey.Name)) rejected = "follow_authorization_ended";
+            if (rejected == null && !waiting && !PortalFollowAuthorized(journey, animal!)) rejected = "follow_authorization_ended";
             if (rejected == null && !TameTravelCommandRules.ConsentValid(waiting ? TameOrder.Wait : TameOrder.Follow, animal!.GetString(ZDOVars.s_follow), journey.Name)) rejected = "follow_state_changed";
             if (rejected == null && (animal!.GetPosition() - journey.SourcePosition).sqrMagnitude > _settings.FollowerRangeMeters.Value * _settings.FollowerRangeMeters.Value) rejected = "animal_left_source_range";
             if (rejected != null)
@@ -238,7 +237,7 @@ internal sealed class TameTravelController : IDisposable
     private void TryEnter(PlayerSample sample, ZDO actor, PositionObservation observation, float now, List<FollowBinding> bindings, ref List<ZDO>? records, ref bool queried, bool pointOnly)
     {
         // New consent must not authorize a previously queued approach retrospectively.
-        if (!HasConsent(bindings, observation.Time)) return;
+        if (observation.Time > sample.WolfApproachUntil && !HasConsent(bindings, observation.Time)) return;
         var position = observation.Position;
         if (!queried)
         {
@@ -325,12 +324,49 @@ internal sealed class TameTravelController : IDisposable
             _reserved.Add(b.Animal);
             if (b.Order == TameOrder.Wait) _commands.Bindings.Remove(b.Animal);
         }
+        CollectNativeWolves(journey, position, range);
         if (journey.Followers.Count > 0)
         {
             sample.Journey = journey; _diagnostics.Entry(journey, mode);
             TameTravelCommands.Feedback(sample.Traveller, "Portal trip detected; move clear and stay within 48 metres of the destination exit until animal arrival is confirmed.");
         }
     }
+    private void CollectNativeWolves(PortalJourney journey, Vector3 playerPosition, float range)
+    {
+        var nearby = TameTravelRules.Nearby(journey.SourcePosition, static (z, _) => z.GetPrefab() == TameTravelRules.AdultWolf);
+        if (nearby == null)
+        {
+            if (_diagnostics.SelectionEnabled) _diagnostics.Traversal(journey.Traveller, "wolf_entry", "scope_over_capacity", journey.Source);
+            return;
+        }
+        foreach (var wolf in nearby)
+        {
+            if (journey.Followers.Count >= _settings.MaxFollowersPerTraversal.Value || _reserved.Count >= 512) break;
+            if (journey.Waiting.Contains(wolf.m_uid) || _commands.Bindings.ContainsKey(wolf.m_uid)) continue;
+            string? reason = _rules.AnimalRejection(wolf);
+            if (reason == null && wolf.GetString(ZDOVars.s_follow) != journey.Name) reason = "follow_target_mismatch";
+            if (reason == null && _stops.Stopping(wolf.m_uid)) reason = "stop_pending";
+            if (reason == null && (_reserved.Contains(wolf.m_uid) || _authority.Contains(wolf.m_uid))) reason = "animal_handoff_busy";
+            if (reason == null && (wolf.GetPosition() - playerPosition).sqrMagnitude > range * range) reason = "animal_outside_player_range";
+            if (reason == null && (wolf.GetPosition() - journey.SourcePosition).sqrMagnitude > range * range) reason = "animal_outside_portal_range";
+            if (_diagnostics.SelectionEnabled)
+                _diagnostics.Traversal(journey.Traveller, "wolf_entry", reason ?? "native_follow_confirmed", journey.Source, wolf.m_uid,
+                    fields: new (string, object?)[] { ("following", wolf.GetString(ZDOVars.s_follow)), ("owner", wolf.GetOwner()) });
+            if (reason != null) continue;
+            journey.NativeWolves.Add(wolf.m_uid);
+            journey.Followers.Enqueue(wolf.m_uid);
+            _reserved.Add(wolf.m_uid);
+        }
+    }
+
+    private bool PortalFollowAuthorized(PortalJourney journey, ZDO wolfOrTame)
+    {
+        var id = wolfOrTame.m_uid;
+        if (_commands.FollowingAuthorized(id, journey.Traveller, journey.Character, journey.Name)) return true;
+        return journey.NativeWolves.Contains(id) && wolfOrTame.GetPrefab() == TameTravelRules.AdultWolf &&
+            !_commands.Bindings.ContainsKey(id) && !_stops.Stopping(id) && wolfOrTame.GetString(ZDOVars.s_follow) == journey.Name;
+    }
+
     internal static string? PortalPairRejection(ZDO source, out ZDO? destination)
     {
         var target = source.GetConnectionZDOID(ZDOExtraData.ConnectionType.Portal);
@@ -450,7 +486,7 @@ internal sealed class TameTravelController : IDisposable
             now - t.Journey.Entered, _settings.TravelWindowSeconds.Value, t.Moved) is string destination) reason = destination;
         else if (ZDOMan.instance.GetZDO(t.Id) != t.Record || t.Record.m_uid != t.Id) reason = "animal_record_replaced";
         else if (_rules.AnimalRejection(t.Record) is string rejected) reason = rejected;
-        else if (!t.Waiting && !_commands.FollowingAuthorized(t.Id, t.Journey.Traveller, t.Journey.Character, t.Journey.Name)) reason = "follow_authorization_ended";
+        else if (!t.Waiting && !PortalFollowAuthorized(t.Journey, t.Record)) reason = "follow_authorization_ended";
         else if (!TameTravelCommandRules.ConsentValid(t.Waiting ? TameOrder.Wait : TameOrder.Follow, t.Record.GetString(ZDOVars.s_follow), t.Journey.Name)) reason = "follow_changed";
         else if (TameTravelTraversalRules.PhaseExpired(t.Phase, t.PlacementStarted, now - t.PhaseTime)) reason = "phase_timeout";
         if (reason != null) { FinishTransfer(t, false, reason); return; }
@@ -520,12 +556,12 @@ internal sealed class TameTravelController : IDisposable
         }
         _transfers.Remove(t.Id); _reserved.Remove(t.Id); _authority.Release(t.Id, keepServerOwner: t.Journey.Traveller.IsLocal && confirmed,
             resetDestination: t.Moved && !confirmed, restoreUndrainedOwner: t.Journey.Traveller.IsLocal);
-        t.FollowContinues = !t.Waiting && _commands.FollowingAuthorized(t.Id, t.Journey.Traveller, t.Journey.Character, t.Journey.Name);
+        t.FollowContinues = !t.Waiting && PortalFollowAuthorized(t.Journey, t.Record);
         if (!confirmed) t.Journey.EndReason = reason;
         if (confirmed)
         {
             t.Journey.Confirmed++;
-            if (t.FollowContinues) _following.Command(t.Journey.Traveller, t.Record, TameOrder.Follow);
+            if (t.FollowContinues && !t.Journey.NativeWolves.Contains(t.Id)) _following.Command(t.Journey.Traveller, t.Record, TameOrder.Follow);
         }
         _diagnostics.Transfer(t, confirmed, snapshot);
     }
@@ -634,8 +670,6 @@ internal sealed class TameTravelController : IDisposable
         foreach (var binding in _commands.Bindings.Values)
             if (!binding.Pending && binding.Traveller.Matches(host) && binding.Character == host.Character)
                 bindings.Add(binding);
-        if (bindings.Count == 0) return;
-
         var sample = LocalSample(host, now);
         BeginJourney(sample, source, destination, new PositionObservation(sourcePosition, now, 0), now,
             bindings, "native_host_portal", nativeExit: exit);
@@ -701,7 +735,8 @@ internal sealed class TameTravelController : IDisposable
         var peer = state.Peer; var actor = state.Actor;
         if (peer == null || actor == null || !actor.IsValid() || actor.DataRevision <= state.Revision ||
             actor.m_uid != peer.m_characterID || actor.GetOwner() != peer.m_uid || !ReferenceEquals(ZDOMan.instance.GetZDO(peer.m_characterID), actor)) return;
-        GuestSummons?.Observe(peer, actor, Time.unscaledTime, !_holdNewWork);
+        _samples.TryGetValue(peer.m_uid, out var wolfSample);
+        GuestSummons?.Observe(peer, actor, Time.unscaledTime, !_holdNewWork, wolfSample);
         int emote = actor.GetInt(ZDOVars.s_emoteID);
         string command = actor.GetString(ZDOVars.s_emote);
         bool recognized = TameTravelCommandRules.Emote(command, out _);
@@ -714,7 +749,7 @@ internal sealed class TameTravelController : IDisposable
         { if (emote != state.Emote && recognized) _diagnostics.Command(peer, "rejected", command, "player_sample_unavailable", emote); return; }
         if (!sample.PlayerDataObserved)
         { sample.PlayerDataObserved = true; _diagnostics.Command(peer, "player_data_applied", command, counter: emote); }
-        bool watching = sample.Journey != null;
+        bool watching = sample.Journey != null || sample.PendingPortal != null || Time.unscaledTime <= sample.WolfApproachUntil;
         if (!watching) foreach (var binding in _commands.Bindings.Values)
             if (binding.Traveller.Matches(peer) && binding.Character == sample.Character) { watching = true; break; }
         if (!Character.InInterior(actor.GetPosition()) && (watching || emote > sample.Emote && TameTravelCommandRules.Emote(command, out _)))

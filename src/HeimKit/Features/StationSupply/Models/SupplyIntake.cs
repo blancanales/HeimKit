@@ -9,6 +9,7 @@ internal sealed class SupplyIntake
     internal float QuietSeconds;
     internal int[] MaximumStacks = System.Array.Empty<int>();
     internal float DefaultFuel;
+    internal bool AllowChestOnAnySide;
     internal int[] Items = System.Array.Empty<int>();
     internal string[] ItemNames = System.Array.Empty<string>();
 }

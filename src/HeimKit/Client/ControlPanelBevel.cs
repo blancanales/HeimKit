@@ -7,7 +7,7 @@ public sealed class ControlPanelBevel : MaskableGraphic
 {
     internal enum Finish { Steel, Bronze, Recess, Gold, Hammered }
 
-    private Finish _finish;
+    [SerializeField] private Finish _finish;
     internal Finish Surface
     {
         set { _finish = value; SetVerticesDirty(); }

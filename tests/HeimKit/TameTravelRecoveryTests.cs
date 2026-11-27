@@ -99,9 +99,9 @@ internal static class TameTravelRecoveryTests
             var moved = new HeimKit.Features.TameTravel.Models.AnimalTransfer {
                 Journey = new HeimKit.Features.TameTravel.Models.PortalJourney { Name = "Traveller", DestinationRotation = Quaternion.identity },
                 Moved = true, Placement = new Vector3(3, 0, 1), PlacementTraveller = new Vector3(0, 0, 1) };
-            moved.PlacementRejections["building_overhead"] = 5; moved.PlacementWalkoutRejections["solid_overlap"] = 9; moved.PlacementWaitReasons["no_safe_ground_position"] = 2;
+            moved.PlacementRejections["unsupported_surface"] = 5; moved.PlacementWalkoutRejections["solid_overlap"] = 9; moved.PlacementWaitReasons["no_safe_ground_position"] = 2;
             placed.Transfer(moved, true, null);
-            Check(lines.Count == 2 && lines[1].Contains("rejections=building_overhead:5") && lines[1].Contains("walkout_rejections=solid_overlap:9") &&
+            Check(lines.Count == 2 && lines[1].Contains("rejections=unsupported_surface:5") && lines[1].Contains("walkout_rejections=solid_overlap:9") &&
                 lines[1].Contains("wait_reasons=no_safe_ground_position:2") && lines[1].Contains("traveller_forward_m=0") && lines[1].Contains("traveller_side_m=3.0") &&
                 lines[1].Contains("traveller_distance_m=3.0"), "Transfer evidence mixed walk-out steps into candidate reasons or lost the traveller-relative landing: " + string.Join(" | ", lines));
         }
@@ -192,12 +192,14 @@ internal static class TameTravelRecoveryTests
             "A distant route around a castle wall authorized the other side.");
         Check(!TameTravelPlacementAccess.Validate(start, end, new[] { start, new Vector3(float.NaN, 0, 4), end }, (_, _) => true, out _),
             "An invalid navigation corner authorized placement.");
-        Check(TameTravelPlacementSurfaces.LowSlab(new Vector3(2, .5f, 2), 1) &&
-            !TameTravelPlacementSurfaces.LowSlab(new Vector3(.3f, 2, 2), 1) &&
-            !TameTravelPlacementSurfaces.LowSlab(new Vector3(2, .5f, 2), 4), "Low paving geometry was confused with walls or raised construction.");
-        Check(TameTravelPlacementSurfaces.LowSlab(new Vector3(2, 1, 2), .7f) && TameTravelPlacementSurfaces.SlabRejection(new Vector3(2, 2, 1), .5f) == "too_thick" &&
-            TameTravelPlacementSurfaces.SlabRejection(new Vector3(2, .5f, 2), 4) == "raised_construction" && TameTravelPlacementSurfaces.SlabRejection(new Vector3(.3f, .5f, 2), 1) == "too_narrow",
-            "A one-metre stone floor was rejected as support, or a wall, raised or narrow piece lost its named reason.");
+        Check(TameTravelPlacementSurfaces.ProbeOrigin(43.5f, 30f) == 44.5f &&
+            TameTravelPlacementSurfaces.ProbeOrigin(30f, 32f) == 33f,
+            "The support probe must start above the walking level and the terrain.");
+        Check(TameTravelPlacementSurfaces.LowSlab(new Vector3(2, .5f, 2)) &&
+            TameTravelPlacementSurfaces.LowSlab(new Vector3(2, 1, 2)) &&
+            TameTravelPlacementSurfaces.SlabRejection(new Vector3(2, 2, 1)) == "too_thick" &&
+            TameTravelPlacementSurfaces.SlabRejection(new Vector3(.3f, .5f, 2)) == "too_narrow",
+            "Structural floors must qualify while thick and narrow pieces retain their rejection reasons.");
         // A narrow landing opening between arc spots must be visited locally.
         var local = Enumerable.Range(0, TameTravelPlacementRules.ArcCandidates(1))
             .Select(i => TameTravelPlacementRules.Candidate(i, 1, Vector3.zero, Vector3.zero, Vector3.forward)).ToArray();

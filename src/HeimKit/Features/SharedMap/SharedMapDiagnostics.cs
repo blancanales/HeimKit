@@ -109,7 +109,7 @@ internal sealed class SharedMapDiagnostics : FeatureDiagnostics
         {
             _portalSampleCursor %= markers.Count;
             var marker = markers[_portalSampleCursor++];
-            if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Portals, "Observed a rotating portal publication sample.", new (string, object?)[] { ("marker_id", marker.Identity), ("name", marker.Name), ("published_x_m", marker.X), ("published_z_m", marker.Z), ("pin_type", (int)Minimap.PinType.Icon4), ("client_read_confirmed", false) }, LogLevel.Debug);
+            if (DiagnosticLog.DebugAvailable(_logger, "SharedMap")) DiagnosticLog.Write(_logger, "SharedMap", SharedMapLogTopics.Portals, "Observed a rotating portal publication sample.", new (string, object?)[] { ("marker_id", marker.Identity), ("name", marker.Name), ("standalone_unconnected", marker.UnconnectedPortal), ("published_x_m", marker.X), ("published_z_m", marker.Z), ("pin_type", (int)Minimap.PinType.Icon4), ("client_read_confirmed", false) }, LogLevel.Debug);
         }
     }
 

@@ -47,6 +47,7 @@ public sealed class SharedMapLandmarkStore
         if (!SharedMapExploration.Finite(y)) throw new ArgumentException("Invalid source height.");
         return SharedMapDungeonIdentity.Create(prefab, x, spawner ? 0 : y, z, path);
     }
+    internal IReadOnlyCollection<string> RetiredIds => _retired;
     public bool Retired(string identity) => _retired.Contains(identity);
     private static bool Valid(MapMarker marker) => SharedMapPinRemovals.ValidId(marker.Identity) &&
         marker.Name.Length > 0 && Encoding.UTF8.GetByteCount(marker.Name) <= 128 && !marker.Name.Contains("$") &&

@@ -29,6 +29,8 @@ internal sealed class ClientTameTravelDiagnostics : IDisposable
     private Vector3 _source, _exit;
     private float _deadline, _next;
     private bool _finished;
+    private float? _settledSample;
+    private readonly int _surfaces = LayerMask.GetMask("terrain", "piece", "static_solid", "Default", "Default_small", "vehicle");
 
     internal ClientTameTravelDiagnostics(ConfigEntry<bool> enabled, ManualLogSource log)
     {
@@ -159,6 +161,16 @@ internal sealed class ClientTameTravelDiagnostics : IDisposable
                 if (!arrived) { ResetTrip(); return; }
                 _finished = true;
                 _deadline = now + 60;
+                if (_watch.Count > 0)
+                {
+                    ObserveFloor("arrival", actual);
+                    _settledSample = now + 3;
+                }
+            }
+            if (_settledSample.HasValue && now >= _settledSample.Value)
+            {
+                ObserveFloor("settled", _player.transform.position);
+                _settledSample = null;
             }
             if (now < _next) return;
             _next = now + .25f;
@@ -178,6 +190,33 @@ internal sealed class ClientTameTravelDiagnostics : IDisposable
         catch (Exception error) { Fail(error); }
     }
 
+    private void ObserveFloor(string phase, Vector3 feet)
+    {
+        string context = $"phase={phase} character={_character} target={_exit} sample_pos={feet} watched={string.Join(",", _watch)}";
+        if (!Physics.Raycast(feet + Vector3.up * .5f, Vector3.down, out var floor, 3f, _surfaces, QueryTriggerInteraction.Ignore))
+        {
+            Event("destination_floor", $"{context} support=unobserved");
+            return;
+        }
+
+        string elevation = Heightmap.GetHeight(floor.point, out float terrain)
+            ? (floor.point.y - terrain).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) : "unknown";
+        const float overheadRange = 12f;
+        var origin = floor.point + Vector3.up * .05f;
+        string above = Physics.Raycast(origin, Vector3.up, out var ceiling, overheadRange, _surfaces, QueryTriggerInteraction.Ignore)
+            ? $"overhead={SurfaceName(ceiling.collider)} headroom_m={ceiling.point.y - floor.point.y:F2}"
+            : $"overhead=unobserved probe_range_m={overheadRange}";
+        Event("destination_floor", $"{context} support={SurfaceName(floor.collider)} support_pos={floor.point} above_terrain_m={elevation} {above}");
+    }
+
+    private static string SurfaceName(Collider surface)
+    {
+        var view = surface.GetComponentInParent<ZNetView>();
+        var record = view != null ? view.GetZDO() : null;
+        string name = view != null ? Utils.GetPrefabName(view.gameObject) : surface.name;
+        return record == null ? name : $"{name}@{record.m_uid}";
+    }
+
     private void Animal(string stage, Character animal, ZDO z) => Event(stage,
         $"character={_character} animal={z.m_uid} prefab={Utils.GetPrefabName(animal.gameObject)} owner={z.GetOwner()} follow='{z.GetString(ZDOVars.s_follow)}' health={animal.GetHealth()} level={animal.GetLevel()} pos={animal.transform.position} record_pos={z.GetPosition()}");
     private void Event(string stage, string fields)
@@ -188,7 +227,7 @@ internal sealed class ClientTameTravelDiagnostics : IDisposable
     private void Write(string text) => _writer.Write($"{DateTime.Now:HH:mm:ss.fff} [HeimKit] [TameTravel.client] {text}");
     private void ResetTrip()
     {
-        _watch.Clear(); _world = null; _player = null; _finished = false; _next = 0;
+        _watch.Clear(); _world = null; _player = null; _finished = false; _next = 0; _settledSample = null;
     }
     private void Fail(Exception error)
     {

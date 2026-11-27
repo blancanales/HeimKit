@@ -25,6 +25,7 @@ internal sealed class SharedMapPortals
     private readonly Dictionary<string, int> _identities = new(StringComparer.Ordinal);
     private static readonly Comparison<ZDOID> IdOrder = NativeIdentity.CompareOrdinal;
     private static readonly Comparison<MapMarker> MarkerOrder = (a, b) => StringComparer.Ordinal.Compare(a.Identity, b.Identity);
+    internal Dictionary<string, string> Aliases { get; private set; } = new();
     public int RegisteredCount => _portals.Count;
     public int EligibleCount { get; private set; }
     private IReadOnlyList<MapMarker>? _grouped;
@@ -53,11 +54,11 @@ internal sealed class SharedMapPortals
             if (!SharedMapExploration.Finite(position.x) || !SharedMapExploration.Finite(position.y) ||
                 !SharedMapExploration.Finite(position.z) || Character.InInterior(position) || !_map.IsExplored(position.x, position.z)) continue;
             string tag = portal.GetString(ZDOVars.s_tag);
-            if (!_observed.TryGetValue(id, out var saved) || saved.Prefab != portal.GetPrefab() || saved.Tag != tag ||
+            bool disconnected = portal.GetConnectionZDOID(ZDOExtraData.ConnectionType.Portal).IsNone();
+            if (!_observed.TryGetValue(id, out var saved) || saved.Prefab != portal.GetPrefab() || saved.Tag != tag || saved.Marker.UnconnectedPortal != disconnected ||
                 saved.Marker.X != position.x || saved.Marker.Y != position.y || saved.Marker.Z != position.z)
             {
-                saved = (portal.GetPrefab(), tag, new MapMarker(string.IsNullOrWhiteSpace(tag) ? "NoName" : tag, position.x, position.y, position.z,
-                    SharedMapPortalIdentity.Create(portal.GetPrefab(), position.x, position.y, position.z)));
+                saved = (portal.GetPrefab(), tag, SharedMapPortalClusters.Observe(portal.GetPrefab(), position, tag, disconnected));
                 if (_observed.Count >= 4096 && !_observed.ContainsKey(id)) throw new InvalidOperationException("Community portal marker limit exceeded; table data was not replaced.");
                 _observed[id] = saved;
             }
@@ -74,6 +75,9 @@ internal sealed class SharedMapPortals
         // The cluster output may retain its input when distance is zero.
         var unique = new MapMarker[_unique.Count]; _unique.CopyTo(unique);
         EligibleCount = unique.Length;
-        return _grouped = SharedMapPortalClusters.Group(unique, clusterDistance);
+        var aliases = new Dictionary<string, string>();
+        _grouped = SharedMapPortalClusters.Group(unique, clusterDistance, (member, group) => aliases[member.Identity] = group);
+        if (!SharedMapPersonalMarkers.SameAliases(Aliases, aliases)) Aliases = aliases;
+        return _grouped;
     }
 }

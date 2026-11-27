@@ -78,7 +78,7 @@ public sealed class SharedMapMarkerRefresh
             float x = marker.X + Slots[slot].X, z = marker.Z + Slots[slot].Z;
             if (!SharedMapExploration.Finite(x) || !SharedMapExploration.Finite(z)) throw new InvalidDataException("Invalid published marker position.");
             next.Add(marker.Identity, new MarkerPublicationState(marker.Name, slot, x, z));
-            output.Add(new MapMarker(marker.Name, x, marker.Y, z, marker.Identity));
+            output.Add(new MapMarker(marker.Name, x, marker.Y, z, marker.Identity, marker.UnconnectedPortal));
             changed |= previous == null || previous.Name != marker.Name || previous.Slot != slot || previous.X != x || previous.Z != z;
         }
         if (!changed) return output;
