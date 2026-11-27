@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.5
+
+- Added **HeimDefender**, a host feature that keeps player-built Ballistas from targeting players and tamed animals. Hosts can also enable automatic bolt refills.
+- **SharedMap** adds nearby discoveries to your personal map as you explore, even on vanilla servers. On HeimKit hosts, markers follow the host’s settings and merge with cartography table pins. On a HeimKit client, an unlinked standalone portal appears white and shows **(Unconnected)**. Its pin updates when Valheim reports a change.
+- **TameTravel** improves portal travel for following wolves and Dead Raiser skeletons, and helps tames find room to land at portals inside buildings and ruins.
+- **StationSupply** can start an empty station directly from its supply chest. Shield generators can draw fuel from the nearest eligible public chest on any side of the fuel hatch.
+- Added **Server Diagnostics** to **F7 → Server Settings** so hosts and authorized admins can adjust server logging during play.
+- HeimKit now supports **Valheim 1.0.31**, including servers configured to require the audited game version.
+
 ## 0.2.4
 
 - **Run HeimKit in your own Valheim world.** Install it in the Windows game to play solo, or choose **Start Server** to play with friends. Guests can join and use the host’s gameplay features without installing HeimKit.
@@ -7,7 +16,7 @@
 - **See who’s visited and manage bans.** World hosts and dedicated-server admins can view current players and past visitors in [Server Administration](https://github.com/blancanales/HeimKit/blob/v0.2.4/docs/heimkit-settings.md#moderate-players). When changes are allowed, they can ban or unban players even after they’ve left.
 - **Bring followers through dungeon entrances and exits.** Following tames can enter or leave with you when they fit through the doorway and have room to land. Skeletons you raise with the Dead Raiser can follow you through linked portals and dungeon entrances in either direction. [TameTravel guide](https://github.com/blancanales/HeimKit/blob/v0.2.4/docs/features/tame-travel.md)
 - **Find more landmarks on your shared map.** Use **Read Map** at a cartography table to see discovered Fuling villages, Draugr villages, Black Forest tower ruins, Swamp ruins, Mountain cabins, Charred Fortresses and Deep North villages. [SharedMap guide](https://github.com/blancanales/HeimKit/blob/v0.2.4/docs/features/shared-map.md#structure-markers)
-- Updated SharedMap, TameTravel and StationSupply for the [supported Valheim release](https://github.com/blancanales/HeimKit/blob/v0.2.4/docs/server-setup.md#supported-environment).
+- HeimKit now officially supports [Valheim 1.0.30](https://github.com/blancanales/HeimKit/blob/v0.2.4/docs/server-setup.md#supported-environment). This release fixes compatibility issues in SharedMap, TameTravel and StationSupply.
 - HeimKit automatically throttles background activity when it detects performance issues.
 
 ## 0.2.3

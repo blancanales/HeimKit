@@ -43,7 +43,7 @@ public sealed class SharedMapPinState
     { _world = world; _changed = changed; FilePath = Path.Combine(directory, "world-" + world.ToString("X16", CultureInfo.InvariantCulture) + ".pin-state"); }
     private static bool Managed(long owner) => SharedMapTableData.ManagedOwner(owner);
     private static MapPin Copy(MapPin p, float x, float z, bool check) => new(p.Owner, p.Name, x, p.Y, z, p.Icon, check, p.Author);
-    public static string MarkerKey(long owner, string identity) => SharedMapPinRemovals.Identity(new MapPin(owner, identity, 0, 0, 0, 0));
+    public static string MarkerKey(long owner, string identity) => SharedMapPinRemovals.Identity(new MapPin(SharedMapTableData.CanonicalOwner(owner), identity, 0, 0, 0, 0));
     private void Index(string key, State state, bool add)
     {
         foreach (string id in new[] { SharedMapPinRemovals.Identity(state.Source), SharedMapPinRemovals.Identity(state.Published) }.Distinct())
@@ -52,6 +52,9 @@ public sealed class SharedMapPinState
             else if (_issued.TryGetValue(id, out var keys)) { keys.Remove(key); if (keys.Count == 0) _issued.Remove(id); }
         }
     }
+    internal IEnumerable<string> IssuedKeys(string fingerprint) =>
+        _issued.TryGetValue(fingerprint, out var keys) ? keys : Array.Empty<string>();
+
     private string? Resolve(MapPin pin)
     {
         string id = SharedMapPinRemovals.Identity(pin);
@@ -113,7 +116,7 @@ public sealed class SharedMapPinState
         // Restore a player's original coordinates when their issued offset returns in an upload.
         MapPin source = markerIdentity == null ? new MapPin(pin.Owner, state.Source.Name, state.Source.X, state.Source.Y, state.Source.Z, pin.Icon, false, pin.Author) : pin;
         bool check = shareChecks && state.Target;
-        if (source.Name != state.Source.Name || source.X != state.Source.X || source.Y != state.Source.Y || source.Z != state.Source.Z || check != state.Source.Checked)
+        if (source.Owner != state.Source.Owner || source.Name != state.Source.Name || source.X != state.Source.X || source.Y != state.Source.Y || source.Z != state.Source.Z || check != state.Source.Checked)
         {
             var old = state.Published; Index(key, state, false);
             // Portal/resource label changes already use their own publication refresh.

@@ -108,7 +108,9 @@ internal static class TameTravelPlacementRules
             {
                 if (probes >= MaximumEscapeProbes) return false;
                 probes++;
-                var next = ground(start + heading * (distance * step / steps));
+                var sample = start + heading * (distance * step / steps);
+                sample.y = previous.y;
+                var next = ground(sample);
                 if (!next.HasValue || !PlayerWorldScope.Finite(next.Value) || Math.Abs(next.Value.y - previous.y) > .75f * distance / steps + .05f || !clear(previous, next.Value)) break;
                 previous = next.Value;
                 if (step == steps) return true;

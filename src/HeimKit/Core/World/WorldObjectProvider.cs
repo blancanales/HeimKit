@@ -78,6 +78,10 @@ internal sealed class WorldObjectProvider : IDisposable
     internal static IReadOnlyList<ZDO>? BorrowSector(ZDOMan world, Vector2s sector) =>
         NativeSectors.Read(world)[ZoneSystem.SectorToIndex(sector).Sector];
 
+    // Valheim indexes replicated portal ZDOs separately from ordinary sector objects.
+    internal static IReadOnlyList<ZDO>? BorrowPortalSector(ZDOMan world, Vector2s sector) =>
+        world.GetPortals().TryGetValue(ZoneSystem.SectorToIndex(sector), out var portals) ? portals : null;
+
     // Share one retrospective pass for two ordinary (non-portal) world prefabs.
     internal static bool CollectPrefabPair(ZDOMan world, int primary, int secondary, List<ZDO> output,
         ref int sector, ref int offset)

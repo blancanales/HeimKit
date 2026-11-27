@@ -23,6 +23,7 @@ public sealed class TameTravelSettings
     public ConfigEntry<float> FollowStopDistanceMeters { get; }
     public ConfigEntry<float> FollowResumeDistanceMeters { get; }
     public ConfigEntry<int> MaxControlledFollowers { get; }
+    public ConfigEntry<float> SummonRangeMeters { get; }
     public ConfigEntry<float> FollowerRangeMeters { get; }
     public ConfigEntry<float> FollowConsentSeconds { get; }
     public ConfigEntry<float> TravelWindowSeconds { get; }
@@ -38,11 +39,12 @@ public sealed class TameTravelSettings
         FollowStopDistanceMeters = config.Bind(section, "FollowStopDistanceMeters", 4f, new ConfigDescription("Horizontal follow stopping distance; enlarged when needed for animal and player clearance.", new AcceptableValueRange<float>(3, 12)));
         FollowResumeDistanceMeters = config.Bind(section, "FollowResumeDistanceMeters", 5f, new ConfigDescription("Horizontal distance to resume following; effective value is at least the stop distance plus one metre.", new AcceptableValueRange<float>(4, 16)));
         MaxControlledFollowers = config.Bind(section, "MaxControlledFollowers", 8, new ConfigDescription("Global cap on server-controlled followers; native following remains when capacity is unavailable.", new AcceptableValueRange<int>(1, 16)));
-        FollowerRangeMeters = config.Bind(section, "FollowerRangeMeters", 20f, new ConfigDescription("Maximum follower distance from player and source portal at entry.", new AcceptableValueRange<float>(5, 32)));
+        SummonRangeMeters = config.Bind(section, "SummonRangeMeters", 32f, new ConfigDescription("Maximum distance of a following Dead Raiser skeleton from its summoner and the source gateway at entry.", new AcceptableValueRange<float>(5, 32)));
+        FollowerRangeMeters = config.Bind(section, "FollowerRangeMeters", 20f, new ConfigDescription("Maximum ordinary tame distance from player and source portal at entry.", new AcceptableValueRange<float>(5, 32)));
         FollowConsentSeconds = config.Bind(section, "FollowConsentSeconds", 300f, new ConfigDescription("Optional portal-wait consent lifetime; one traversal consumes it. Active follow permission lasts for the current player session until stopped or invalidated.", new AcceptableValueRange<float>(30, 1800)));
         TravelWindowSeconds = config.Bind(section, "TravelWindowSeconds", 30f, new ConfigDescription("Maximum time to observe corresponding portal arrival.", new AcceptableValueRange<float>(15, 60)));
         MaxFollowersPerTraversal = config.Bind(section, "MaxFollowersPerTraversal", 8, new ConfigDescription("Maximum tames reserved for one traversal.", new AcceptableValueRange<int>(1, 16)));
-        foreach (float n in new[] { CommandRangeMeters.Value, FollowStopDistanceMeters.Value, FollowResumeDistanceMeters.Value, FollowerRangeMeters.Value, FollowConsentSeconds.Value, TravelWindowSeconds.Value })
+        foreach (float n in new[] { CommandRangeMeters.Value, FollowStopDistanceMeters.Value, FollowResumeDistanceMeters.Value, FollowerRangeMeters.Value, SummonRangeMeters.Value, FollowConsentSeconds.Value, TravelWindowSeconds.Value })
             if (float.IsNaN(n) || float.IsInfinity(n)) throw new ArgumentException("TameTravel settings must be finite.");
         DebugLogging = DebugLoggingResolver.Resolve(config, section, DiagnosticsSettings.Bind(config), logger, DebugMode);
     }

@@ -14,13 +14,24 @@ namespace HeimKit.Features.SharedMap;
 
 public static class SharedMapPortalClusters
 {
-    public static IReadOnlyList<MapMarker> Group(IReadOnlyList<MapMarker> portals, float distance)
+    internal static MapMarker Observe(int prefab, UnityEngine.Vector3 point, string tag, bool disconnected)
+    {
+        string name = string.IsNullOrWhiteSpace(tag) ? "NoName" : tag;
+        if (disconnected) name += " (Unconnected)";
+        return new MapMarker(name, point.x, point.y, point.z,
+            SharedMapPortalIdentity.Create(prefab, point.x, point.y, point.z), disconnected);
+    }
+
+    public static IReadOnlyList<MapMarker> Group(IReadOnlyList<MapMarker> portals, float distance, Action<MapMarker, string>? member = null)
     {
         if (!SharedMapExploration.Finite(distance) || distance < 0 || distance > 100)
             throw new ArgumentOutOfRangeException(nameof(distance));
         if (portals.Count > 4096) throw new ArgumentOutOfRangeException(nameof(portals));
         if (distance == 0) return portals;
         var groups = SharedMapMarkerClusters.Group(portals, distance, p => p.X, p => p.Z, (a, b) => true);
+        foreach (var group in groups)
+            foreach (var portal in group)
+                if (portal.Identity != group[0].Identity) member?.Invoke(portal, group[0].Identity);
         return groups.Select(group => group.Count == 1 ? group[0] :
             new MapMarker("Multi Portals (" + group.Count + ")", (float)group.Average(p => (double)p.X),
                 (float)group.Average(p => (double)p.Y), (float)group.Average(p => (double)p.Z), group[0].Identity)).ToArray();

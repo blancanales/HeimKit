@@ -18,6 +18,7 @@ internal sealed partial class ControlServer : IDisposable
     private static readonly int HelloHash = ControlProtocol.Hello.GetStableHashCode();
     private static readonly int SetHash = ControlProtocol.Set.GetStableHashCode();
     private readonly ControlSettings _settings;
+    private readonly ServerDiagnosticsControls _diagnostics;
     private readonly Func<bool>? _localAccess;
     private readonly Client? _localClient;
     private readonly ModuleHost _host;
@@ -149,6 +150,7 @@ internal sealed partial class ControlServer : IDisposable
     {
         _settings = settings; _host = host; _players = players; _log = log; _version = version;
         _compatibility = compatibility; _gameVersion = gameVersion;
+        _diagnostics = new ServerDiagnosticsControls(settings.Enabled.ConfigFile);
         _localAccess = localAccess;
         if (localAccess != null) _localClient = new Client { IsLocal = true, Admin = true };
         foreach (var server in host.Modules)
@@ -368,6 +370,14 @@ internal sealed partial class ControlServer : IDisposable
             result = SetResult.RateLimited;
         if (result != SetResult.None) { Reply(client, request.Id, result); return; }
 
+        if (request.Module == ControlProtocol.DiagnosticsGroup)
+        {
+            result = request.Number.HasValue ? SetResult.InvalidValue :
+                _diagnostics.Set(request.Key, request.Value, DescribeAdmin(client), _log);
+            _dirty |= result == SetResult.Applied;
+            Reply(client, request.Id, result, request.Module, request.Key);
+            return;
+        }
         var module = _modules.Find(m => m.Server.Name == request.Module);
         if (request.Number is double number)
         {
@@ -509,6 +519,7 @@ internal sealed partial class ControlServer : IDisposable
             entries.Add(new SwitchState(entry.Definition, entry.Value,
                 pending?.Entry == entry ? pending.Value : (bool?)null, status, reason));
         }
+        _diagnostics.AddSnapshot(entries);
         return entries.ToArray();
     }
 

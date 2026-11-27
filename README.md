@@ -2,17 +2,17 @@
 
 ![HeimKit: shield and longhouse emblem beside the HeimKit name](docs/images/heimkit-banner.jpg)
 
-Quality-of-life features for Windows Valheim worlds hosted in the game or on a dedicated server: infinite torches, shared map exploration and markers, weather protection, majority sleep, AFK raid protection, tame portal travel, door closing, tree renewal, sunken-loot recovery, gradual building repairs and production-station feeding.
+Quality-of-life features for Windows Valheim worlds hosted in the game or on a dedicated server: infinite torches, shared map exploration and markers, weather protection, majority sleep, AFK raid protection, tame portal travel, door closing, tree renewal, sunken-loot recovery, gradual building repairs, production-station feeding and Ballista targeting.
 
 Install HeimKit in the Windows game to run its features in your own world. Play solo or choose **Start Server** to invite friends. Guests can join without HeimKit.
 
-The [HeimKit Settings guide](docs/heimkit-settings.md) shows how to use **F7**. Open **Server Settings** to manage the world you host, from door closing delays to shared map markers. Open **Client Settings** for interaction logging and your menu shortcut. World hosts and dedicated-server admins can use **Server Administration** to see who has joined and manage Valheim’s ban list, including while a player is offline. See [Moderate players](docs/heimkit-settings.md#moderate-players) for access and controls.
+The [HeimKit Settings guide](docs/heimkit-settings.md) shows how to use **F7**. Open **Server Settings** to manage the world you host, including gameplay settings and [Server Diagnostics](docs/heimkit-settings.md#change-server-diagnostics-during-play). Open **Client Settings** for automatic personal map markers, local diagnostics and your menu shortcut. World hosts and dedicated-server admins can use **Server Administration** to see who has joined and manage Valheim’s ban list, including while a player is offline. See [Moderate players](docs/heimkit-settings.md#moderate-players) for access and controls.
 
 ![Server Settings with InfiniteTorches selected, its fireplace controls and refill interval, and the Client Settings and Server Administration tabs](docs/images/heimkit-settings-server-settings-0.2.4.png)
 
 *Server Settings in the F7 menu, as seen by a dedicated-server admin.*
 
-DoorKeeper, ForestRenewal, SeaSalvage, TameTravel, HeimMender and StationSupply default enabled. Review their guides to choose which features to keep on. Existing configuration values are preserved; missing settings are added automatically. Install only one HeimKit plugin DLL.
+DoorKeeper, ForestRenewal, SeaSalvage, TameTravel, HeimMender, StationSupply and HeimDefender default enabled. Review their guides to choose which features to keep on. Existing configuration values are preserved; missing settings are added automatically. Install only one HeimKit plugin DLL.
 
 Before enabling HeimKit, follow [world backups](docs/world-backups.md) and read [safety and limitations](docs/limitations.md).
 
@@ -22,7 +22,7 @@ If HeimKit makes your Valheim server more enjoyable, you can [support its develo
 
 ## Features
 
-![All eleven HeimKit features, including StationSupply production-station feeding](docs/images/feature-overview.jpg)
+![The twelve HeimKit features, including HeimDefender’s player-built Ballista](docs/images/feature-overview.jpg)
 
 ### InfiniteTorches
 
@@ -63,7 +63,17 @@ SharedMap’s marker options default enabled.
 
 Optional settings discover resources/dungeons in previously explored terrain or reject player map uploads while automatic collection continues. Enabled runestone, spawner and structure markers include eligible points in community-explored terrain. Optional shared X checkmarks default off. Server owners can remove a selected shared pin through server-side administration without clearing other pins or exploration.
 
+A HeimKit client can mark nearby discoveries as you explore, including on a vanilla server. A known standalone portal turns white when Valheim tells your client it has lost its link, and grey when it connects again. On a HeimKit host, nearby discoveries reconcile with the pins you receive from a cartography table.
+
 [Usage, settings and administration](docs/features/shared-map.md) · [Specification](docs/specs/shared-map.md)
+
+### HeimDefender
+
+![Illustration of a player-built Ballista overlooking a palisade while a Viking and a tame wolf walk behind it](docs/images/heim-defender-workflow.jpg)
+
+HeimDefender keeps player-built Ballistas from targeting players and tamed animals. It runs on the world host and is enabled by default, so vanilla guests benefit too. Hosts can also turn on free bolt refills in **F7 → Server Settings → HeimDefender**.
+
+[Usage and settings](docs/features/heim-defender.md) · [Specification](docs/specs/heim-defender.md)
 
 ### DoorKeeper
 
@@ -73,7 +83,7 @@ Closes eligible player-built doors and gates after a delay once players clear th
 
 ### TameTravel
 
-Brings explicitly following or portal-waiting tamed wolves, boars, lox, asksvin, hens and moose along a validated trip between linked player-built portals outside dungeons. Following tames can also enter and leave dungeons when they fit through the doorway and have room to land. Preserves the same animal and its saved state. One follow command covers successive portal trips and following continues at the destination until stopped. Follow, stay and optional portal-wait commands have vanilla emote fallbacks. Explicit followers can use configurable stopping distance through bounded server control. Following Dead Raiser skeletons can accompany their summoner through portals and native dungeon entrances and exits, including vanilla guests on a HeimKit host. Defaults enabled.
+Brings explicitly following or portal-waiting tamed wolves, boars, lox, asksvin, hens and moose along a validated trip between linked player-built portals outside dungeons. Following tames can also enter and leave dungeons when they fit through the doorway and have room to land. An adult wolf can travel using its normal follow command. At a portal inside a building, tames can land on an upper floor when there is enough support, headroom and space to walk out. Each tame keeps its identity and saved state. One follow command covers successive portal trips and following continues at the destination until stopped. Follow, stay and optional portal-wait commands have vanilla emote fallbacks. Explicit followers can use configurable stopping distance through bounded server control. Following Dead Raiser skeletons can accompany their summoner through portals and native dungeon entrances and exits, including vanilla guests on a HeimKit host. Defaults enabled.
 
 [Usage and settings](docs/features/tame-travel.md) · [Specification](docs/specs/tame-travel.md)
 

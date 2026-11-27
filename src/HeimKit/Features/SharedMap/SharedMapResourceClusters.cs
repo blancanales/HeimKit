@@ -16,7 +16,8 @@ namespace HeimKit.Features.SharedMap;
 public static class SharedMapResourceClusters
 {
     public static IReadOnlyList<MapMarker> Group(IEnumerable<ResourceDeposit> discoveries, float distance, bool removeDepleted,
-        Action<int, int?, string>? association = null, Func<ResourceDeposit, bool>? pillarVerified = null)
+        Action<int, int?, string>? association = null, Func<ResourceDeposit, bool>? pillarVerified = null,
+        Action<ResourceDeposit, int>? membership = null)
     {
         var ordered = discoveries.OrderBy(d => d.Identity).ToArray();
         var groups = SharedMapMarkerClusters.Group(ordered.Where(d => d.Kind != ResourceKind.SoftTissue &&
@@ -39,6 +40,8 @@ public static class SharedMapResourceClusters
                     }
             }
         }
+        var tissueHosts = new Dictionary<int, int>();
+        var publishedGroups = new Dictionary<int, int>();
         var bySkull = new Dictionary<int, ResourceDeposit>();
         var markers = new List<MapMarker>();
         foreach (var tissue in tissues)
@@ -54,12 +57,14 @@ public static class SharedMapResourceClusters
                 }
             if (match != null && !ambiguous)
             {
+                if (membership != null) tissueHosts[tissue.Identity] = match.Identity;
                 if (!bySkull.ContainsKey(match.Identity)) bySkull.Add(match.Identity, tissue);
                 association?.Invoke(tissue.Identity, match.Identity, "matched");
             }
             else
             {
                 association?.Invoke(tissue.Identity, null, ambiguous ? "ambiguous_skulls" : "no_observed_skull");
+                membership?.Invoke(tissue, tissue.Identity);
                 AddMarker("(ST)", tissue.X, tissue.Y, tissue.Z, tissue.Identity);
             }
         }
@@ -71,6 +76,12 @@ public static class SharedMapResourceClusters
                     anchor = tissue;
             var remaining = group.Where(d => !removeDepleted || !d.Depleted).ToArray();
             if (remaining.Length == 0 && anchor == null) continue;
+            if (membership != null)
+                foreach (var member in group)
+                {
+                    membership(member, group[0].Identity);
+                    publishedGroups[member.Identity] = group[0].Identity;
+                }
             string name = group[0].Kind == ResourceKind.AncientRoot
                 ? SharedMapAncientRoot.Label(group[0]) : group[0].Kind == ResourceKind.FlametalPillar ? "Flametal Pillar" : group[0].Kind.ToString();
             if (SharedMapResourceHealth.TracksProgress(group[0].Kind)) name = PercentageLabel(group);
@@ -89,6 +100,10 @@ public static class SharedMapResourceClusters
             if (markers.Count >= 4096) throw new InvalidOperationException("Community resource marker limit exceeded; table data was not replaced.");
             markers.Add(new MapMarker(name, x, y, z, id.ToString(CultureInfo.InvariantCulture)));
         }
+        if (membership != null)
+            foreach (var tissue in tissues)
+                if (tissueHosts.TryGetValue(tissue.Identity, out int skull) && publishedGroups.TryGetValue(skull, out int group))
+                    membership(tissue, group);
         return markers;
     }
 

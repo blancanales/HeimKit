@@ -84,14 +84,14 @@ internal static class TameTravelReviewTests
             "Stay could not preempt its own pending reclamation, or gained authority over someone else's animal.");
         System.Console.WriteLine("PASS: absent follower names can be reclaimed, loading/respawning players remain protected, unknown presence refuses takeover, and stay preempts only its own pending reclaim.");
 
-        string? Surface(bool structural = true, bool isStatic = true, bool supports = true, int comfort = 0, float thickness = 1, float height = .5f)
-            => TameTravelPlacementSurfaces.SurfaceRejection(true, comfort, structural, isStatic, supports, new Vector3(2, thickness, 2), height);
-        Check(Surface() == null && Surface(thickness: .5f, height: 2) == null, "A low static ruin floor was rejected as support.");
+        string? Surface(bool structural = true, bool isStatic = true, bool supports = true, int comfort = 0, float thickness = 1)
+            => TameTravelPlacementSurfaces.SurfaceRejection(true, comfort, structural, isStatic, supports, new Vector3(2, thickness, 2));
+        Check(Surface() == null && Surface(thickness: .5f) == null, "A low static ruin floor was rejected as support.");
         Check(Surface(isStatic: false) == "not_static" && Surface(structural: false) == "not_structural" &&
             Surface(supports: false) == "not_supporting" && Surface(comfort: 1) == "furniture" &&
-            Surface(thickness: 2) == "too_thick" && Surface(height: 3.1f) == "raised_construction",
-            "Accepting ruin floors weakened static, structural, furniture, thickness or height guards.");
-        System.Console.WriteLine("PASS: static low ruin floors qualify while furniture, mobile/non-supporting pieces, thick walls and raised construction remain excluded.");
+            Surface(thickness: 2) == "too_thick",
+            "Accepting ruin floors weakened static, structural, furniture, or thickness guards.");
+        System.Console.WriteLine("PASS: static low ruin floors qualify while furniture, mobile/non-supporting pieces, and thick walls remain excluded.");
 
         Check(TameTravelDiagnostics.CommandMessage("Astra", "player_data_applied", "", null) == "Observed fresh player data for Astra." &&
             !TameTravelCommandRules.Emote("", out _) && !TameTravelCommandRules.Emote("sit", out _),

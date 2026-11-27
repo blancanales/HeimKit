@@ -71,6 +71,19 @@ internal static class SharedMapDungeonPinTests
         var cleanedCitadel = SharedMapTableData.Merge(map, citadel, out _, dungeons: new[] { Marker("retired", 0, 0, "Infested Citadel") })!;
         Check(SharedMapTableData.ReadPins(64, cleanedCitadel).Single().Name == "The Queen",
             "Citadel table cleanup preserved a stale copy or removed the native boss marker.");
+        var managed = new MapPin(SharedMapTableData.DungeonOwner, "Burial Chamber", note.X, note.Y, note.Z, 2);
+        var colocated = Table(managed, note);
+        using (var input = new GZipStream(new MemoryStream(colocated), CompressionMode.Decompress))
+        using (var bytes = new MemoryStream())
+        {
+            input.CopyTo(bytes);
+            byte[] raw = bytes.ToArray();
+            var separate = SharedMapTableData.SeparateManagedPins(64, ref raw);
+            Check(separate.Count == 1 && separate[0].Owner == managed.Owner,
+                "Personal-map import lost a managed pin coincident with a manual note.");
+            Check(raw.SequenceEqual(SharedMapTableData.Decode(64, Table(note))!.Raw),
+                "Separating the managed pin changed native terrain or the manual note.");
+        }
         var upload = Table(old, adopted, note, dot, distant);
         int obsolete = 0;
         var merged = SharedMapTableData.Merge(map, upload, out _, dungeons: markers, dungeonCleanup: (_, pins) => obsolete = pins)!;

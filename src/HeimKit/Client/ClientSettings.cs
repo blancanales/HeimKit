@@ -12,6 +12,9 @@ internal sealed class ClientSettings
     {
         _file = new ConfigFile(Path.Combine(directory, FileName), true);
         MenuKey = _file.Bind("Client", "MenuKey", KeyCode.F7, "Open HeimKit Settings. None disables the menu.");
+        PersonalMarkers = _file.Bind("SharedMap", "AutomaticMarkers", true, "Show nearby discoveries on this character’s map.");
+        TraceHeimDefender = _file.Bind("Diagnostics", "TraceHeimDefender", false, "Record native Ballista target and ammo observations on this client.");
+        TraceSharedMap = _file.Bind("Diagnostics", "TraceSharedMap", false, "Record automatic discoveries and table merges on this client.");
         TraceTameTravel = _file.Bind("Diagnostics", "TraceTameTravel", false,
             "Record TameTravel observations in this client’s log. Can be changed in F7.");
         TraceObjectInteractions = _file.Bind("Diagnostics", "TraceObjectInteractions", false,
@@ -19,6 +22,9 @@ internal sealed class ClientSettings
     }
 
     internal string ConfigPath => Path.GetFullPath(_file.ConfigFilePath);
+    internal ConfigEntry<bool> PersonalMarkers { get; }
+    internal ConfigEntry<bool> TraceHeimDefender { get; }
+    internal ConfigEntry<bool> TraceSharedMap { get; }
     internal ConfigEntry<KeyCode> MenuKey { get; }
     internal ConfigEntry<bool> TraceTameTravel { get; }
     internal ConfigEntry<bool> TraceObjectInteractions { get; }

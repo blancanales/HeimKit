@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using HeimKit.Core.Control;
 using HeimKit.Core.Control.Models;
 using TMPro;
 using HarmonyLib;
@@ -35,6 +36,10 @@ public sealed partial class ControlPanelView : MonoBehaviour
     internal bool CanEdit;
     internal bool TraceTameTravel;
     internal Action<bool>? SetTameTravelTrace;
+    internal bool HeimDefenderTrace;
+    internal Action<bool>? SetHeimDefenderTrace;
+    internal bool MapMarkers, MapTrace;
+    internal Action<bool>? SetMapMarkers, SetMapTrace;
     internal bool TraceInteractions;
     internal Action<bool>? SetInteractionTrace;
     internal Action<SwitchState>? Click;
@@ -366,6 +371,11 @@ public sealed partial class ControlPanelView : MonoBehaviour
         AddClientSwitch("Object interaction logging", TraceInteractions, SetInteractionTrace,
             "Record container actions immediately in this client's BepInEx log.");
 
+        Label(_content, "HeimDefender", 29).color = HighlightGold;
+        AddClientSwitch("Debug logging", HeimDefenderTrace, SetHeimDefenderTrace, "Record native Ballista targets and ammunition observed on this PC.");
+        Label(_content, "SharedMap", 29).color = HighlightGold;
+        AddClientSwitch("Automatic markers", MapMarkers, SetMapMarkers, "Show nearby discoveries without visiting a cartography table.");
+        AddClientSwitch("Debug logging", MapTrace, SetMapTrace, "Record marker delivery and personal-map reconciliation on this PC.");
         Label(_content, "TameTravel", 29).color = HighlightGold;
         AddClientSwitch("Debug logging", TraceTameTravel, SetTameTravelTrace,
             "Record local portal and dungeon trips and nearby animal IDs on this PC.");
@@ -393,6 +403,26 @@ public sealed partial class ControlPanelView : MonoBehaviour
         var name = Label(header, row.Name, 29);
         name.color = HighlightGold;
         FillLine(name);
+        if (row.Name == ControlProtocol.DiagnosticsGroup)
+        {
+            foreach (var option in row.Options)
+            {
+                var entry = option.Entry;
+                if (entry.Definition.Key == "DebugVerbosity")
+                {
+                    var line = Rect("Log detail", _content);
+                    Line(line);
+                    AddDropdown(line, entry.Definition.Label, new List<string> { "Normal", "Verbose" },
+                        entry.Value ? 1 : 0, CanEdit, choice =>
+                        {
+                            if ((choice == 1) != entry.Value) Click?.Invoke(entry);
+                        });
+                    Notice(_content, option.Feedback);
+                }
+                else AddSwitchRow(_content, entry, option.Feedback);
+            }
+            return;
+        }
         var status = row.Entry?.Status ?? SwitchStatus.Unavailable;
         bool failed = status == SwitchStatus.Unavailable &&
             row.Entry?.Reason is UnavailableReason.StoppedAfterError or UnavailableReason.FailureProtection;
@@ -432,10 +462,20 @@ public sealed partial class ControlPanelView : MonoBehaviour
         else
         {
             if (row.Entry is { } entry) AddSwitchRow(_content, entry, row.Feedback);
-            foreach (var option in row.Options) AddSwitchRow(_content, option.Entry, option.Feedback);
+            foreach (var option in row.Options)
+            {
+                var line = AddSwitchRow(_content, option.Entry, option.Feedback);
+                if (row.Name == "HeimDefender" && option.Entry.Definition.Key == "FreeWoodBolts")
+                {
+                    foreach (var number in row.Numbers)
+                        if (number.Entry.Key == "BoltType")
+                            AddBoltDropdown(line, number.Entry, number.Feedback, row.Entry?.Reason != UnavailableReason.FailureProtection);
+                }
+            }
         }
         foreach (var number in row.Numbers)
-            AddNumber(number.Entry, number.Feedback, row.Entry?.Reason != UnavailableReason.FailureProtection);
+            if (row.Name != "HeimDefender" || number.Entry.Key != "BoltType")
+                AddNumber(number.Entry, number.Feedback, row.Entry?.Reason != UnavailableReason.FailureProtection);
     }
 
     private static RectTransform AddSwitchColumn(Transform parent)
@@ -448,7 +488,7 @@ public sealed partial class ControlPanelView : MonoBehaviour
         return column;
     }
 
-    private void AddSwitchRow(Transform parent, SwitchState entry, string feedback)
+    private Transform AddSwitchRow(Transform parent, SwitchState entry, string feedback)
     {
         var toggle = AddCheckboxRow(parent, entry.Definition.Label, entry.Value, SettingDescription(entry.Definition.Description));
         toggle.interactable = CanEdit && !entry.PendingValue.HasValue;
@@ -458,6 +498,98 @@ public sealed partial class ControlPanelView : MonoBehaviour
             Click?.Invoke(entry);
         });
         Notice(parent, feedback);
+        return toggle.transform.parent;
+    }
+
+    private void AddBoltDropdown(Transform line, NumericSettingState entry, string feedback, bool available)
+    {
+        AddDropdown(line, entry.Label, new List<string>(Features.HeimDefender.HeimDefenderSettings.BoltLabels),
+            (int)entry.Value, CanEdit && available, choice => ApplyNumber?.Invoke(entry, choice));
+        Notice(_content, feedback);
+    }
+
+    private void AddDropdown(Transform line, string label, List<string> options, int selected, bool editable, Action<int> apply)
+    {
+        Label(line, label, 17);
+        var root = TMP_DefaultControls.CreateDropdown(default);
+        root.transform.SetParent(line, false);
+        var size = root.AddComponent<LayoutElement>();
+        size.minWidth = size.preferredWidth = 165;
+        size.minHeight = size.preferredHeight = 30;
+        var dropdown = root.GetComponent<TMP_Dropdown>();
+        dropdown.ClearOptions();
+        dropdown.AddOptions(options);
+        StyleDropdown(dropdown);
+        dropdown.SetValueWithoutNotify(selected);
+        dropdown.RefreshShownValue();
+        dropdown.interactable = editable;
+        dropdown.onValueChanged.AddListener(choice =>
+        {
+            dropdown.SetValueWithoutNotify(selected);
+            apply(choice);
+        });
+    }
+
+    private void StyleDropdown(TMP_Dropdown dropdown)
+    {
+        foreach (var text in new[] { dropdown.captionText, dropdown.itemText })
+        {
+            text.font = _textStyle.font;
+            text.fontSharedMaterial = _textStyle.fontSharedMaterial;
+            text.fontStyle = _textStyle.fontStyle;
+            text.fontSize = 17;
+            text.color = Ivory;
+            text.raycastTarget = false;
+        }
+
+        var face = Rect("Button face", dropdown.transform);
+        Stretch(face);
+        face.SetAsFirstSibling();
+        dropdown.GetComponent<Image>().enabled = false;
+        dropdown.targetGraphic = ButtonSurface(face, ControlPanelArtwork.ButtonRole.Feature);
+        dropdown.colors = ButtonColors();
+        dropdown.captionText.rectTransform.offsetMin = new Vector2(10, 1);
+        dropdown.captionText.rectTransform.offsetMax = new Vector2(-28, -1);
+        var arrow = (RectTransform)dropdown.transform.Find("Arrow");
+        arrow.GetComponent<Image>().enabled = false;
+        var chevron = Label(arrow, "▼", 14, TextAlignmentOptions.Center);
+        chevron.color = HighlightGold;
+        Stretch(chevron.rectTransform);
+
+        // TMP clones the inactive template when the list opens.
+        var template = dropdown.template;
+        template.GetComponent<Image>().color = PanelNavy;
+        var frame = Rect("List frame", template);
+        Stretch(frame);
+        frame.SetAsFirstSibling();
+        var border = frame.gameObject.AddComponent<ControlPanelBevel>();
+        border.Surface = ControlPanelBevel.Finish.Recess;
+        border.raycastTarget = false;
+
+        var scroll = template.GetComponent<ScrollRect>();
+        scroll.verticalScrollbar.gameObject.SetActive(false);
+        scroll.verticalScrollbar = null;
+        Stretch(scroll.viewport, 3, 0);
+        var option = dropdown.itemText.transform.parent.GetComponent<Toggle>();
+        const float rowHeight = 30;
+        ((RectTransform)option.transform).sizeDelta = new Vector2(0, rowHeight);
+        scroll.content.sizeDelta = new Vector2(0, rowHeight + 8);
+        template.sizeDelta = new Vector2(0, rowHeight * dropdown.options.Count + 8);
+        option.targetGraphic.color = Color.white;
+        var colors = ButtonColors();
+        colors.normalColor = PanelNavy;
+        colors.highlightedColor = colors.selectedColor = new Color(.29f, .18f, .08f);
+        colors.pressedColor = new Color(.41f, .24f, .08f);
+        option.colors = colors;
+
+        var indicator = Rect("Gold checkmark", option.graphic.transform);
+        Stretch(indicator, 2, 2);
+        option.graphic.enabled = false;
+        var mark = indicator.gameObject.AddComponent<ControlPanelMark>();
+        mark.IsCheckmark = true;
+        mark.raycastTarget = false;
+        option.graphic = mark;
+        dropdown.itemText.rectTransform.offsetMin = new Vector2(27, 1);
     }
 
     private void AddNumber(NumericSettingState entry, string feedback, bool available)
@@ -710,30 +842,9 @@ public sealed partial class ControlPanelView : MonoBehaviour
     private Button Button(Transform parent, string text, float width, Action action, ControlPanelArtwork.ButtonRole role)
     {
         var rect = Rect(text, parent);
-        Graphic image;
-        var sprite = _artwork?.Button(role);
-        if (sprite != null)
-        {
-            var art = rect.gameObject.AddComponent<Image>();
-            art.sprite = sprite;
-            art.type = Image.Type.Sliced;
-            image = art;
-        }
-        else
-        {
-            var bevel = rect.gameObject.AddComponent<ControlPanelBevel>();
-            bevel.Surface = role is ControlPanelArtwork.ButtonRole.Apply or ControlPanelArtwork.ButtonRole.Close
-                ? ControlPanelBevel.Finish.Hammered : ControlPanelBevel.Finish.Steel;
-            image = bevel;
-        }
         var button = rect.gameObject.AddComponent<Button>();
-        button.targetGraphic = image;
-        var colors = ColorBlock.defaultColorBlock;
-        colors.highlightedColor = new Color(1f, .94f, .81f);
-        colors.pressedColor = new Color(.75f, .65f, .52f);
-        colors.selectedColor = colors.highlightedColor;
-        colors.disabledColor = new Color(.48f, .48f, .48f);
-        button.colors = colors;
+        button.targetGraphic = ButtonSurface(rect, role);
+        button.colors = ButtonColors();
         button.onClick.AddListener(() => action());
         var label = Label(rect, text, 18, TextAlignmentOptions.Center);
         Stretch(label.rectTransform, 3, 0);
@@ -741,6 +852,35 @@ public sealed partial class ControlPanelView : MonoBehaviour
         layout.minWidth = layout.preferredWidth = width;
         layout.minHeight = layout.preferredHeight = 35;
         return button;
+    }
+
+    private Graphic ButtonSurface(RectTransform rect, ControlPanelArtwork.ButtonRole role)
+    {
+        var sprite = _artwork?.Button(role);
+        if (sprite != null)
+        {
+            var art = rect.gameObject.AddComponent<Image>();
+            art.sprite = sprite;
+            art.type = Image.Type.Sliced;
+            return art;
+        }
+        else
+        {
+            var bevel = rect.gameObject.AddComponent<ControlPanelBevel>();
+            bevel.Surface = role is ControlPanelArtwork.ButtonRole.Apply or ControlPanelArtwork.ButtonRole.Close
+                ? ControlPanelBevel.Finish.Hammered : ControlPanelBevel.Finish.Steel;
+            return bevel;
+        }
+    }
+
+    private static ColorBlock ButtonColors()
+    {
+        var colors = ColorBlock.defaultColorBlock;
+        colors.highlightedColor = new Color(1f, .94f, .81f);
+        colors.pressedColor = new Color(.75f, .65f, .52f);
+        colors.selectedColor = colors.highlightedColor;
+        colors.disabledColor = new Color(.48f, .48f, .48f);
+        return colors;
     }
 
     private void SetSelected(Button button, bool selected, bool scopeTab = false)

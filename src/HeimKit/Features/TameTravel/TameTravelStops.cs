@@ -31,6 +31,7 @@ internal sealed class TameTravelStops
     internal TameTravelStops(ObjectTransferAuthority authority, TameTravelFollowing following, IPlayerPresence presence, ManualLogSource log)
     { _authority = authority; _following = following; _presence = presence; _log = log; }
     internal bool Contains(ZDOID id) => _stops.ContainsKey(id);
+    internal bool Stopping(ZDOID id) => _stops.ContainsKey(id) || _cleanup.ContainsKey(id);
     internal void QueueCleanup(ZDO animal, string name, float now)
     {
         if (_cleanup.Count >= 512 && !_cleanup.ContainsKey(animal.m_uid)) return;

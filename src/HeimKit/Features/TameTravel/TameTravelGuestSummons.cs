@@ -161,7 +161,7 @@ internal sealed class TameTravelGuestSummons : IDisposable
         sender == characterOwner ? profile : 0;
 
     internal bool Idle => _trips.Count == 0;
-    internal void Observe(ZNetPeer peer, ZDO player, float now, bool allowNew)
+    internal void Observe(ZNetPeer peer, ZDO player, float now, bool allowNew, PlayerSample? sample)
     {
         bool pendingGeometry = _loading.Remove(peer);
         if (_rules.ActorRejection(peer, out var actor, allowInterior: true) != null ||
@@ -210,6 +210,20 @@ internal sealed class TameTravelGuestSummons : IDisposable
         long profile = player.GetLong(ZDOVars.s_playerID);
         if (profile == 0) return;
         var nearby = TameTravelRules.Nearby(point, SourceRecord);
+        // Reuse this bounded search to arm outdoor portal observation before a wolf's
+        // owner-local follow command has produced any HeimKit command binding.
+        if (nearby != null && sample != null && sample.Character == peer.m_characterID &&
+            sample.Traveller.Matches(peer) && !Character.InInterior(point))
+        {
+            bool portal = false, wolf = false;
+            foreach (var z in nearby)
+            {
+                int hash = z.GetPrefab();
+                portal |= hash == WoodPortal || hash == StonePortal;
+                wolf |= hash == TameTravelRules.AdultWolf && NearSource(z, point) && z.GetBool(ZDOVars.s_tamed);
+                if (portal && wolf) { sample.WolfApproachUntil = now + 2; break; }
+            }
+        }
         if (nearby == null || !Candidates(nearby, peer, profile, point, remoteOwnersOnly: false))
         {
             // Players without nearby summons have no doorway observation work.
@@ -278,8 +292,8 @@ internal sealed class TameTravelGuestSummons : IDisposable
     private bool SourceRecord(ZDO record, Vector3 point)
     {
         int hash = record.GetPrefab();
-        if (hash == TameTravelSummons.Skeleton || _commands.Bindings.ContainsKey(record.m_uid)) return true;
-        if (hash == WoodPortal || hash == StonePortal) return (record.GetPosition() - point).sqrMagnitude <= 16;
+        if (hash == TameTravelRules.AdultWolf || hash == TameTravelSummons.Skeleton || _commands.Bindings.ContainsKey(record.m_uid)) return true;
+        if (hash == WoodPortal || hash == StonePortal) return (record.GetPosition() - point).sqrMagnitude <= 144;
         // A dungeon's exterior proxy can contain the interior exit far above its origin.
         return record.GetInt(ZDOVars.s_location) != 0;
     }
@@ -301,8 +315,13 @@ internal sealed class TameTravelGuestSummons : IDisposable
     private static bool Eligible(ZDO z, long profile, string name) => profile != 0 && z.IsValid() && z.Persistent &&
         z.GetPrefab() == TameTravelSummons.Skeleton && NativeCharacterHealth.IsAlive(z) &&
         z.GetLong(TameTravelSummons.Summoner) == profile && z.GetString(ZDOVars.s_follow) == name;
-    private bool NearSource(ZDO z, Vector3 point) =>
-        (z.GetPosition() - point).sqrMagnitude <= _settings.FollowerRangeMeters.Value * _settings.FollowerRangeMeters.Value;
+    private bool NearSource(ZDO z, Vector3 point)
+    {
+        float range = z.GetPrefab() == TameTravelSummons.Skeleton
+            ? _settings.SummonRangeMeters.Value
+            : _settings.FollowerRangeMeters.Value;
+        return (z.GetPosition() - point).sqrMagnitude <= range * range;
+    }
 
     private void Start(TameTravelActor actor, long profile, TameTravelSummonGate gate, float now)
     {

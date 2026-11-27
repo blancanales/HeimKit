@@ -46,6 +46,14 @@ public static class DiagnosticLog
     }
     // Small diagnostic lane for the evidence needed to evaluate battle pauses.
     // It bypasses only the combat mute, retaining configuration, time and volume gates.
+    internal static void WriteObservation(ManualLogSource logger,string feature,DebugLoggingPolicy policy,LogTopic topic,string fields)
+    {
+        if (!policy.ConfiguredEnabled || !ServerActivity.Allowed || !ServerPerformance.OptionalOutputAvailable) return;
+        float now = (float)Clock.Elapsed.TotalSeconds;
+        var budget = Budget(logger,feature);
+        if (budget.Reserve(now,"optional",60,false) && budget.Reserve(now,topic.Name,24,false))
+            Deliver(logger,feature,topic,fields,default,LogLevel.Debug,false,null);
+    }
     internal static bool ContextAvailable(ManualLogSource logger, DebugLoggingPolicy policy) =>
         policy.ConfiguredEnabled && ServerActivity.Allowed && ServerPerformance.OptionalOutputAvailable &&
         Budget(logger, "PlayerActivity").Available((float)Clock.Elapsed.TotalSeconds, "optional", 60) &&

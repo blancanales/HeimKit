@@ -167,7 +167,7 @@ internal sealed class SharedMapPatches : IDisposable
             pkg.ReadUShort();
             int prefab = pkg.ReadInt();
             if (prefab == SharedMapController.TablePrefab)
-                __state = new MapReplicationSnapshot(controller) { Table = new TableMapSnapshot(controller, __instance.GetByteArray(ZDOVars.s_data)) { SenderPeer = _receivingPeer?.m_uid, SenderName = _receivingPeer?.m_playerName ?? "" } };
+                __state = new MapReplicationSnapshot(controller) { Table = new TableMapSnapshot(controller, __instance.GetByteArray(ZDOVars.s_data)) { PreviousKeys = __instance.GetByteArray(SharedMapTableKeys.Field), SenderPeer = _receivingPeer?.m_uid, SenderName = _receivingPeer?.m_playerName ?? "" } };
             else if (prefab == SharedMapFlametalPillars.Prefab && controller.KnownPillar(__instance.m_uid) &&
                 _receivingPeer?.m_uid == __instance.GetOwner())
                 __state = new MapReplicationSnapshot(controller) { PreviousPrefab = SharedMapFlametalPillars.Prefab };
@@ -202,10 +202,11 @@ internal sealed class SharedMapPatches : IDisposable
         {
             var previous = __instance.GetByteArray(hash);
             if (controller.PlayerHosted && SharedMapController.Equal(bytes, previous)) return true;
-            var normalized = controller.Normalize(bytes, previous, out int removed);
+            byte[]? keys = null;
+            var normalized = controller.NormalizeWithKeys(bytes, previous, out int removed,value => keys=value.SourceKeys);
             if (normalized == null) return false;
             if (!SharedMapController.Equal(previous, normalized) || !SharedMapController.Equal(bytes, normalized))
-                __state = new TableMapSnapshot(controller, previous) { RemovedDeaths = removed, Received = bytes, Expected = normalized,
+                __state = new TableMapSnapshot(controller, previous) { RemovedDeaths = removed, Received = bytes, Expected = normalized, SourceKeys = keys,
                     SenderPeer = _receivingPeer?.m_uid, SenderName = _receivingPeer?.m_playerName ?? "" };
             bytes = normalized;
             return true;

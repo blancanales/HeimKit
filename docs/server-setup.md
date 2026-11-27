@@ -6,14 +6,14 @@ Install HeimKit on a Windows Valheim dedicated server. Vanilla clients can join.
 
 | Item | Current baseline |
 | --- | --- |
-| HeimKit release baseline | 0.2.4 |
-| Supported Valheim version (built-in audited baseline for HeimKit 0.2.4) | 1.0.30 |
+| HeimKit release baseline | 0.2.5 |
+| Supported Valheim version | 1.0.31 |
 | BepInExPack Valheim | 5.4.2351 |
 | BepInEx runtime | 5.4.23.5 |
 | Plugin target framework | netstandard2.1 |
 | Build output | `src/HeimKit/bin/<Debug or Release>/netstandard2.1/HeimKit.dll` |
 
-The release accepts its audited Valheim version with either value of `[Compatibility] AllowUnverifiedVersions` and skips the automatic upgrade backup on that version. See [server upgrades](#server-upgrades).
+Each build accepts its built-in audited Valheim version with either value of `[Compatibility] AllowUnverifiedVersions` and skips the automatic upgrade backup on that version. See [server upgrades](#server-upgrades).
 
 This section is the sole documentation source for HeimKit's supported game, loader, runtime and framework versions. Other documents link here rather than repeating version values. Update this baseline when code guards and dependencies change.
 
@@ -100,13 +100,13 @@ Shared sections `[Compatibility]`, `[Diagnostics]`, `[Client]` and `[PlayerActiv
 
 StationSupply feeds supported stations from one nearby public chest per intake. Use the [illustrated placement guide](features/station-supply.md#placement-examples) to position chests. In `[StationSupply]`, use `Enabled` to control the feature or the individual station switches to choose which stations receive supplies. Fermenter and Obliterator feeding are opt-in. Restart after hand-editing [StationSupply settings](features/station-supply.md#configuration).
 
-Feature controls are documented in their guides: [InfiniteTorches](features/infinite-torches.md#configuration), [WeatherGuard](features/weather-guard.md#scope-and-configuration), [AFKNightWatch](features/afk-night-watch.md#configuration), [AFKRaidWatch](features/afk-raid-watch.md#configuration), [SharedMap](features/shared-map.md#configuration), [TameTravel](features/tame-travel.md#configuration), [DoorKeeper](features/door-keeper.md#configuration), [ForestRenewal](features/forest-renewal.md#configuration), [SeaSalvage](features/sea-salvage.md#configuration) and [HeimMender](features/heim-mender.md) (live reload). Hand edits require a restart except for HeimMender's live reload. [HeimKit Settings](heimkit-settings.md#change-a-setting) applies changes to exposed settings live.
+Feature controls are documented in their guides: [InfiniteTorches](features/infinite-torches.md#configuration), [WeatherGuard](features/weather-guard.md#scope-and-configuration), [AFKNightWatch](features/afk-night-watch.md#configuration), [AFKRaidWatch](features/afk-raid-watch.md#configuration), [SharedMap](features/shared-map.md#configuration), [TameTravel](features/tame-travel.md#configuration), [DoorKeeper](features/door-keeper.md#configuration), [ForestRenewal](features/forest-renewal.md#configuration), [SeaSalvage](features/sea-salvage.md#configuration), [HeimDefender](features/heim-defender.md) and [HeimMender](features/heim-mender.md) (live reload). Hand edits require a restart except for HeimMender's live reload. [HeimKit Settings](heimkit-settings.md#change-a-setting) applies changes to exposed settings live.
 
 ### Diagnostics
 
-For intermittent chest access, set `TraceObjectInteractions = true` under `[Diagnostics]` in the host's `heimkit.cfg`, restart the host, and include `Debug` in the BepInEx disk log levels. This switch works independently of global and feature DebugMode. Search the host log for `interaction` to see the object ID, requesting player, destination peer, ownership snapshots, request count and elapsed milliseconds for open, stack and take-all actions. To check whether StationSupply also handled that chest, enable `[StationSupply] DebugMode = true` and match its entries by chest ID and time. See [observation limits](limitations.md#server-observations-and-logs).
+For intermittent chest access, enable **F7 → Server Settings → Server Diagnostics → Object interaction tracing** and include `Debug` in the BepInEx disk log levels. This switch works independently of global and feature DebugMode. Search the host log for `interaction` to see the object ID, requesting player, destination peer, ownership snapshots, request count and elapsed milliseconds for open, stack and take-all actions. To check whether StationSupply also handled that chest, enable `[StationSupply] DebugMode = true` and match its entries by chest ID and time. See [observation limits](limitations.md#server-observations-and-logs).
 
-`[Diagnostics] DebugVerbosity = Normal` selects the shared evidence tier. `Verbose` adds detailed topic records when the feature's effective DebugMode permits them; it does not enable debugging or bypass hidden suppression, budgets or the empty-server pause. Restart applies changes. HeimKit prefixes every line with local `HH:mm:ss`; startup also includes the full date. Shared player topics are `presence` and `afk`; see the [logging contract](architecture.md#logging).
+`[Diagnostics] DebugVerbosity = Normal` selects the shared evidence tier. `Verbose` adds detailed topic records when the feature's effective DebugMode permits them; it does not enable debugging or bypass hidden suppression, budgets or the empty-server pause. The **Log detail** selector in **F7 → Server Settings → Server Diagnostics** applies during play. Direct edits to this file take effect on restart. HeimKit prefixes every line with local `HH:mm:ss`; startup also includes the full date. Shared player topics are `presence` and `afk`; see the [logging contract](architecture.md#logging).
 
 `[Diagnostics] DebugMode` enables optional diagnostics across features. Each feature and PlayerActivity has its own DebugMode, default false, for selective output. A false feature switch inherits global Debug. Startup adds missing keys even for disabled features.
 

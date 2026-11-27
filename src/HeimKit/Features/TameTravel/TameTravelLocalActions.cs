@@ -121,7 +121,7 @@ internal sealed class TameTravelLocalActions : IDisposable
             var from = player.transform.position;
             var gate = TameTravelSummonGate.Dungeon(__instance, from, 8);
             if (gate == null) return;
-            adapter.Summons.Begin(player, from, gate.Exit, gate.Rotation, gate.Valid);
+            adapter.Summons.Begin(player, from, gate);
             adapter._controller.GuestSummons?.LocalAccepted(actor, gate);
         }
         catch (Exception error) { adapter._fail(error); }
@@ -202,8 +202,9 @@ internal sealed class TameTravelLocalActions : IDisposable
                     TameTravelRules.Portal(attempt.Source)!.m_exitDistance + Vector3.up - pos).sqrMagnitude < .0001f;
             if (adapter._controller.AcceptSummons && adapter._controller.SummonerReady(attempt.Host))
             {
-                adapter.Summons.Begin(__instance, attempt.From, pos, rot, Linked);
-                adapter._controller.GuestSummons?.LocalAccepted(attempt.Host, new(attempt.From, pos, rot, Linked));
+                var gate = new TameTravelSummonGate(attempt.Source.GetPosition(), pos, rot, Linked);
+                adapter.Summons.Begin(__instance, attempt.From, gate);
+                adapter._controller.GuestSummons?.LocalAccepted(attempt.Host, gate);
             }
         }
         catch (Exception error) { adapter._fail(error); }

@@ -12,6 +12,8 @@ internal sealed class ClientHost : IDisposable
     private readonly ClientModuleHost _modules;
     private readonly ControlPanel _panel;
     private readonly ClientTameTravelDiagnostics _travel;
+    private readonly Features.HeimDefender.HeimDefenderClientDiagnostics _heimDefender;
+    private readonly Features.SharedMap.SharedMapClient _map;
     private readonly ClientInteractionDiagnostics _interactions;
     private readonly ManualLogSource _log;
 
@@ -23,6 +25,8 @@ internal sealed class ClientHost : IDisposable
         _link = new ClientLink(version, log, _local);
         _modules = new ClientModuleHost(settings, _link, log);
         _panel = new ControlPanel(owner, settings, _link, version, log);
+        _heimDefender = new(settings.TraceHeimDefender,log);
+        _map = new(settings, _link, log);
         _travel = new ClientTameTravelDiagnostics(settings.TraceTameTravel, log);
         _interactions = new ClientInteractionDiagnostics(settings.TraceObjectInteractions, log);
     }
@@ -32,10 +36,11 @@ internal sealed class ClientHost : IDisposable
         _local.Tick(now);
         _link.Tick(now);
         if (_modules.HasModules) _modules.Tick(now);
+        _map.Tick(now);
         _travel.Tick(now);
         _panel.Tick(now);
     }
 
     public void Dispose() =>
-        ModuleCleanup.Run(_log, "HeimKit", _travel.Dispose, _interactions.Dispose, _panel.Dispose, _modules.Dispose, _link.Dispose, _local.Dispose);
+        ModuleCleanup.Run(_log, "HeimKit", _map.Dispose, _heimDefender.Dispose, _travel.Dispose, _interactions.Dispose, _panel.Dispose, _modules.Dispose, _link.Dispose, _local.Dispose);
 }

@@ -21,7 +21,7 @@ internal static class ConfigurationLoaderTests
         int diagnostics = contents.IndexOf("[Diagnostics]", StringComparison.Ordinal);
         int activity = contents.IndexOf("[PlayerActivity]", StringComparison.Ordinal);
         int client = contents.IndexOf("[Client]", StringComparison.Ordinal);
-        foreach (string feature in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch", "SharedMap", "DoorKeeper", "ForestRenewal", "SeaSalvage", "TameTravel", "HeimMender", "StationSupply" })
+        foreach (string feature in new[] { "Torches", "WeatherGuard", "AFKNightWatch", "AFKRaidWatch", "SharedMap", "DoorKeeper", "ForestRenewal", "SeaSalvage", "TameTravel", "HeimMender", "StationSupply", "HeimDefender" })
         {
             int at = contents.IndexOf("[" + feature + "]", StringComparison.Ordinal);
             if (diagnostics < 0 || activity < 0 || client < 0 || at < 0 || diagnostics > at || activity > at || client > at)
@@ -72,6 +72,7 @@ internal static class ConfigurationLoaderTests
                 _ = new HeimKit.Features.TameTravel.TameTravel(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new HeimKit.Features.HeimMender.HeimMender(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new HeimKit.Features.StationSupply.StationSupply(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.HeimDefender.HeimDefender(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 return config;
             });
             if (complete.Count != reference.Count || complete.Any(entry =>
@@ -99,6 +100,7 @@ internal static class ConfigurationLoaderTests
                 _ = new HeimKit.Features.TameTravel.TameTravel(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new HeimKit.Features.HeimMender.HeimMender(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 _ = new HeimKit.Features.StationSupply.StationSupply(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
+                _ = new HeimKit.Features.HeimDefender.HeimDefender(config, setupLogger, PlayerServicesTests.For(config, setupLogger));
                 return config;
             });
             var reordered = File.ReadAllText(complete.ConfigFilePath);

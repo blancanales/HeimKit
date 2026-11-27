@@ -68,7 +68,7 @@ internal sealed class SharedMapResources : IDisposable
             throw new MissingMemberException("Native resource record discovery/destruction APIs are unavailable.");
     }
 
-    private static readonly (string Name, ResourceKind Kind, string Drop, string? Successor)[] Catalog = {
+    internal static readonly (string Name, ResourceKind Kind, string Drop, string? Successor)[] Catalog = {
         ("rock4_copper", ResourceKind.Copper, "CopperOre", "rock4_copper_frac"),
         ("rock4_copper_frac", ResourceKind.Copper, "CopperOre", null),
         ("MineRock_Copper", ResourceKind.Copper, "CopperOre", null),
@@ -278,14 +278,20 @@ internal sealed class SharedMapResources : IDisposable
         }
     }
 
+    internal Dictionary<string, string> Aliases { get; private set; } = new();
+
     public IReadOnlyList<MapMarker> Read()
     {
         if (_markerRevision != _store.Revision || _markerPillarRevision != _pillars.Revision || _distance != _settings.ResourceClusterDistanceMeters.Value ||
             _removeDepleted != _settings.ResourceRemoveDepleted.Value)
         {
             long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            var aliases = new Dictionary<string, string>();
             _markers = _refresh.Apply(SharedMapResourceClusters.Group(_store.Deposits,
-                _settings.ResourceClusterDistanceMeters.Value, _settings.ResourceRemoveDepleted.Value, _diagnostics.TissueAssociation, _pillars.Verified));
+                _settings.ResourceClusterDistanceMeters.Value, _settings.ResourceRemoveDepleted.Value, _diagnostics.TissueAssociation, _pillars.Verified,
+                (deposit, group) => aliases[SharedMapLocalDiscovery.ResourceSource(deposit.Kind, deposit.X, deposit.Y, deposit.Z)] =
+                    group.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            if (!SharedMapPersonalMarkers.SameAliases(Aliases, aliases)) Aliases = aliases;
             _markerPillarRevision = _pillars.Revision;
             _diagnostics.ResourceRefresh(started, _store.Deposits.Count, _markers.Count);
             _markerRevision = _store.Revision; _distance = _settings.ResourceClusterDistanceMeters.Value;

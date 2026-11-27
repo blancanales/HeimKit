@@ -32,10 +32,16 @@ internal sealed class ControlPanel : IDisposable
         _view.Moderate = _link.Moderate;
         _link.ModerationCleared += _view.ClearModeration;
         _view.Click = entry => _link.Set(entry, Time.unscaledTime);
+        _view.SetMapMarkers = value => _settings.PersonalMarkers.Value = value;
+        _view.SetHeimDefenderTrace = value => _settings.TraceHeimDefender.Value = value;
+        _view.SetMapTrace = value => _settings.TraceSharedMap.Value = value;
         _view.SetInteractionTrace = value => _settings.TraceObjectInteractions.Value = value;
         _view.SetTameTravelTrace = value => _settings.TraceTameTravel.Value = value;
         _view.ApplyNumber = (entry, value) => _link.Set(entry, value, Time.unscaledTime);
         _settings.MenuKey.SettingChanged += SettingChanged;
+        _settings.PersonalMarkers.SettingChanged += TraceSettingChanged;
+        _settings.TraceHeimDefender.SettingChanged += TraceSettingChanged;
+        _settings.TraceSharedMap.SettingChanged += TraceSettingChanged;
         _settings.TraceObjectInteractions.SettingChanged += TraceSettingChanged;
         _settings.TraceTameTravel.SettingChanged += TraceSettingChanged;
         _link.Changed += QueueRefresh;
@@ -219,6 +225,9 @@ internal sealed class ControlPanel : IDisposable
         };
         _view.MenuShortcut = _settings.MenuKey.Value.ToString();
         _view.TraceTameTravel = _settings.TraceTameTravel.Value;
+        _view.MapMarkers = _settings.PersonalMarkers.Value;
+        _view.HeimDefenderTrace = _settings.TraceHeimDefender.Value;
+        _view.MapTrace = _settings.TraceSharedMap.Value;
         _view.TraceInteractions = _settings.TraceObjectInteractions.Value;
         _view.LocalConfigHelp = $"Change [Client] MenuKey and restart Valheim.\n\n{_settings.ConfigPath}";
         _view.AdminMessage = snapshot?.IsAdmin == true && !snapshot.AdminChangesAllowed
@@ -239,7 +248,16 @@ internal sealed class ControlPanel : IDisposable
             foreach (var entry in snapshot.Switches)
             {
                 string feedback = Feedback(entry);
-                if (entry.Definition.IsModuleSwitch)
+                if (entry.Definition.Module == ControlProtocol.DiagnosticsGroup)
+                {
+                    if (row?.Name != ControlProtocol.DiagnosticsGroup)
+                    {
+                        row = new ControlPanelView.Row(ControlProtocol.DiagnosticsGroup, "");
+                        rows.Add(row);
+                    }
+                    row.Options.Add(new ControlPanelView.Option(entry, feedback));
+                }
+                else if (entry.Definition.IsModuleSwitch)
                 {
                     row = new ControlPanelView.Row(entry.Definition.Module, Status(entry)) { Entry = entry, Feedback = feedback };
                     rows.Add(row);
@@ -257,9 +275,11 @@ internal sealed class ControlPanel : IDisposable
         if (local && snapshot != null)
         {
             var ordered = new List<ControlPanelView.Row>();
+            var diagnostics = rows.Find(row => row.Name == ControlProtocol.DiagnosticsGroup);
             foreach (string name in ControlProtocol.ModuleNames)
                 ordered.Add(rows.Find(row => row.Name == name) ??
                     new ControlPanelView.Row(name, "This feature is unavailable in player-hosted worlds."));
+            if (diagnostics != null) ordered.Add(diagnostics);
             rows = ordered;
         }
         _view.Rows = rows;
@@ -308,6 +328,9 @@ internal sealed class ControlPanel : IDisposable
         _link.Changed -= QueueRefresh;
         _link.ModerationCleared -= _view.ClearModeration;
         _settings.MenuKey.SettingChanged -= SettingChanged;
+        _settings.PersonalMarkers.SettingChanged -= TraceSettingChanged;
+        _settings.TraceHeimDefender.SettingChanged -= TraceSettingChanged;
+        _settings.TraceSharedMap.SettingChanged -= TraceSettingChanged;
         _settings.TraceObjectInteractions.SettingChanged -= TraceSettingChanged;
         _settings.TraceTameTravel.SettingChanged -= TraceSettingChanged;
         try { _hooks?.UnpatchSelf(); }

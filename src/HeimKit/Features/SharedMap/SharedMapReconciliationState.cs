@@ -26,7 +26,8 @@ internal sealed class SharedMapReconciliationState
     }
     private static MapMarker[] Copy(IReadOnlyList<MapMarker> source)
     { var result = new MapMarker[source.Count]; for (int i = 0; i < result.Length; i++) result[i] = source[i]; return result; }
-    internal bool Same(SharedMapReconciliationState other) => Pixels == other.Pixels && Pins == other.Pins &&
+    internal bool Same(SharedMapReconciliationState other) => Pixels == other.Pixels && SamePublications(other);
+    internal bool SamePublications(SharedMapReconciliationState other) => Pins == other.Pins &&
         Removals == other.Removals && PortalPublications == other.PortalPublications && HideDistance == other.HideDistance &&
         SameMarkers(Portals, other.Portals) && SameMarkers(Resources, other.Resources) && SameMarkers(Dungeons, other.Dungeons) &&
         SameMarkers(Runestones, other.Runestones) && SameMarkers(Spawners, other.Spawners) && SameMarkers(Structures, other.Structures);
@@ -36,7 +37,7 @@ internal sealed class SharedMapReconciliationState
         for (int i = 0; i < left.Count; i++)
         {
             var a = left[i]; var b = right[i];
-            if (a.Name != b.Name || a.Identity != b.Identity || a.X != b.X || a.Y != b.Y || a.Z != b.Z) return false;
+            if (a.UnconnectedPortal != b.UnconnectedPortal || a.Name != b.Name || a.Identity != b.Identity || a.X != b.X || a.Y != b.Y || a.Z != b.Z) return false;
         }
         return true;
     }

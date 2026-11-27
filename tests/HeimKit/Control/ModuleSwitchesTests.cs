@@ -1,6 +1,9 @@
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HeimKit.Core.Control;
+using HeimKit.Core.Control.Models;
+using HeimKit.Core.Control.Server;
+using HeimKit.Configuration;
 using HeimKit.Core.Players;
 using HeimKit.Core.Scheduling;
 
@@ -11,6 +14,19 @@ internal static class ModuleSwitchesTests
         using var log = new ManualLogSource("Switch catalog");
         var config = new ConfigFile(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".cfg"), false) { SaveOnConfigSet = false };
         using var players = new PlayerServices(config, log);
+        var diagnostics = new ServerDiagnosticsControls(config);
+        if (diagnostics.Set("DebugVerbosity", true, "Local host", log) != SetResult.Applied ||
+            DiagnosticsSettings.Verbosity != DebugVerbosity.Verbose ||
+            diagnostics.Set("Enabled", true, "Local host", log) != SetResult.UnknownSwitch)
+            throw new Exception("Live verbosity update or diagnostic key validation failed.");
+        var shared = new List<SwitchState>();
+        diagnostics.AddSnapshot(shared);
+        if (shared.Count != 3 || shared.Any(s => s.Definition.IsModuleSwitch) ||
+            !shared.Single(s => s.Definition.Key == "DebugVerbosity").Value ||
+            shared.Single(s => s.Definition.Key == "DebugMode").Value ||
+            !File.ReadAllText(config.ConfigFilePath).Contains("DebugVerbosity = Verbose"))
+            throw new Exception("Verbose selection must persist and leave global debugging off.");
+        diagnostics.Set("DebugVerbosity", false, "Local host", log);
         var modules = new (IServerModule Module, string Keys)[]
         {
             (new HeimKit.Features.InfiniteTorches.InfiniteTorches(config, log, players), "Enabled DebugMode IncludeFireplaces Campfires Hearths Bonfires"),
@@ -24,6 +40,7 @@ internal static class ModuleSwitchesTests
             (new HeimKit.Features.TameTravel.TameTravel(config, log, players), "Enabled DebugMode SummonTravel FollowSpacingEnabled"),
             (new HeimKit.Features.HeimMender.HeimMender(config, log, players), "Enabled DebugMode AutomaticEnabled"),
             (new HeimKit.Features.StationSupply.StationSupply(config, log, players), "Enabled DebugMode Smelters CharcoalKilns BlastFurnaces Windmills SpinningWheels EitrRefineries FrigidKilns ShieldGenerators Fermenters Obliterators"),
+            (new HeimKit.Features.HeimDefender.HeimDefender(config, log, players), "Enabled FreeWoodBolts DebugMode"),
         };
         if (!modules.Select(m => m.Module.Name).SequenceEqual(ControlProtocol.ModuleNames))
             throw new Exception("Client-only module list differs from the server order.");
@@ -43,7 +60,7 @@ internal static class ModuleSwitchesTests
             };
             if (!settings.Switches.Where(s => s.ApplyInPlace != null).Select(s => s.Entry.Definition.Key).SequenceEqual(inPlaceKeys))
                 throw new Exception("In-place switch binding mismatch for " + module.Name);
-            if (settings.ApplyMode != (module.Name == "HeimMender" ? SwitchApplyMode.SelfReconciling : SwitchApplyMode.Reinitialize))
+            if (settings.ApplyMode != (module.Name is "HeimMender" or "HeimDefender" ? SwitchApplyMode.SelfReconciling : SwitchApplyMode.Reinitialize))
                 throw new Exception("Switch apply mode mismatch for " + module.Name);
         }
     }

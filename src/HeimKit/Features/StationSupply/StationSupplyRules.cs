@@ -10,11 +10,11 @@ internal static class StationSupplyRules
         => Distance(station, rotation, localIntake, chest, range, height, out _);
     internal static float? Distance(Vector3 station, Quaternion rotation, Vector3 localIntake, Vector3 chest, float range, float height, out string reason)
         => Distance(Placement(station, rotation, localIntake, range, height), chest, out reason);
-    internal static SupplyPlacement Placement(Vector3 station, Quaternion rotation, Vector3 localIntake, float range, float height)
+    internal static SupplyPlacement Placement(Vector3 station, Quaternion rotation, Vector3 localIntake, float range, float height, bool allowChestOnAnySide = false)
     {
         bool valid = PlayerWorldScope.Finite(station) && PlayerWorldScope.Finite(localIntake) && PlayerWorldScope.Finite(range) && PlayerWorldScope.Finite(height) && range > 0 && height >= 0;
         var anchor = rotation * localIntake; anchor.y = 0;
-        return new SupplyPlacement(station, anchor, range, height, valid);
+        return new SupplyPlacement(station, anchor, range, height, valid, allowChestOnAnySide);
     }
     internal static float? Distance(in SupplyPlacement placement, Vector3 chest, out string reason)
     {
